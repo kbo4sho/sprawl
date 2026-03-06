@@ -2,546 +2,676 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>The Hive</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-  body {
-    background: #050510;
-    overflow: hidden;
-    font-family: 'Share Tech Mono', monospace;
-    color: #e2e8f0;
-    user-select: none;
-  }
+body {
+  background: #050510;
+  overflow: hidden;
+  font-family: 'Share Tech Mono', monospace;
+  color: #e2e8f0;
+  user-select: none;
+  touch-action: none;
+}
 
-  canvas {
-    display: block;
-    position: fixed;
-    top: 0; left: 0;
-  }
+canvas { display: block; position: fixed; top: 0; left: 0; }
 
-  /* Stats overlay */
-  #stats {
-    position: fixed;
-    top: 18px;
-    right: 22px;
-    font-size: 12px;
-    color: rgba(226,232,240,0.45);
-    letter-spacing: 0.08em;
-    pointer-events: none;
-    z-index: 10;
-  }
+#stats {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  font-size: 12px;
+  color: rgba(226,232,240,0.4);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+  z-index: 10;
+  text-align: right;
+  line-height: 1.8;
+}
 
-  /* Join panel */
-  #join-panel {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    padding: 24px 20px 28px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    z-index: 20;
-    background: linear-gradient(to top, rgba(5,5,16,0.95) 0%, rgba(5,5,16,0.6) 70%, transparent 100%);
-  }
+#join-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20px 16px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  z-index: 20;
+  background: linear-gradient(to top, rgba(5,5,16,0.95) 0%, rgba(5,5,16,0.6) 70%, transparent 100%);
+}
 
-  #join-panel h2 {
-    font-size: 13px;
-    letter-spacing: 0.2em;
-    color: rgba(226,232,240,0.5);
-    text-transform: uppercase;
-  }
+#join-panel h2 {
+  font-size: 12px;
+  letter-spacing: 0.25em;
+  color: rgba(226,232,240,0.45);
+  text-transform: uppercase;
+}
 
-  #join-form {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
+#join-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
 
-  #name-input {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 4px;
-    color: #e2e8f0;
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 13px;
-    padding: 8px 14px;
-    outline: none;
-    width: 200px;
-    transition: border-color 0.2s;
-  }
-  #name-input:focus { border-color: rgba(255,255,255,0.35); }
-  #name-input::placeholder { color: rgba(226,232,240,0.3); }
+#name-input {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 3px;
+  color: #e2e8f0;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  width: 180px;
+  transition: border-color 0.2s;
+}
+#name-input:focus { border-color: rgba(255,255,255,0.35); }
+#name-input::placeholder { color: rgba(226,232,240,0.25); }
 
-  #color-picker {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
+#color-picker { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 
-  .color-swatch {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    cursor: pointer;
-    border: 2px solid transparent;
-    transition: transform 0.15s, border-color 0.15s;
-    position: relative;
-  }
-  .color-swatch:hover { transform: scale(1.2); }
-  .color-swatch.selected {
-    border-color: rgba(255,255,255,0.8);
-    transform: scale(1.25);
-    box-shadow: 0 0 8px currentColor;
-  }
+.color-swatch {
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.15s, border-color 0.15s;
+}
+.color-swatch:hover { transform: scale(1.2); }
+.color-swatch.selected {
+  border-color: rgba(255,255,255,0.8);
+  transform: scale(1.25);
+}
 
-  #join-btn {
-    background: none;
-    border: 1px solid rgba(255,255,255,0.25);
-    color: rgba(226,232,240,0.8);
-    font-family: 'Share Tech Mono', monospace;
-    font-size: 12px;
-    letter-spacing: 0.15em;
-    padding: 8px 22px;
-    border-radius: 3px;
-    cursor: pointer;
-    text-transform: uppercase;
-    transition: border-color 0.2s, color 0.2s, box-shadow 0.2s;
-  }
-  #join-btn:hover {
-    border-color: rgba(255,255,255,0.6);
-    color: #fff;
-    box-shadow: 0 0 12px rgba(255,255,255,0.1);
-  }
+#recipe-picker { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
 
-  #my-status {
-    font-size: 11px;
-    color: rgba(226,232,240,0.4);
-    letter-spacing: 0.08em;
-  }
-  #my-status span { color: rgba(226,232,240,0.7); }
+.recipe-btn {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 3px;
+  color: rgba(226,232,240,0.6);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.recipe-btn:hover { border-color: rgba(255,255,255,0.3); color: #e2e8f0; }
+.recipe-btn.selected { border-color: rgba(255,255,255,0.6); color: #fff; background: rgba(255,255,255,0.08); }
 
-  /* Tooltip */
-  #tooltip {
-    position: fixed;
-    pointer-events: none;
-    z-index: 30;
-    background: rgba(5,5,16,0.88);
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 5px;
-    padding: 8px 12px;
-    font-size: 11px;
-    line-height: 1.7;
-    color: rgba(226,232,240,0.85);
-    display: none;
-    white-space: nowrap;
-  }
-  #tooltip .tip-name { font-size: 13px; color: #fff; }
+#join-btn {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.25);
+  color: rgba(226,232,240,0.8);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  padding: 8px 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.2s;
+}
+#join-btn:hover { border-color: rgba(255,255,255,0.6); color: #fff; }
+
+#my-status {
+  font-size: 10px;
+  color: rgba(226,232,240,0.35);
+  letter-spacing: 0.06em;
+  display: none;
+}
+
+#tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 30;
+  background: rgba(5,5,16,0.9);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: rgba(226,232,240,0.8);
+  display: none;
+  white-space: nowrap;
+}
+#tooltip .tip-name { font-size: 13px; color: #fff; }
 </style>
 </head>
 <body>
 
 <canvas id="canvas"></canvas>
 
-<div id="stats">0 organisms alive</div>
+<div id="stats"></div>
 
 <div id="tooltip">
   <div class="tip-name" id="tip-name"></div>
+  <div id="tip-recipe"></div>
   <div id="tip-status"></div>
-  <div id="tip-uptime"></div>
 </div>
 
 <div id="join-panel">
   <h2>Join the Hive</h2>
   <div id="join-form">
-    <input type="text" id="name-input" placeholder="your name" maxlength="32" autocomplete="off" spellcheck="false">
+    <input type="text" id="name-input" placeholder="your name" maxlength="24" autocomplete="off" spellcheck="false">
     <div id="color-picker"></div>
-    <button id="join-btn">Join the Hive</button>
   </div>
-  <div id="my-status" id="my-status" style="display:none"></div>
+  <div id="recipe-picker"></div>
+  <button id="join-btn">Join the Hive</button>
+  <div id="my-status"></div>
 </div>
 
 <script>
-// ─── Constants ────────────────────────────────────────────────────────────────
+// =====================================================================
+//  THE HIVE - Swarm Chemistry Simulation
+//  Based on Hiroki Sayama's Swarm Chemistry algorithm
+//  Ported from Kevin Bolander's Java/XNA implementations
+// =====================================================================
+
 const COLORS = [
   '#00ffcc','#ff6b9d','#c084fc','#fbbf24',
   '#34d399','#f472b6','#60a5fa','#a78bfa',
   '#fb923c','#4ade80','#f43f5e','#e2e8f0'
 ];
 
-const TRAIL_LENGTH = 22;
-const PERCEPTION_RADIUS = 90;
-const SEPARATION_DIST = 38;
-const MAX_SPEED_BASE = 1.6;
-const MAX_FORCE = 0.04;
-const SPORE_COUNT = 120;
-const SYNAPSE_DIST = 75;
-const POLL_INTERVAL = 4000;
+// Swarm Chemistry recipes: [neighborhoodRadius, normalSpeed, maxSpeed, c1, c2, c3, c4, c5]
+const RECIPES = {
+  nucleus:  { label: 'Nucleus',  params: [60,  3, 8,  0.8, 0.5, 15, 0.05, 0.7] },
+  ring:     { label: 'Ring',     params: [100, 5, 12, 0.3, 0.8, 40, 0.08, 0.6] },
+  tendril:  { label: 'Tendril',  params: [200, 4, 10, 0.1, 0.9, 20, 0.03, 0.8] },
+  pulse:    { label: 'Pulse',    params: [80,  4, 10, 0.6, 0.3, 25, 0.35, 0.5] },
+  orbiter:  { label: 'Orbiter',  params: [120, 8, 18, 0.4, 0.2, 60, 0.1,  0.3] },
+  cloud:    { label: 'Cloud',    params: [250, 2, 6,  0.05,0.1, 8,  0.15, 0.9] },
+  spark:    { label: 'Spark',    params: [70,  10,20, 0.2, 0.1, 50, 0.4,  0.2] },
+  helix:    { label: 'Helix',    params: [90,  6, 14, 0.5, 0.7, 35, 0.12, 0.4] },
+};
+const RECIPE_KEYS = Object.keys(RECIPES);
 
-// ─── Canvas setup ─────────────────────────────────────────────────────────────
+const PARTICLES_PER_AGENT = 40;
+const AMBIENT_COUNT = 200;
+const THREAD_DIST = 45;      // max distance for intra-agent threads
+const CROSS_THREAD_DIST = 30; // max distance for cross-agent threads
+const TRAIL_LEN = 7;
+const POLL_INTERVAL = 5000;
+
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-let W = window.innerWidth;
-let H = window.innerHeight;
+let W, H;
 let mouseX = -9999, mouseY = -9999;
-let focusOrgId = null;
-let cameraX = 0, cameraY = 0;
+let hoveredAgent = null;
 
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-}
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
 resize();
 window.addEventListener('resize', resize);
 
-// ─── Spores (background particles) ────────────────────────────────────────────
-const spores = [];
-for (let i = 0; i < SPORE_COUNT; i++) {
-  spores.push({
-    x: Math.random() * 2000,
-    y: Math.random() * 2000,
-    r: Math.random() * 1.5 + 0.3,
-    vx: (Math.random() - 0.5) * 0.18,
-    vy: (Math.random() - 0.5) * 0.18,
-    alpha: Math.random() * 0.35 + 0.05,
-    flicker: Math.random() * Math.PI * 2,
-  });
+function hexToRgb(hex) {
+  return { r: parseInt(hex.slice(1,3),16), g: parseInt(hex.slice(3,5),16), b: parseInt(hex.slice(5,7),16) };
 }
 
-function updateSpores() {
-  for (const s of spores) {
-    s.x += s.vx;
-    s.y += s.vy;
-    s.flicker += 0.015 + Math.random() * 0.01;
-    if (s.x < -10) s.x = W + 10;
-    if (s.x > W + 10) s.x = -10;
-    if (s.y < -10) s.y = H + 10;
-    if (s.y > H + 10) s.y = -10;
+// =====================================================================
+//  PARTICLE
+// =====================================================================
+class Particle {
+  constructor(x, y, genome, agentId, rgb) {
+    this.x = x;
+    this.y = y;
+    this.dx = (Math.random() - 0.5) * genome.normalSpeed;
+    this.dy = (Math.random() - 0.5) * genome.normalSpeed;
+    this.dx2 = this.dx;
+    this.dy2 = this.dy;
+    this.genome = genome;
+    this.agentId = agentId;
+    this.rgb = rgb;
+    this.trail = [];
+    this.z = 0.7 + Math.random() * 0.6; // fake depth
+  }
+
+  accelerate(ax, ay) {
+    this.dx2 += ax;
+    this.dy2 += ay;
+    const d = Math.sqrt(this.dx2 * this.dx2 + this.dy2 * this.dy2);
+    if (d > this.genome.maxSpeed) {
+      const f = this.genome.maxSpeed / d;
+      this.dx2 *= f;
+      this.dy2 *= f;
+    }
+  }
+
+  step() {
+    this.dx = this.dx2;
+    this.dy = this.dy2;
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > TRAIL_LEN) this.trail.shift();
+    this.x += this.dx;
+    this.y += this.dy;
+
+    // soft bounce off edges
+    const margin = 30;
+    const bounce = 0.4;
+    if (this.x < margin) { this.x = margin; this.dx2 *= -bounce; }
+    if (this.x > W - margin) { this.x = W - margin; this.dx2 *= -bounce; }
+    if (this.y < margin) { this.y = margin; this.dy2 *= -bounce; }
+    if (this.y > H - margin) { this.y = H - margin; this.dy2 *= -bounce; }
   }
 }
 
-function drawSpores() {
-  for (const s of spores) {
-    const a = s.alpha * (0.6 + 0.4 * Math.sin(s.flicker));
+// =====================================================================
+//  GENOME (Swarm Chemistry Parameters)
+// =====================================================================
+function makeGenome(params) {
+  return {
+    neighborhoodRadius: params[0],
+    normalSpeed: params[1],
+    maxSpeed: params[2],
+    c1: params[3],  // cohesion
+    c2: params[4],  // alignment
+    c3: params[5],  // separation
+    c4: params[6],  // random perturbation probability
+    c5: params[7],  // speed regulation
+  };
+}
+
+// =====================================================================
+//  AGENT (collection of particles)
+// =====================================================================
+const agents = {}; // id -> { id, name, color, rgb, recipe, particles[], dormant }
+
+function spawnAgent(id, name, color, recipeKey, centerX, centerY) {
+  const rgb = hexToRgb(color);
+  const recipe = RECIPES[recipeKey] || RECIPES.nucleus;
+  const genome = makeGenome(recipe.params);
+  const particles = [];
+  const cx = centerX || Math.random() * (W - 200) + 100;
+  const cy = centerY || Math.random() * (H - 200) + 100;
+
+  for (let i = 0; i < PARTICLES_PER_AGENT; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 40;
+    particles.push(new Particle(
+      cx + Math.cos(angle) * dist,
+      cy + Math.sin(angle) * dist,
+      genome, id, rgb
+    ));
+  }
+
+  agents[id] = { id, name, color, rgb, recipe: recipeKey, genome, particles, dormant: false };
+  return agents[id];
+}
+
+// =====================================================================
+//  SWARM CHEMISTRY SIMULATION STEP
+// =====================================================================
+// Spatial grid for neighbor lookup
+let grid = {};
+const CELL_SIZE = 300; // max neighborhoodRadius
+
+function buildGrid(allParticles) {
+  grid = {};
+  for (const p of allParticles) {
+    const cx = Math.floor(p.x / CELL_SIZE);
+    const cy = Math.floor(p.y / CELL_SIZE);
+    const key = cx + ',' + cy;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(p);
+  }
+}
+
+function getNeighborCandidates(px, py, radius) {
+  const result = [];
+  const minCx = Math.floor((px - radius) / CELL_SIZE);
+  const maxCx = Math.floor((px + radius) / CELL_SIZE);
+  const minCy = Math.floor((py - radius) / CELL_SIZE);
+  const maxCy = Math.floor((py + radius) / CELL_SIZE);
+  for (let cx = minCx; cx <= maxCx; cx++) {
+    for (let cy = minCy; cy <= maxCy; cy++) {
+      const cell = grid[cx + ',' + cy];
+      if (cell) result.push(...cell);
+    }
+  }
+  return result;
+}
+
+function simulateStep() {
+  // collect all particles
+  const allParticles = [];
+  for (const agent of Object.values(agents)) {
+    if (agent.dormant) {
+      // dormant agents: slow drift only
+      for (const p of agent.particles) {
+        p.dx2 *= 0.98;
+        p.dy2 *= 0.98;
+        p.accelerate((Math.random() - 0.5) * 0.1, (Math.random() - 0.5) * 0.1);
+        p.step();
+      }
+      continue;
+    }
+    allParticles.push(...agent.particles);
+  }
+
+  buildGrid(allParticles);
+
+  // Sayama's algorithm for each active particle
+  for (const p of allParticles) {
+    const g = p.genome;
+    const nrSq = g.neighborhoodRadius * g.neighborhoodRadius;
+
+    const candidates = getNeighborCandidates(p.x, p.y, g.neighborhoodRadius);
+    const neighbors = [];
+
+    for (const other of candidates) {
+      if (other === p) continue;
+      const ddx = other.x - p.x;
+      const ddy = other.y - p.y;
+      if (ddx * ddx + ddy * ddy < nrSq) {
+        neighbors.push(other);
+      }
+    }
+
+    let ax, ay;
+    const n = neighbors.length;
+
+    if (n === 0) {
+      ax = (Math.random() - 0.5) * 0.5;
+      ay = (Math.random() - 0.5) * 0.5;
+    } else {
+      let lcx = 0, lcy = 0, ldx = 0, ldy = 0;
+      for (const nb of neighbors) {
+        lcx += nb.x; lcy += nb.y;
+        ldx += nb.dx; ldy += nb.dy;
+      }
+      lcx /= n; lcy /= n;
+      ldx /= n; ldy /= n;
+
+      ax = 0; ay = 0;
+
+      // c1: cohesion (steer toward local center)
+      ax += (lcx - p.x) * g.c1;
+      ay += (lcy - p.y) * g.c1;
+
+      // c2: alignment (match neighbor velocity)
+      ax += (ldx - p.dx) * g.c2;
+      ay += (ldy - p.dy) * g.c2;
+
+      // c3: separation (repel from each neighbor, inverse square)
+      for (const nb of neighbors) {
+        const sx = p.x - nb.x;
+        const sy = p.y - nb.y;
+        let d2 = sx * sx + sy * sy;
+        if (d2 < 0.001) d2 = 0.001;
+        ax += (sx / d2) * g.c3;
+        ay += (sy / d2) * g.c3;
+      }
+
+      // c4: random perturbation
+      if (Math.random() < g.c4) {
+        ax += (Math.random() * 10 - 5);
+        ay += (Math.random() * 10 - 5);
+      }
+    }
+
+    p.accelerate(ax, ay);
+
+    // c5: speed regulation toward normalSpeed
+    const spd = Math.sqrt(p.dx2 * p.dx2 + p.dy2 * p.dy2);
+    if (spd > 0.001) {
+      const reg = (g.normalSpeed - spd) / spd * g.c5;
+      p.accelerate(p.dx2 * reg, p.dy2 * reg);
+    }
+
+    // mouse repulsion
+    const mx = p.x - mouseX;
+    const my = p.y - mouseY;
+    const md = Math.sqrt(mx * mx + my * my);
+    if (md < 100 && md > 0) {
+      const force = (1 - md / 100) * 3;
+      p.accelerate(mx / md * force, my / md * force);
+    }
+  }
+
+  // step all
+  for (const p of allParticles) p.step();
+}
+
+// =====================================================================
+//  AMBIENT PARTICLES (background plankton)
+// =====================================================================
+const ambient = [];
+for (let i = 0; i < AMBIENT_COUNT; i++) {
+  ambient.push({
+    x: Math.random() * 3000,
+    y: Math.random() * 2000,
+    vx: (Math.random() - 0.5) * 0.12,
+    vy: (Math.random() - 0.5) * 0.12,
+    r: Math.random() * 1.2 + 0.3,
+    alpha: Math.random() * 0.2 + 0.03,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function updateAmbient() {
+  for (const a of ambient) {
+    a.x += a.vx; a.y += a.vy;
+    a.phase += 0.01;
+    if (a.x < -5) a.x = W + 5;
+    if (a.x > W + 5) a.x = -5;
+    if (a.y < -5) a.y = H + 5;
+    if (a.y > H + 5) a.y = -5;
+  }
+}
+
+function drawAmbient() {
+  for (const a of ambient) {
+    const alpha = a.alpha * (0.5 + 0.5 * Math.sin(a.phase));
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(150,200,255,${a})`;
+    ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(120,160,220,${alpha})`;
     ctx.fill();
   }
 }
 
-// ─── Organism simulation objects (client-side) ────────────────────────────────
-// organisms from server, extended with local simulation state
-const simOrgs = {}; // id -> sim object
-
-function hexToRgb(hex) {
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
-  return {r,g,b};
-}
-
-function createSim(org) {
-  const existing = simOrgs[org.id];
-  const rgb = hexToRgb(org.color);
-  const speedMult = 0.7 + (org.cpu / 100) * 0.8;
-  const radius = 8 + (org.memory / 100) * 12;
-
-  if (existing) {
-    // update server-driven properties, preserve position/velocity
-    existing.name = org.name;
-    existing.color = org.color;
-    existing.rgb = rgb;
-    existing.status = org.status;
-    existing.cpu = org.cpu;
-    existing.memory = org.memory;
-    existing.agents = org.agents;
-    existing.uptime = org.uptime;
-    existing.targetRadius = radius;
-    existing.maxSpeed = MAX_SPEED_BASE * speedMult;
-    return;
-  }
-
-  simOrgs[org.id] = {
-    id: org.id,
-    name: org.name,
-    color: org.color,
-    rgb,
-    status: org.status,
-    cpu: org.cpu,
-    memory: org.memory,
-    agents: org.agents,
-    uptime: org.uptime,
-
-    x: Math.random() * W,
-    y: Math.random() * H,
-    vx: (Math.random() - 0.5) * 2,
-    vy: (Math.random() - 0.5) * 2,
-
-    radius,
-    targetRadius: radius,
-    maxSpeed: MAX_SPEED_BASE * speedMult,
-
-    trail: [],
-    phase: Math.random() * Math.PI * 2, // for pulse
-    wanderAngle: Math.random() * Math.PI * 2,
-  };
-}
-
-// ─── Boids ────────────────────────────────────────────────────────────────────
-function vecLen(x, y) { return Math.sqrt(x*x + y*y); }
-
-function limit(vx, vy, max) {
-  const len = vecLen(vx, vy);
-  if (len > max) { return [vx/len*max, vy/len*max]; }
-  return [vx, vy];
-}
-
-function steer(org, tx, ty) {
-  let dx = tx - org.vx, dy = ty - org.vy;
-  [dx, dy] = limit(dx, dy, MAX_FORCE);
-  return [dx, dy];
-}
-
-function applyBoids(orgs) {
-  const list = Object.values(orgs);
-  for (const o of list) {
-    if (o.status === 'sleeping') continue;
-
-    let sepX=0,sepY=0,sepN=0;
-    let aliX=0,aliY=0,aliN=0;
-    let cohX=0,cohY=0,cohN=0;
-
-    for (const other of list) {
-      if (other.id === o.id) continue;
-      let dx = other.x - o.x;
-      let dy = other.y - o.y;
-      // wrap distance
-      if (Math.abs(dx) > W/2) dx -= Math.sign(dx)*W;
-      if (Math.abs(dy) > H/2) dy -= Math.sign(dy)*H;
-      const d = vecLen(dx, dy);
-
-      if (d < SEPARATION_DIST && d > 0) {
-        sepX -= dx/d; sepY -= dy/d; sepN++;
-      }
-      if (d < PERCEPTION_RADIUS) {
-        aliX += other.vx; aliY += other.vy; aliN++;
-        cohX += other.x; cohY += other.y; cohN++;
-      }
-    }
-
-    let fx=0, fy=0;
-
-    // separation
-    if (sepN > 0) {
-      let svx = sepX/sepN, svy = sepY/sepN;
-      const sl = vecLen(svx,svy);
-      if (sl > 0) { svx=svx/sl*o.maxSpeed; svy=svy/sl*o.maxSpeed; }
-      const [sx,sy] = steer(o, svx, svy);
-      fx += sx*1.6; fy += sy*1.6;
-    }
-
-    // alignment
-    if (aliN > 0) {
-      let avx = aliX/aliN, avy = aliY/aliN;
-      const al = vecLen(avx,avy);
-      if (al > 0) { avx=avx/al*o.maxSpeed; avy=avy/al*o.maxSpeed; }
-      const [ax,ay] = steer(o, avx, avy);
-      fx += ax*1.0; fy += ay*1.0;
-    }
-
-    // cohesion
-    if (cohN > 0) {
-      const cx = cohX/cohN - o.x;
-      const cy = cohY/cohN - o.y;
-      const cl = vecLen(cx,cy);
-      let tvx=0,tvy=0;
-      if (cl > 0) { tvx=cx/cl*o.maxSpeed; tvy=cy/cl*o.maxSpeed; }
-      const [cvx,cvy] = steer(o, tvx, tvy);
-      fx += cvx*0.8; fy += cvy*0.8;
-    }
-
-    // wander
-    o.wanderAngle += (Math.random()-0.5)*0.35;
-    fx += Math.cos(o.wanderAngle)*MAX_FORCE*0.6;
-    fy += Math.sin(o.wanderAngle)*MAX_FORCE*0.6;
-
-    // mouse repulsion
-    const mdx = o.x - mouseX, mdy = o.y - mouseY;
-    const md = vecLen(mdx,mdy);
-    if (md < 120 && md > 0) {
-      const mf = (1 - md/120) * 0.12;
-      fx += (mdx/md)*mf;
-      fy += (mdy/md)*mf;
-    }
-
-    o.vx += fx; o.vy += fy;
-    [o.vx, o.vy] = limit(o.vx, o.vy, o.maxSpeed);
-
-    // update trail
-    o.trail.push({x: o.x, y: o.y});
-    const maxTrail = 8 + Math.floor((o.uptime / 3600) * 14);
-    if (o.trail.length > Math.min(maxTrail, TRAIL_LENGTH)) o.trail.shift();
-
-    // move
-    o.x += o.vx;
-    o.y += o.vy;
-
-    // wrap
-    if (o.x < -20) o.x = W+20;
-    if (o.x > W+20) o.x = -20;
-    if (o.y < -20) o.y = H+20;
-    if (o.y > H+20) o.y = -20;
-
-    // smooth radius
-    o.radius += (o.targetRadius - o.radius) * 0.05;
-    o.phase += 0.025;
-  }
-}
-
-// ─── Draw ─────────────────────────────────────────────────────────────────────
-function drawTrail(o) {
-  if (o.trail.length < 2) return;
-  const {r,g,b} = o.rgb;
-  const sleeping = o.status === 'sleeping';
-  const alphaScale = sleeping ? 0.3 : 1;
-
-  ctx.save();
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  for (let i = 1; i < o.trail.length; i++) {
-    const t = i / o.trail.length;
-    const alpha = t * 0.5 * alphaScale;
-    const width = t * (o.radius * 0.55);
-    const p0 = o.trail[i-1];
-    const p1 = o.trail[i];
-
-    // avoid giant lines on wrap
-    const dx = Math.abs(p1.x - p0.x), dy = Math.abs(p1.y - p0.y);
-    if (dx > W/2 || dy > H/2) continue;
-
+// =====================================================================
+//  RENDERING
+// =====================================================================
+function drawParticleTrail(p) {
+  if (p.trail.length < 2) return;
+  const { r, g, b } = p.rgb;
+  for (let i = 1; i < p.trail.length; i++) {
+    const t = i / p.trail.length;
+    const alpha = t * 0.25;
+    const p0 = p.trail[i - 1];
+    const p1 = p.trail[i];
     ctx.beginPath();
     ctx.moveTo(p0.x, p0.y);
     ctx.lineTo(p1.x, p1.y);
     ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
-    ctx.lineWidth = Math.max(0.5, width);
+    ctx.lineWidth = t * 1.5 * p.z;
     ctx.stroke();
   }
-  ctx.restore();
 }
 
-function drawOrganism(o, isMe, hovered) {
-  const {r,g,b} = o.rgb;
-  const sleeping = o.status === 'sleeping';
-  const alphaScale = sleeping ? 0.35 : 1;
+function drawParticle(p, isHovered) {
+  const { r, g, b } = p.rgb;
+  const sz = (1.5 + p.z * 2);
+  const glowSz = sz * 4;
 
-  // pulse
-  const pulse = Math.sin(o.phase) * 0.12 + 1;
-  const rad = o.radius * pulse;
-
-  // glow intensity from agents
-  const glowMult = sleeping ? 0.4 : 0.6 + (o.agents / 10) * 0.6;
-
-  // halo
-  const haloRad = rad * 2.8;
-  const halo = ctx.createRadialGradient(o.x, o.y, rad*0.4, o.x, o.y, haloRad);
-  halo.addColorStop(0, `rgba(${r},${g},${b},${0.18*alphaScale*glowMult})`);
-  halo.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  // glow
+  const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSz);
+  grad.addColorStop(0, `rgba(${r},${g},${b},${isHovered ? 0.6 : 0.35})`);
+  grad.addColorStop(0.4, `rgba(${r},${g},${b},${isHovered ? 0.2 : 0.1})`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
   ctx.beginPath();
-  ctx.arc(o.x, o.y, haloRad, 0, Math.PI*2);
-  ctx.fillStyle = halo;
+  ctx.arc(p.x, p.y, glowSz, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
   ctx.fill();
 
-  // outer glow ring
-  const glow = ctx.createRadialGradient(o.x, o.y, rad*0.5, o.x, o.y, rad*1.8);
-  glow.addColorStop(0, `rgba(${r},${g},${b},${0.45*alphaScale*glowMult})`);
-  glow.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  // core
   ctx.beginPath();
-  ctx.arc(o.x, o.y, rad*1.8, 0, Math.PI*2);
-  ctx.fillStyle = glow;
+  ctx.arc(p.x, p.y, sz, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(${Math.min(255, r + 80)},${Math.min(255, g + 80)},${Math.min(255, b + 80)},0.9)`;
   ctx.fill();
-
-  // body
-  const body = ctx.createRadialGradient(o.x - rad*0.25, o.y - rad*0.25, 0, o.x, o.y, rad);
-  body.addColorStop(0, `rgba(255,255,255,${0.95*alphaScale})`);
-  body.addColorStop(0.3, `rgba(${r},${g},${b},${0.9*alphaScale})`);
-  body.addColorStop(1, `rgba(${r},${g},${b},${0.15*alphaScale})`);
-  ctx.beginPath();
-  ctx.arc(o.x, o.y, rad, 0, Math.PI*2);
-  ctx.fillStyle = body;
-  ctx.fill();
-
-  // my-organism ring
-  if (isMe) {
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, rad + 4, 0, Math.PI*2);
-    ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.3*Math.sin(o.phase*2)})`;
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  }
-
-  // name label
-  const nameAlpha = hovered ? 0.9 : (isMe ? 0.55 : 0.18);
-  ctx.fillStyle = `rgba(226,232,240,${nameAlpha})`;
-  ctx.font = `10px 'Share Tech Mono', monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText(o.name, o.x, o.y + rad + 14);
 }
 
-function drawSynapses(orgs) {
-  const list = Object.values(orgs);
-  for (let i = 0; i < list.length; i++) {
-    const a = list[i];
-    for (let j = i+1; j < list.length; j++) {
-      const b = list[j];
-      const dx = b.x - a.x, dy = b.y - a.y;
-      const d = vecLen(dx, dy);
-      if (d < SYNAPSE_DIST && d > 0) {
-        const t = 1 - d/SYNAPSE_DIST;
-        const {r:ar,g:ag,b:ab} = a.rgb;
-        const {r:br,g:bg,b:bb} = b.rgb;
-        const mr = (ar+br)/2, mg = (ag+bg)/2, mb_ = (ab+bb)/2;
-        const alpha = t * 0.35;
+function drawIntraThreads(agent) {
+  const ps = agent.particles;
+  const { r, g, b } = agent.rgb;
+  const distSq = THREAD_DIST * THREAD_DIST;
+
+  ctx.lineWidth = 0.5;
+
+  for (let i = 0; i < ps.length; i++) {
+    for (let j = i + 1; j < ps.length; j++) {
+      const dx = ps[j].x - ps[i].x;
+      const dy = ps[j].y - ps[i].y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < distSq) {
+        const d = Math.sqrt(d2);
+        const alpha = (1 - d / THREAD_DIST) * 0.15;
         ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = `rgba(${mr},${mg},${mb_},${alpha})`;
-        ctx.lineWidth = t * 1.5;
+        ctx.moveTo(ps[i].x, ps[i].y);
+        ctx.lineTo(ps[j].x, ps[j].y);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
         ctx.stroke();
       }
     }
   }
 }
 
-// ─── Tooltip & hover ──────────────────────────────────────────────────────────
+function drawCrossThreads() {
+  const agentList = Object.values(agents);
+  const distSq = CROSS_THREAD_DIST * CROSS_THREAD_DIST;
+
+  ctx.lineWidth = 0.3;
+
+  for (let a = 0; a < agentList.length; a++) {
+    for (let b = a + 1; b < agentList.length; b++) {
+      const pa = agentList[a].particles;
+      const pb = agentList[b].particles;
+      const ra = agentList[a].rgb;
+      const rb = agentList[b].rgb;
+      const mr = (ra.r + rb.r) / 2;
+      const mg = (ra.g + rb.g) / 2;
+      const mb = (ra.b + rb.b) / 2;
+
+      // sample subset for performance (every 3rd particle)
+      for (let i = 0; i < pa.length; i += 3) {
+        for (let j = 0; j < pb.length; j += 3) {
+          const dx = pb[j].x - pa[i].x;
+          const dy = pb[j].y - pa[i].y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < distSq) {
+            const d = Math.sqrt(d2);
+            const alpha = (1 - d / CROSS_THREAD_DIST) * 0.08;
+            ctx.beginPath();
+            ctx.moveTo(pa[i].x, pa[i].y);
+            ctx.lineTo(pb[j].x, pb[j].y);
+            ctx.strokeStyle = `rgba(${mr},${mg},${mb},${alpha})`;
+            ctx.stroke();
+          }
+        }
+      }
+    }
+  }
+}
+
+function drawAgentLabel(agent) {
+  // find centroid
+  let cx = 0, cy = 0;
+  for (const p of agent.particles) { cx += p.x; cy += p.y; }
+  cx /= agent.particles.length;
+  cy /= agent.particles.length;
+
+  const isHovered = hoveredAgent === agent.id;
+  const alpha = isHovered ? 0.85 : 0.2;
+
+  ctx.font = '10px "Share Tech Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = `rgba(226,232,240,${alpha})`;
+  ctx.fillText(agent.name, cx, cy + 35);
+}
+
+// =====================================================================
+//  SPAWN EFFECTS
+// =====================================================================
+const spawnFX = [];
+
+function triggerSpawn(x, y, rgb) {
+  for (let i = 0; i < 30; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 4 + 1;
+    spawnFX.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      rgb,
+      life: 1,
+      decay: 0.015 + Math.random() * 0.01,
+    });
+  }
+}
+
+function updateAndDrawSpawnFX() {
+  for (let i = spawnFX.length - 1; i >= 0; i--) {
+    const f = spawnFX[i];
+    f.x += f.vx; f.y += f.vy;
+    f.vx *= 0.97; f.vy *= 0.97;
+    f.life -= f.decay;
+    if (f.life <= 0) { spawnFX.splice(i, 1); continue; }
+
+    const { r, g, b } = f.rgb;
+    const sz = f.life * 3;
+    const grad = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, sz * 3);
+    grad.addColorStop(0, `rgba(${r},${g},${b},${f.life * 0.6})`);
+    grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, sz * 3, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+}
+
+// =====================================================================
+//  HOVER & TOOLTIP
+// =====================================================================
 const tooltip = document.getElementById('tooltip');
-let hoveredId = null;
+
+function findHoveredAgent(mx, my) {
+  let closest = null;
+  let closestDist = 60; // detection radius
+
+  for (const agent of Object.values(agents)) {
+    // use centroid
+    let cx = 0, cy = 0;
+    for (const p of agent.particles) { cx += p.x; cy += p.y; }
+    cx /= agent.particles.length;
+    cy /= agent.particles.length;
+
+    const d = Math.sqrt((cx - mx) ** 2 + (cy - my) ** 2);
+    if (d < closestDist) {
+      closestDist = d;
+      closest = agent.id;
+    }
+  }
+  return closest;
+}
 
 canvas.addEventListener('mousemove', e => {
   mouseX = e.clientX; mouseY = e.clientY;
-  hoveredId = null;
-  for (const o of Object.values(simOrgs)) {
-    const dx = o.x - e.clientX, dy = o.y - e.clientY;
-    if (Math.sqrt(dx*dx+dy*dy) < o.radius + 8) {
-      hoveredId = o.id;
-      break;
-    }
-  }
-  if (hoveredId) {
-    const o = simOrgs[hoveredId];
-    document.getElementById('tip-name').textContent = o.name;
-    document.getElementById('tip-status').textContent = `status: ${o.status}`;
-    const h = Math.floor(o.uptime / 3600);
-    document.getElementById('tip-uptime').textContent = `uptime: ${h}h`;
+  hoveredAgent = findHoveredAgent(e.clientX, e.clientY);
+
+  if (hoveredAgent && agents[hoveredAgent]) {
+    const a = agents[hoveredAgent];
+    document.getElementById('tip-name').textContent = a.name;
+    document.getElementById('tip-recipe').textContent = `recipe: ${RECIPES[a.recipe]?.label || a.recipe}`;
+    document.getElementById('tip-status').textContent = a.dormant ? 'dormant' : 'alive';
     tooltip.style.display = 'block';
     tooltip.style.left = (e.clientX + 16) + 'px';
     tooltip.style.top = (e.clientY - 10) + 'px';
@@ -552,129 +682,113 @@ canvas.addEventListener('mousemove', e => {
 
 canvas.addEventListener('mouseleave', () => {
   mouseX = -9999; mouseY = -9999;
-  hoveredId = null;
+  hoveredAgent = null;
   tooltip.style.display = 'none';
 });
 
 canvas.addEventListener('click', e => {
-  for (const o of Object.values(simOrgs)) {
-    const dx = o.x - e.clientX, dy = o.y - e.clientY;
-    if (Math.sqrt(dx*dx+dy*dy) < o.radius + 8) {
-      focusOrgId = o.id;
-      return;
+  const clicked = findHoveredAgent(e.clientX, e.clientY);
+  if (clicked && agents[clicked]) {
+    // scatter and reform effect
+    const agent = agents[clicked];
+    for (const p of agent.particles) {
+      const angle = Math.random() * Math.PI * 2;
+      const force = 3 + Math.random() * 4;
+      p.dx2 += Math.cos(angle) * force;
+      p.dy2 += Math.sin(angle) * force;
     }
   }
-  focusOrgId = null;
 });
 
-// touch support
 canvas.addEventListener('touchmove', e => {
   const t = e.touches[0];
   mouseX = t.clientX; mouseY = t.clientY;
-}, {passive: true});
+}, { passive: true });
 
-// ─── Spawn animation ──────────────────────────────────────────────────────────
-const spawnFX = []; // {x,y,color,t}
+canvas.addEventListener('touchend', () => { mouseX = -9999; mouseY = -9999; });
 
-function triggerSpawn(x, y, color) {
-  spawnFX.push({x, y, color, rgb: hexToRgb(color), t: 0});
-}
-
-function drawSpawnFX() {
-  for (let i = spawnFX.length-1; i >= 0; i--) {
-    const fx = spawnFX[i];
-    fx.t += 0.025;
-    if (fx.t > 1) { spawnFX.splice(i,1); continue; }
-
-    const {r,g,b} = fx.rgb;
-    const ease = 1 - Math.pow(1 - fx.t, 3);
-    const maxR = 120;
-    const rad = ease * maxR;
-    const alpha = (1 - fx.t) * 0.7;
-
-    ctx.beginPath();
-    ctx.arc(fx.x, fx.y, rad, 0, Math.PI*2);
-    ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // inner flash
-    if (fx.t < 0.3) {
-      const fa = (0.3 - fx.t)/0.3 * 0.9;
-      const flashR = ctx.createRadialGradient(fx.x, fx.y, 0, fx.x, fx.y, fx.t*80+10);
-      flashR.addColorStop(0, `rgba(255,255,255,${fa})`);
-      flashR.addColorStop(0.4, `rgba(${r},${g},${b},${fa*0.6})`);
-      flashR.addColorStop(1, `rgba(${r},${g},${b},0)`);
-      ctx.beginPath();
-      ctx.arc(fx.x, fx.y, fx.t*80+10, 0, Math.PI*2);
-      ctx.fillStyle = flashR;
-      ctx.fill();
-    }
-  }
-}
-
-// ─── Main render loop ─────────────────────────────────────────────────────────
+// =====================================================================
+//  MAIN RENDER LOOP
+// =====================================================================
 let myId = localStorage.getItem('hive_id');
 
 function render() {
-  // background fade
-  ctx.fillStyle = 'rgba(5,5,16,0.22)';
+  // fade background (creates natural trail effect)
+  ctx.fillStyle = 'rgba(5,5,16,0.18)';
   ctx.fillRect(0, 0, W, H);
 
-  updateSpores();
-  drawSpores();
+  updateAmbient();
+  drawAmbient();
 
-  applyBoids(simOrgs);
+  simulateStep();
 
-  // draw synapses first (below organisms)
-  drawSynapses(simOrgs);
+  // draw cross-agent threads
+  drawCrossThreads();
 
-  // draw trails
-  for (const o of Object.values(simOrgs)) drawTrail(o);
+  // draw each agent
+  for (const agent of Object.values(agents)) {
+    drawIntraThreads(agent);
 
-  // draw organisms
-  for (const o of Object.values(simOrgs)) {
-    drawOrganism(o, o.id === myId, o.id === hoveredId);
+    for (const p of agent.particles) {
+      drawParticleTrail(p);
+    }
+    for (const p of agent.particles) {
+      drawParticle(p, hoveredAgent === agent.id);
+    }
+    drawAgentLabel(agent);
   }
 
-  drawSpawnFX();
+  updateAndDrawSpawnFX();
 
   // stats
-  const count = Object.keys(simOrgs).length;
-  document.getElementById('stats').textContent = `${count} organism${count===1?'':'s'} alive`;
+  const count = Object.keys(agents).length;
+  const totalP = count * PARTICLES_PER_AGENT;
+  document.getElementById('stats').textContent =
+    `${count} swarm${count === 1 ? '' : 's'} alive\n${totalP} particles`;
 
   requestAnimationFrame(render);
 }
 
-// ─── Server sync ──────────────────────────────────────────────────────────────
+// =====================================================================
+//  SERVER SYNC
+// =====================================================================
 async function fetchState() {
   try {
     const res = await fetch('/api/state');
-    const orgs = await res.json();
-    const serverIds = new Set(orgs.map(o => o.id));
+    const data = await res.json();
+    const serverIds = new Set();
 
-    // remove gone organisms
-    for (const id of Object.keys(simOrgs)) {
-      if (!serverIds.has(id)) delete simOrgs[id];
+    for (const org of data) {
+      serverIds.add(org.id);
+      if (!agents[org.id]) {
+        spawnAgent(org.id, org.name, org.color, org.recipe);
+      } else {
+        // update properties
+        agents[org.id].name = org.name;
+        agents[org.id].dormant = org.dormant || false;
+      }
     }
 
-    // create/update
-    for (const org of orgs) createSim(org);
-  } catch(e) {
-    console.warn('State fetch failed:', e.message);
+    // remove departed
+    for (const id of Object.keys(agents)) {
+      if (!serverIds.has(id)) delete agents[id];
+    }
+  } catch (e) {
+    // offline mode: keep existing agents
   }
 }
 
-// ─── Join form ────────────────────────────────────────────────────────────────
+// =====================================================================
+//  JOIN FORM
+// =====================================================================
 const colorPicker = document.getElementById('color-picker');
 let selectedColor = COLORS[0];
+let selectedRecipe = RECIPE_KEYS[Math.floor(Math.random() * RECIPE_KEYS.length)];
 
 COLORS.forEach(c => {
   const sw = document.createElement('div');
   sw.className = 'color-swatch' + (c === selectedColor ? ' selected' : '');
   sw.style.background = c;
-  sw.style.boxShadow = `0 0 6px ${c}88`;
-  sw.title = c;
   sw.onclick = () => {
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('selected'));
     sw.classList.add('selected');
@@ -683,18 +797,28 @@ COLORS.forEach(c => {
   colorPicker.appendChild(sw);
 });
 
+const recipePicker = document.getElementById('recipe-picker');
+RECIPE_KEYS.forEach(key => {
+  const btn = document.createElement('button');
+  btn.className = 'recipe-btn' + (key === selectedRecipe ? ' selected' : '');
+  btn.textContent = RECIPES[key].label;
+  btn.onclick = () => {
+    document.querySelectorAll('.recipe-btn').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+    selectedRecipe = key;
+  };
+  recipePicker.appendChild(btn);
+});
+
 document.getElementById('join-btn').onclick = async () => {
   const name = document.getElementById('name-input').value.trim();
-  if (!name) {
-    document.getElementById('name-input').focus();
-    return;
-  }
+  if (!name) { document.getElementById('name-input').focus(); return; }
 
   try {
     const res = await fetch('/api/join', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({name, color: selectedColor}),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, color: selectedColor, recipe: selectedRecipe }),
     });
     const data = await res.json();
     if (data.id) {
@@ -702,42 +826,44 @@ document.getElementById('join-btn').onclick = async () => {
       localStorage.setItem('hive_id', myId);
       localStorage.setItem('hive_name', name);
       localStorage.setItem('hive_color', selectedColor);
+      localStorage.setItem('hive_recipe', selectedRecipe);
 
-      // place organism near center for dramatic entry
-      createSim(data.organism);
-      const org = simOrgs[myId];
-      if (org) {
-        org.x = W/2 + (Math.random()-0.5)*60;
-        org.y = H/2 + (Math.random()-0.5)*60;
-      }
+      const agent = spawnAgent(myId, name, selectedColor, selectedRecipe, W / 2, H / 2);
+      triggerSpawn(W / 2, H / 2, agent.rgb);
 
-      triggerSpawn(W/2, H/2, selectedColor);
-
-      const myStatus = document.getElementById('my-status');
-      myStatus.innerHTML = `you are <span>${name}</span> &mdash; id: <span>${myId.slice(0,8)}</span>`;
-      myStatus.style.display = 'block';
+      const status = document.getElementById('my-status');
+      status.textContent = `you are ${name} // ${RECIPES[selectedRecipe].label}`;
+      status.style.display = 'block';
     }
-  } catch(e) {
+  } catch (e) {
     console.error('Join failed:', e);
   }
 };
 
-// restore from localStorage
-(function restoreSession() {
-  const savedId = localStorage.getItem('hive_id');
+// restore
+(function restore() {
   const savedName = localStorage.getItem('hive_name');
   const savedColor = localStorage.getItem('hive_color');
+  const savedRecipe = localStorage.getItem('hive_recipe');
   if (savedName) document.getElementById('name-input').value = savedName;
   if (savedColor) {
     selectedColor = savedColor;
     document.querySelectorAll('.color-swatch').forEach(sw => {
-      if (sw.title === savedColor) sw.classList.add('selected');
-      else sw.classList.remove('selected');
+      sw.classList.toggle('selected', sw.style.backgroundColor === savedColor ||
+        '#' + [...sw.style.backgroundColor.matchAll(/\d+/g)].map(m => (+m[0]).toString(16).padStart(2,'0')).join('') === savedColor);
+    });
+  }
+  if (savedRecipe && RECIPES[savedRecipe]) {
+    selectedRecipe = savedRecipe;
+    document.querySelectorAll('.recipe-btn').forEach(btn => {
+      btn.classList.toggle('selected', btn.textContent === RECIPES[savedRecipe].label);
     });
   }
 })();
 
-// ─── Boot ─────────────────────────────────────────────────────────────────────
+// =====================================================================
+//  BOOT
+// =====================================================================
 fetchState();
 setInterval(fetchState, POLL_INTERVAL);
 render();
