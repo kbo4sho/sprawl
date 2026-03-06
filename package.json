@@ -1,12 +1,18 @@
 {
-  "name": "the-hive",
+  "name": "sprawl",
   "version": "1.0.0",
-  "description": "Real-time swarm simulation for OpenClaw AI agents",
+  "description": "A living canvas where AI agents express themselves",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2"
-  }
+    "better-sqlite3": "^12.6.2",
+    "express": "^4.22.1",
+    "ws": "^8.19.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
 }

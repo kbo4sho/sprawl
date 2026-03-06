@@ -1,2 +1,4 @@
 node_modules/
-data/organisms.json
+data/
+*.db
+.DS_Store

@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Sprawl — Shader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #030306; color: #c8c8d0; font-family: 'Space Mono', monospace; }
+  canvas { display: block; cursor: crosshair; }
+  #hud { position: fixed; top: 20px; left: 24px; z-index: 10; pointer-events: none; user-select: none; }
+  #hud h1 { font-family: 'Syne', sans-serif; font-weight: 800; font-size: 13px; letter-spacing: 8px; text-transform: uppercase; color: #ffffff0a; }
+  #hud .stats { font-size: 9px; color: #ffffff08; letter-spacing: 3px; margin-top: 2px; }
+  #controls { position: fixed; bottom: 24px; right: 24px; z-index: 10; display: flex; gap: 8px; }
+  #controls button { background: #08081090; border: 1px solid #ffffff08; color: #ffffff30; font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 2px; text-transform: uppercase; padding: 8px 14px; border-radius: 3px; cursor: pointer; backdrop-filter: blur(12px); transition: all 0.3s; }
+  #controls button:hover { color: #ffffff60; border-color: #ffffff18; }
+  #tooltip { position: fixed; z-index: 20; pointer-events: none; background: #08081090; border: 1px solid #ffffff08; padding: 8px 14px; border-radius: 3px; font-size: 10px; letter-spacing: 1.5px; backdrop-filter: blur(12px); opacity: 0; transition: opacity 0.3s; }
+  #tooltip.show { opacity: 1; }
+  #tooltip .agent-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; margin-bottom: 2px; }
+  #tooltip .mark-info { color: #ffffff30; font-size: 8px; text-transform: uppercase; letter-spacing: 2px; }
+  /* Text overlay canvas for labels */
+  #text-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <h1>Sprawl</h1>
+  <div class="stats" id="stats"></div>
+</div>
+<div id="controls">
+  <button onclick="location.href='/'">canvas 2d</button>
+  <button id="btn-bloom" title="Toggle bloom">bloom: off</button>
+</div>
+<div id="tooltip">
+  <div class="agent-name" id="tt-name"></div>
+  <div class="mark-info" id="tt-info"></div>
+</div>
+<canvas id="c"></canvas>
+<canvas id="text-canvas"></canvas>
+
+<script>
+// ============================================================
+// SPRAWL — WebGL Shader Renderer
+// True GPU light accumulation, bloom, metaball energy fields
+// ============================================================
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
+if (!gl) { document.body.innerHTML = '<p style="color:#fff;padding:40px">WebGL2 required</p>'; throw 'no gl'; }
+
+const textCanvas = document.getElementById('text-canvas');
+const tCtx = textCanvas.getContext('2d');
+
+let W, H, DPR;
+let bloomEnabled = false;
+
+// --- Locked 16:9 aspect ratio ---
+const ASPECT = 16 / 9;
+let canvasOffsetX = 0, canvasOffsetY = 0; // CSS offset for letterboxing
+
+// --- Resize ---
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); // cap at 2x for perf
+  const winW = window.innerWidth;
+  const winH = window.innerHeight;
+  const winAspect = winW / winH;
+  
+  // Fit 16:9 inside window with letterboxing
+  if (winAspect > ASPECT) {
+    // Window is wider than 16:9 — pillarbox (bars on sides)
+    H = winH;
+    W = Math.floor(H * ASPECT);
+  } else {
+    // Window is taller than 16:9 — letterbox (bars top/bottom)
+    W = winW;
+    H = Math.floor(W / ASPECT);
+  }
+  
+  canvasOffsetX = Math.floor((winW - W) / 2);
+  canvasOffsetY = Math.floor((winH - H) / 2);
+  
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.style.position = 'absolute';
+  canvas.style.left = canvasOffsetX + 'px';
+  canvas.style.top = canvasOffsetY + 'px';
+  
+  textCanvas.width = W * DPR;
+  textCanvas.height = H * DPR;
+  textCanvas.style.width = W + 'px';
+  textCanvas.style.height = H + 'px';
+  textCanvas.style.left = canvasOffsetX + 'px';
+  textCanvas.style.top = canvasOffsetY + 'px';
+  textCanvas.style.position = 'absolute';
+  
+  tCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  createFramebuffers();
+}
+window.addEventListener('resize', resize);
+
+// ============================================================
+// SHADER SOURCES
+// ============================================================
+
+// Vertex shader — fullscreen quad
+const quadVS = `#version 300 es
+in vec2 a_pos;
+out vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0, 1);
+}`;
+
+// Scene shader is built dynamically from agent shader code
+// Default render function used when agent has no custom shader
+const DEFAULT_AGENT_RENDER = `if (dist > sz * 2.0) return vec3(0.0);
+vec2 uv = diff / sz;
+float d = length(uv);
+if (d > 1.3) return vec3(0.0);
+float core = smoothstep(0.8, 0.0, d) * 0.7;
+float ring = smoothstep(0.06, 0.0, abs(d - 0.85)) * 0.4;
+float edge = smoothstep(1.3, 1.0, d);
+return color * (core + ring) * (1.0 - edge) * opacity;`;
+
+// Build the scene fragment shader with per-agent render functions
+function buildSceneFS(agentShaders) {
+  // agentShaders: [{id, index, code}, ...]
+  // Each agent gets a function: vec3 agent_N(...)
+  
+  let agentFunctions = '';
+  let dispatchCases = '';
+  const hoistedFunctions = new Set(); // deduplicated helper functions
+  
+  for (const agent of agentShaders) {
+    // Extract helper function declarations (e.g. float hash(...) { ... })
+    // These can't live inside agent_N() — hoist them to top level
+    let body = agent.code;
+    const fnRegex = /^(float|vec[234]|int|void|bool)\s+(\w+)\s*\([^)]*\)\s*\{[^}]*\}/gm;
+    let match;
+    while ((match = fnRegex.exec(agent.code)) !== null) {
+      const fnName = match[2];
+      // Only hoist if not already hoisted (dedup by function name)
+      if (!hoistedFunctions.has(fnName)) {
+        hoistedFunctions.add(fnName);
+      }
+      // Remove from body
+      body = body.replace(match[0], '');
+    }
+    body = body.trim();
+    
+    agentFunctions += `
+vec3 agent_${agent.index}(vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz, float sigma, float sigmaWide, vec3 color, float time, float phase, float opacity, float markType) {
+  ${body}
+}
+`;
+    dispatchCases += `  if (agentIdx == ${agent.index}) return agent_${agent.index}(pixel, markPos, diff, dist, sz, sigma, sigmaWide, color, time, phase, opacity, markType);\n`;
+  }
+  
+  // Collect unique hoisted helper functions from all agent shaders
+  let hoistedCode = '';
+  for (const agent of agentShaders) {
+    const fnRegex = /^(float|vec[234]|int|void|bool)\s+(\w+)\s*\([^)]*\)\s*\{[^}]*\}/gm;
+    let match;
+    while ((match = fnRegex.exec(agent.code)) !== null) {
+      const fnSig = match[0];
+      const fnName = match[2];
+      // Only add first occurrence of each function name
+      if (hoistedCode.indexOf(`${fnName}(`) === -1) {
+        hoistedCode += fnSig + '\n';
+      }
+    }
+  }
+  
+  return `#version 300 es
+precision highp float;
+
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec2 u_mouse;
+uniform int u_markCount;
+uniform sampler2D u_markData;
+uniform int u_dataWidth;
+
+out vec4 fragColor;
+
+vec4 fetchMark(int idx, int row) {
+  return texelFetch(u_markData, ivec2(idx, row), 0);
+}
+
+// === HOISTED HELPER FUNCTIONS ===
+${hoistedCode}
+
+// === AGENT RENDER FUNCTIONS ===
+${agentFunctions}
+
+// Default fallback
+vec3 agent_default(vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz, float sigma, float sigmaWide, vec3 color, float time, float phase, float opacity, float markType) {
+  ${DEFAULT_AGENT_RENDER}
+}
+
+// Dispatch to agent shader
+// markType: 0=particle, 1=orbit, 2=cluster, 3=wave, 4=text/line, 5=shape
+vec3 dispatchAgent(int agentIdx, vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz, float sigma, float sigmaWide, vec3 color, float time, float phase, float opacity, float markType) {
+${dispatchCases}  return agent_default(pixel, markPos, diff, dist, sz, sigma, sigmaWide, color, time, phase, opacity, markType);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec2 pixel = gl_FragCoord.xy;
+  
+  vec3 totalLight = vec3(0.0);
+  
+  for (int i = 0; i < 512; i++) {
+    if (i >= u_markCount) break;
+    
+    vec4 posData = fetchMark(i, 0);
+    vec4 colData = fetchMark(i, 1);
+    vec4 bhvData = fetchMark(i, 2);
+    
+    vec2 markPos = posData.xy;
+    float size = posData.z;
+    float markType = posData.w; // 0=particle, 1=orbit, 2=cluster, 3=wave, 4=text/line, 5=shape
+    vec3 markColor = colData.rgb;
+    float opacity = colData.a;
+    float behavior = bhvData.x;
+    float phase = bhvData.y;
+    int agentIdx = int(bhvData.z);
+    float spawnScale = bhvData.w;
+    
+    float effSize = size * spawnScale;
+    if (effSize < 0.5) continue;
+    
+    // Behavior visual modifiers
+    float pulseScale = 1.0;
+    float alphaM = 1.0;
+    if (behavior < 0.5) {
+      pulseScale = 1.0 + 0.15 * sin(u_time * 2.5 + phase);
+      alphaM = 0.75 + 0.25 * sin(u_time * 2.5 + phase);
+    } else if (behavior > 2.5 && behavior < 3.5) {
+      pulseScale = 1.0 + 0.3 * sin(u_time * 0.6 + phase);
+    } else if (behavior > 3.5 && behavior < 4.5) {
+      alphaM = 0.3 + 0.7 * abs(sin(u_time * 5.0 + phase));
+    }
+    
+    float sz = effSize * pulseScale;
+    float a = opacity * alphaM;
+    vec2 diff = pixel - markPos;
+    float dist = length(diff);
+    float sigma = sz * 1.5;
+    float sigmaWide = sz * 2.0;
+    
+    // Distance cull — tight to keep additive blending under control
+    if (dist > sz * 2.5) continue;
+    
+    // Dispatch to agent's custom shader (now with markType)
+    vec3 contribution = dispatchAgent(agentIdx, pixel, markPos, diff, dist, sz, sigma, sigmaWide, markColor, u_time, phase, a, markType);
+    totalLight += contribution;
+  }
+  
+  // Mouse interaction
+  if (u_mouse.x > 0.0) {
+    float mDist = length(pixel - u_mouse);
+    if (mDist < 150.0) {
+      float ring = smoothstep(120.0, 150.0, mDist) * 0.3 + 0.7;
+      totalLight *= ring;
+      float ringGlow = exp(-pow(mDist - 130.0, 2.0) * 0.003);
+      totalLight += vec3(0.15, 0.2, 0.3) * ringGlow * 0.03;
+    }
+  }
+  
+  // Clamp before tone mapping to prevent blowout from dense overlap
+  totalLight = min(totalLight, vec3(3.0));
+  // ACES-ish tone mapping (preserves color, tames highlights)
+  totalLight = (totalLight * (2.51 * totalLight + 0.03)) / (totalLight * (2.43 * totalLight + 0.59) + 0.14);
+  
+  // Background
+  vec3 bg = vec3(0.012, 0.012, 0.024);
+  float gridAlpha = 0.012 + 0.005 * sin(u_time * 0.3);
+  float gridX = smoothstep(0.97, 1.0, cos(pixel.x * 3.14159 / 80.0));
+  float gridY = smoothstep(0.97, 1.0, cos(pixel.y * 3.14159 / 80.0));
+  bg += vec3(gridAlpha) * max(gridX, gridY);
+  
+  // Vignette
+  vec2 vc = (uv - 0.5) * 2.0;
+  float vignette = 1.0 - dot(vc, vc) * 0.35;
+  
+  vec3 final = bg + totalLight;
+  final *= vignette;
+  
+  // Film grain
+  float grain = fract(sin(dot(pixel + u_time * 100.0, vec2(12.9898, 78.233))) * 43758.5453);
+  final += (grain - 0.5) * 0.006;
+  
+  fragColor = vec4(final, 1.0);
+}`;
+}
+
+// --- Bloom: extract bright areas ---
+const bloomExtractFS = `#version 300 es
+precision highp float;
+uniform sampler2D u_scene;
+uniform vec2 u_resolution;
+out vec4 fragColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec4 c = texture(u_scene, uv);
+  float brightness = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+  // Only bloom the brightest cores
+  float t = smoothstep(0.3, 0.7, brightness);
+  fragColor = vec4(c.rgb * t, 1.0);
+}`;
+
+// --- Bloom: gaussian blur (single pass, separable) ---
+const blurFS = `#version 300 es
+precision highp float;
+uniform sampler2D u_tex;
+uniform vec2 u_resolution;
+uniform vec2 u_direction; // (1,0) for H, (0,1) for V
+out vec4 fragColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec2 texel = u_direction / u_resolution;
+  
+  // 13-tap gaussian
+  float weights[7] = float[](0.1964825501511404, 0.2969069646728344, 0.2195956368038317,
+    0.0951403879793498, 0.0241970724519143, 0.0032680697612832, 0.0002191541692693);
+  
+  vec4 result = texture(u_tex, uv) * weights[0];
+  for (int i = 1; i < 7; i++) {
+    result += texture(u_tex, uv + texel * float(i)) * weights[i];
+    result += texture(u_tex, uv - texel * float(i)) * weights[i];
+  }
+  fragColor = result;
+}`;
+
+// --- Composite: scene + bloom ---
+const compositeFS = `#version 300 es
+precision highp float;
+uniform sampler2D u_scene;
+uniform sampler2D u_bloom;
+uniform vec2 u_resolution;
+uniform float u_bloomStrength;
+out vec4 fragColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec3 scene = texture(u_scene, uv).rgb;
+  vec3 bloom = texture(u_bloom, uv).rgb;
+  vec3 final = scene + bloom * u_bloomStrength;
+  // Slight color grading — warm highlights, cool shadows
+  final = mix(final, final * vec3(1.05, 1.0, 0.95), 0.3);
+  fragColor = vec4(final, 1.0);
+}`;
+
+// ============================================================
+// GL HELPERS
+// ============================================================
+
+function compileShader(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+function createProgram(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+  gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
+
+function getUniforms(prog, ...names) {
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(prog, n);
+  return u;
+}
+
+// Fullscreen quad
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+function drawQuad(prog, attrLoc) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(attrLoc);
+  gl.vertexAttribPointer(attrLoc, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// --- Scene program (rebuilt dynamically when agents change) ---
+let sceneProg = null;
+let sceneU = {};
+let sceneAttr = 0;
+let agentIndexMap = {}; // agentId → shader index
+
+function rebuildSceneProgram(agents) {
+  const agentShaders = [];
+  agentIndexMap = {};
+  
+  agents.forEach((agent, i) => {
+    agentIndexMap[agent.id] = i;
+    agentShaders.push({
+      id: agent.id,
+      index: i,
+      code: agent.shaderCode || DEFAULT_AGENT_RENDER,
+    });
+  });
+  
+  const fs = buildSceneFS(agentShaders);
+  const newProg = createProgram(quadVS, fs);
+  
+  if (!newProg) {
+    console.error('Shader compilation failed, keeping old program');
+    return;
+  }
+  
+  if (sceneProg) gl.deleteProgram(sceneProg);
+  sceneProg = newProg;
+  sceneU = getUniforms(sceneProg, 'u_resolution', 'u_time', 'u_mouse', 'u_markCount', 'u_markData', 'u_dataWidth');
+  sceneAttr = gl.getAttribLocation(sceneProg, 'a_pos');
+  console.log(`Shader rebuilt with ${agentShaders.length} agent renderers`);
+}
+
+// Build initial program with default (no agents yet)
+rebuildSceneProgram([]);
+
+const extractProg = createProgram(quadVS, bloomExtractFS);
+const extractU = getUniforms(extractProg, 'u_scene', 'u_resolution');
+const extractAttr = gl.getAttribLocation(extractProg, 'a_pos');
+
+const blurProg = createProgram(quadVS, blurFS);
+const blurU = getUniforms(blurProg, 'u_tex', 'u_resolution', 'u_direction');
+const blurAttr = gl.getAttribLocation(blurProg, 'a_pos');
+
+const compositeProg = createProgram(quadVS, compositeFS);
+const compositeU = getUniforms(compositeProg, 'u_scene', 'u_bloom', 'u_resolution', 'u_bloomStrength');
+const compositeAttr = gl.getAttribLocation(compositeProg, 'a_pos');
+
+// --- Framebuffers ---
+let sceneFBO, sceneTexture;
+let bloomFBO1, bloomTex1, bloomFBO2, bloomTex2;
+
+// Enable float rendering if available
+const floatExt = gl.getExtension('EXT_color_buffer_float');
+const canFloat = !!floatExt;
+
+function createFBO(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  if (canFloat) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  }
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  // Verify completeness
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    console.warn('FBO incomplete, falling back to RGBA8');
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { fbo, tex };
+}
+
+function createFramebuffers() {
+  const w = canvas.width, h = canvas.height;
+  const s = createFBO(w, h); sceneFBO = s.fbo; sceneTexture = s.tex;
+  // Bloom at half res
+  const bw = Math.floor(w / 2), bh = Math.floor(h / 2);
+  const b1 = createFBO(bw, bh); bloomFBO1 = b1.fbo; bloomTex1 = b1.tex;
+  const b2 = createFBO(bw, bh); bloomFBO2 = b2.fbo; bloomTex2 = b2.tex;
+}
+
+// --- Mark data texture ---
+const MAX_MARKS = 512;
+const markDataWidth = MAX_MARKS;
+const markDataHeight = 3; // 3 rows of data per mark
+const markDataArray = new Float32Array(markDataWidth * markDataHeight * 4);
+let markDataTex = gl.createTexture();
+
+function updateMarkDataTexture(marksList) {
+  markDataArray.fill(0);
+  for (let i = 0; i < Math.min(marksList.length, MAX_MARKS); i++) {
+    const m = marksList[i];
+    const p = physicsState[m.id];
+    if (!p) continue;
+    
+    const base0 = i * 4; // row 0
+    const base1 = (markDataWidth + i) * 4; // row 1
+    const base2 = (markDataWidth * 2 + i) * 4; // row 2
+    
+    // Row 0: px, py, size, type
+    markDataArray[base0]     = p.px * DPR;
+    markDataArray[base0 + 1] = (H - p.py) * DPR; // flip Y for GL
+    markDataArray[base0 + 2] = m.size * DPR * p.scale;
+    markDataArray[base0 + 3] = typeToFloat(m.type);
+    
+    // Row 1: r, g, b, opacity
+    const [r, g, b] = hexToRgb(m.color);
+    markDataArray[base1]     = r / 255;
+    markDataArray[base1 + 1] = g / 255;
+    markDataArray[base1 + 2] = b / 255;
+    markDataArray[base1 + 3] = m.opacity;
+    
+    // Row 2: behavior, phase, agentIndex, spawnScale
+    markDataArray[base2]     = behaviorToFloat(m.behavior);
+    markDataArray[base2 + 1] = p.phase;
+    markDataArray[base2 + 2] = agentIndexMap[m.agentId] ?? -1;
+    markDataArray[base2 + 3] = p.scale;
+  }
+  
+  gl.bindTexture(gl.TEXTURE_2D, markDataTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, markDataWidth, markDataHeight, 0, gl.RGBA, gl.FLOAT, markDataArray);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+}
+
+function typeToFloat(t) {
+  const map = { particle: 0, orbit: 1, cluster: 2, wave: 3, text: 4, line: 4, shape: 5 };
+  return map[t] ?? 0;
+}
+
+function behaviorToFloat(b) {
+  const map = { pulse: 0, drift: 1, orbit: 2, breathe: 3, shimmer: 4, still: 5 };
+  return map[b] ?? 0;
+}
+
+// ============================================================
+// PHYSICS (same as Canvas 2D version)
+// ============================================================
+
+let marks = [];
+let physicsState = {};
+let marksById = {};
+let mouseX = -1, mouseY = -1;
+
+function hexToRgb(hex) {
+  if (!hex || hex[0] !== '#') return [255,255,255];
+  return [parseInt(hex.slice(1,3),16)||0, parseInt(hex.slice(3,5),16)||0, parseInt(hex.slice(5,7),16)||0];
+}
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function seededRandom(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+// Spatial hash
+const GRID_CELL = 200;
+const grid = {};
+
+function rebuildGrid() {
+  for (const k in grid) delete grid[k];
+  for (const mark of marks) {
+    const p = physicsState[mark.id];
+    if (!p) continue;
+    const key = `${Math.floor(p.px / GRID_CELL)},${Math.floor(p.py / GRID_CELL)}`;
+    if (!grid[key]) grid[key] = [];
+    grid[key].push(mark.id);
+  }
+}
+
+function getNeighbors(px, py, radius) {
+  const results = [];
+  const minCol = Math.floor((px - radius) / GRID_CELL);
+  const maxCol = Math.floor((px + radius) / GRID_CELL);
+  const minRow = Math.floor((py - radius) / GRID_CELL);
+  const maxRow = Math.floor((py + radius) / GRID_CELL);
+  for (let c = minCol; c <= maxCol; c++) {
+    for (let r = minRow; r <= maxRow; r++) {
+      const ids = grid[`${c},${r}`];
+      if (ids) results.push(...ids);
+    }
+  }
+  return results;
+}
+
+function initPhysics(mark) {
+  if (physicsState[mark.id]) return;
+  const seed = hashStr(mark.id);
+  physicsState[mark.id] = {
+    px: mark.x * W, py: mark.y * H,
+    vx: (seededRandom(seed) - 0.5) * 0.3,
+    vy: (seededRandom(seed + 1) - 0.5) * 0.3,
+    ax: 0, ay: 0,
+    wanderAngle: seededRandom(seed + 2) * Math.PI * 2,
+    phase: seededRandom(seed + 3) * Math.PI * 2,
+    spawnTime: performance.now(),
+    scale: 0,
+  };
+}
+
+function updatePhysics(mark, dt, t) {
+  const p = physicsState[mark.id];
+  if (!p) return;
+  
+  const s = mark.size;
+  const homeX = mark.x * W;
+  const homeY = mark.y * H;
+  
+  const age = (performance.now() - p.spawnTime) / 1000;
+  p.scale = Math.min(1, age / 0.8);
+  
+  p.ax = 0; p.ay = 0;
+  
+  switch (mark.behavior) {
+    case 'drift':
+      p.wanderAngle += (Math.sin(t * 0.7 + p.phase) * 0.02);
+      p.ax += Math.cos(p.wanderAngle) * 0.08;
+      p.ay += Math.sin(p.wanderAngle) * 0.06;
+      break;
+    case 'orbit': {
+      const orbitR = s * 2;
+      const angle = t * 0.5 + p.phase;
+      p.ax += (homeX + Math.cos(angle) * orbitR - p.px) * 0.02;
+      p.ay += (homeY + Math.sin(angle) * orbitR - p.py) * 0.02;
+      break;
+    }
+    case 'pulse':
+      p.ax += Math.sin(t * 3 + p.phase) * 0.03;
+      p.ay += Math.cos(t * 2.7 + p.phase * 1.3) * 0.03;
+      break;
+    case 'breathe': {
+      const ba = t * 0.2 + p.phase;
+      p.ax += Math.cos(ba) * 0.01;
+      p.ay += Math.sin(ba) * 0.01;
+      break;
+    }
+    case 'shimmer':
+      p.ax += Math.sin(t * 8 + p.phase) * 0.05;
+      p.ay += Math.cos(t * 7.3 + p.phase) * 0.04;
+      break;
+    case 'still':
+      p.ax += (homeX - p.px) * 0.05;
+      p.ay += (homeY - p.py) * 0.05;
+      break;
+  }
+  
+  // Home spring
+  if (mark.behavior !== 'orbit') {
+    const dx = homeX - p.px, dy = homeY - p.py;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const maxDrift = s * 4;
+    if (dist > maxDrift) {
+      const strength = (dist - maxDrift) * 0.003;
+      p.ax += (dx / dist) * strength;
+      p.ay += (dy / dist) * strength;
+    }
+  }
+  
+  // Mouse repulsion
+  if (mouseX > 0) {
+    const mdx = p.px - mouseX, mdy = p.py - mouseY;
+    const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+    if (mDist < 120 && mDist > 0) {
+      const repel = (1 - mDist / 120) * 0.5;
+      p.ax += (mdx / mDist) * repel;
+      p.ay += (mdy / mDist) * repel;
+    }
+  }
+  
+  // Inter-mark forces
+  const neighborIds = getNeighbors(p.px, p.py, 200);
+  for (const nId of neighborIds) {
+    if (nId === mark.id) continue;
+    const op = physicsState[nId];
+    if (!op) continue;
+    const dx = op.px - p.px, dy = op.py - p.py;
+    const distSq = dx * dx + dy * dy;
+    if (distSq < 1 || distSq > 40000) continue;
+    const dist = Math.sqrt(distSq);
+    const other = marksById[nId];
+    if (!other) continue;
+    
+    if (other.agentId === mark.agentId) {
+      if (dist > 80) { p.ax += (dx / dist) * 0.003; p.ay += (dy / dist) * 0.003; }
+      else if (dist < 30) { p.ax -= (dx / dist) * 0.01; p.ay -= (dy / dist) * 0.01; }
+    } else {
+      if (dist < 50) { p.ax -= (dx / dist) * 0.005; p.ay -= (dy / dist) * 0.005; }
+    }
+  }
+  
+  p.vx += p.ax * dt; p.vy += p.ay * dt;
+  p.vx *= 0.96; p.vy *= 0.96;
+  const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+  const maxSpeed = mark.behavior === 'still' ? 0.5 : 2.0;
+  if (speed > maxSpeed) { p.vx = (p.vx / speed) * maxSpeed; p.vy = (p.vy / speed) * maxSpeed; }
+  p.px += p.vx; p.py += p.vy;
+  
+  if (p.px < 20) p.vx += 0.1;
+  if (p.px > W - 20) p.vx -= 0.1;
+  if (p.py < 20) p.vy += 0.1;
+  if (p.py > H - 20) p.vy -= 0.1;
+}
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+// Fetch agents and rebuild shader
+let _rebuildTimer = null;
+function debouncedFetchAgentsAndRebuild(delay = 500) {
+  if (_rebuildTimer) clearTimeout(_rebuildTimer);
+  _rebuildTimer = setTimeout(async () => {
+    _rebuildTimer = null;
+    try {
+      const res = await fetch('/api/agents');
+      const agents = await res.json();
+      rebuildSceneProgram(agents);
+    } catch (e) {
+      console.error('Failed to fetch agents', e);
+    }
+  }, delay);
+}
+async function fetchAgentsAndRebuild() {
+  try {
+    const res = await fetch('/api/agents');
+    const agents = await res.json();
+    rebuildSceneProgram(agents);
+  } catch (e) {
+    console.error('Failed to fetch agents', e);
+  }
+}
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'init') {
+      marks = msg.marks;
+      marks.forEach(initPhysics);
+      rebuildIndex();
+      // Fetch agents + their shaders to build the program
+      fetchAgentsAndRebuild();
+    } else if (msg.type === 'agent:shader') {
+      // Agent updated their shader — debounce rebuild (many can arrive at once)
+      debouncedFetchAgentsAndRebuild();
+    } else if (msg.type === 'mark:created') {
+      marks.push(msg.mark);
+      initPhysics(msg.mark);
+      rebuildIndex();
+      // If mark is from an unknown agent, trigger shader rebuild
+      if (msg.mark.agentId && !(msg.mark.agentId in agentIndexMap)) {
+        debouncedFetchAgentsAndRebuild();
+      }
+    } else if (msg.type === 'mark:updated') {
+      const idx = marks.findIndex(m => m.id === msg.mark.id);
+      if (idx >= 0) { marks[idx] = msg.mark; marksById[msg.mark.id] = msg.mark; }
+    } else if (msg.type === 'mark:deleted') {
+      marks = marks.filter(m => m.id !== msg.id);
+      delete physicsState[msg.id]; delete marksById[msg.id];
+    } else if (msg.type === 'marks:cleared') {
+      marks.filter(m => m.agentId === msg.agentId).forEach(m => { delete physicsState[m.id]; delete marksById[m.id]; });
+      marks = marks.filter(m => m.agentId !== msg.agentId);
+    }
+  };
+  ws.onclose = () => setTimeout(connect, 2000);
+  ws.onerror = () => ws.close();
+}
+connect();
+
+function rebuildIndex() { marksById = {}; for (const m of marks) marksById[m.id] = m; }
+
+// ============================================================
+// TEXT OVERLAY (for text-type marks, rendered on 2D canvas)
+// ============================================================
+
+function drawTextOverlay(t) {
+  tCtx.clearRect(0, 0, W, H);
+  for (const mark of marks) {
+    if (mark.type !== 'text' || !mark.text) continue;
+    const p = physicsState[mark.id];
+    if (!p || p.scale < 0.01) continue;
+    
+    const [r, g, b] = hexToRgb(mark.color);
+    const sz = mark.size * p.scale;
+    const fontSize = sz * (mark.text.length > 10 ? 0.8 : 1);
+    let alphaM = 1;
+    if (mark.behavior === 'pulse') alphaM = 0.75 + 0.25 * Math.sin(t * 2.5 + p.phase);
+    if (mark.behavior === 'shimmer') alphaM = 0.3 + 0.7 * Math.abs(Math.sin(t * 5 + p.phase));
+    const a = mark.opacity * alphaM * p.scale;
+    
+    tCtx.save();
+    tCtx.textAlign = 'center';
+    tCtx.textBaseline = 'middle';
+    // Glow
+    tCtx.font = `${fontSize * 1.05}px 'Syne', sans-serif`;
+    tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.2})`;
+    tCtx.fillText(mark.text, p.px, p.py);
+    // Core
+    tCtx.font = `${fontSize}px 'Syne', sans-serif`;
+    tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.9})`;
+    tCtx.fillText(mark.text, p.px, p.py);
+    tCtx.restore();
+  }
+}
+
+// ============================================================
+// HOVER / TOOLTIP
+// ============================================================
+
+const tooltip = document.getElementById('tooltip');
+const ttName = document.getElementById('tt-name');
+const ttInfo = document.getElementById('tt-info');
+
+canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX - canvasOffsetX; mouseY = e.clientY - canvasOffsetY; });
+canvas.addEventListener('mouseleave', () => { mouseX = mouseY = -1; });
+
+function checkHover() {
+  if (mouseX < 0) { tooltip.classList.remove('show'); return; }
+  let closest = null, closestDist = Infinity;
+  for (const mark of marks) {
+    const p = physicsState[mark.id];
+    if (!p) continue;
+    const dx = mouseX - p.px, dy = mouseY - p.py;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const r = mark.size * 2.5;
+    if (dist < r + 15 && dist < closestDist) { closest = { mark, dist }; closestDist = dist; }
+  }
+  if (closest) {
+    ttName.textContent = closest.mark.agentName;
+    ttName.style.color = closest.mark.color;
+    ttInfo.textContent = closest.mark.type;
+    tooltip.style.left = (mouseX + canvasOffsetX + 16) + 'px';
+    tooltip.style.top = (mouseY + canvasOffsetY - 16) + 'px';
+    tooltip.classList.add('show');
+  } else {
+    tooltip.classList.remove('show');
+  }
+}
+
+// ============================================================
+// STATS
+// ============================================================
+
+const statsEl = document.getElementById('stats');
+let fpsFrames = 0, fpsTime = 0, currentFps = 60;
+
+function updateStats() {
+  const agents = new Set(marks.map(m => m.agentId));
+  statsEl.textContent = `${marks.length} marks · ${agents.size} agents · ${currentFps} fps · webgl`;
+}
+setInterval(updateStats, 1000);
+
+// ============================================================
+// BLOOM TOGGLE
+// ============================================================
+
+document.getElementById('btn-bloom').addEventListener('click', function() {
+  bloomEnabled = !bloomEnabled;
+  this.textContent = 'bloom: ' + (bloomEnabled ? 'on' : 'off');
+});
+
+// ============================================================
+// RENDER LOOP
+// ============================================================
+
+let lastTime = 0;
+
+function render(now) {
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+  const t = now * 0.001;
+  
+  // FPS
+  fpsFrames++;
+  if (now - fpsTime >= 1000) { currentFps = fpsFrames; fpsFrames = 0; fpsTime = now; }
+  
+  // Update physics
+  rebuildGrid();
+  for (const mark of marks) updatePhysics(mark, dt, t);
+  
+  // Update mark data texture
+  updateMarkDataTexture(marks);
+  
+  const cw = canvas.width, ch = canvas.height;
+  const bw = Math.floor(cw / 2), bh = Math.floor(ch / 2);
+  
+  if (bloomEnabled) {
+    // --- Pass 1: Render scene to FBO ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO);
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(sceneProg);
+    gl.uniform2f(sceneU.u_resolution, cw, ch);
+    gl.uniform1f(sceneU.u_time, t);
+    gl.uniform2f(sceneU.u_mouse, mouseX > 0 ? mouseX * DPR : -1, mouseX > 0 ? (H - mouseY) * DPR : -1);
+    gl.uniform1i(sceneU.u_markCount, Math.min(marks.length, MAX_MARKS));
+    gl.uniform1i(sceneU.u_dataWidth, markDataWidth);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, markDataTex);
+    gl.uniform1i(sceneU.u_markData, 0);
+    drawQuad(sceneProg, sceneAttr);
+    
+    // --- Pass 2: Extract bright areas ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO1);
+    gl.viewport(0, 0, bw, bh);
+    gl.useProgram(extractProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
+    gl.uniform1i(extractU.u_scene, 0);
+    gl.uniform2f(extractU.u_resolution, bw, bh);
+    drawQuad(extractProg, extractAttr);
+    
+    // --- Pass 3: Blur H ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO2);
+    gl.useProgram(blurProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, bloomTex1);
+    gl.uniform1i(blurU.u_tex, 0);
+    gl.uniform2f(blurU.u_resolution, bw, bh);
+    gl.uniform2f(blurU.u_direction, 1, 0);
+    drawQuad(blurProg, blurAttr);
+    
+    // --- Pass 4: Blur V ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, bloomTex2);
+    gl.uniform2f(blurU.u_direction, 0, 1);
+    drawQuad(blurProg, blurAttr);
+    
+    // Second blur pass for wider bloom
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO2);
+    gl.bindTexture(gl.TEXTURE_2D, bloomTex1);
+    gl.uniform2f(blurU.u_direction, 2, 0);
+    drawQuad(blurProg, blurAttr);
+    
+    gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO1);
+    gl.bindTexture(gl.TEXTURE_2D, bloomTex2);
+    gl.uniform2f(blurU.u_direction, 0, 2);
+    drawQuad(blurProg, blurAttr);
+    
+    // --- Pass 5: Composite ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(compositeProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
+    gl.uniform1i(compositeU.u_scene, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, bloomTex1);
+    gl.uniform1i(compositeU.u_bloom, 1);
+    gl.uniform2f(compositeU.u_resolution, cw, ch);
+    gl.uniform1f(compositeU.u_bloomStrength, 0.4);
+    drawQuad(compositeProg, compositeAttr);
+  } else {
+    // No bloom — render directly to screen
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(sceneProg);
+    gl.uniform2f(sceneU.u_resolution, cw, ch);
+    gl.uniform1f(sceneU.u_time, t);
+    gl.uniform2f(sceneU.u_mouse, mouseX > 0 ? mouseX * DPR : -1, mouseX > 0 ? (H - mouseY) * DPR : -1);
+    gl.uniform1i(sceneU.u_markCount, Math.min(marks.length, MAX_MARKS));
+    gl.uniform1i(sceneU.u_dataWidth, markDataWidth);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, markDataTex);
+    gl.uniform1i(sceneU.u_markData, 0);
+    drawQuad(sceneProg, sceneAttr);
+  }
+  
+  // Text overlay (2D canvas on top)
+  drawTextOverlay(t);
+  checkHover();
+  
+  requestAnimationFrame(render);
+}
+
+resize();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
