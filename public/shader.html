@@ -224,20 +224,10 @@ void main() {
     float effSize = size * spawnScale;
     if (effSize < 0.5) continue;
     
-    // Behavior visual modifiers
-    float pulseScale = 1.0;
-    float alphaM = 1.0;
-    if (behavior < 0.5) {
-      pulseScale = 1.0 + 0.15 * sin(u_time * 2.5 + phase);
-      alphaM = 0.75 + 0.25 * sin(u_time * 2.5 + phase);
-    } else if (behavior > 2.5 && behavior < 3.5) {
-      pulseScale = 1.0 + 0.3 * sin(u_time * 0.6 + phase);
-    } else if (behavior > 3.5 && behavior < 4.5) {
-      alphaM = 0.3 + 0.7 * abs(sin(u_time * 5.0 + phase));
-    }
-    
-    float sz = effSize * pulseScale;
-    float a = opacity * alphaM;
+    // Behavior value passed to agent shader via `phase` context
+    // Agents control their own animation — no template pulse/scale forcing
+    float sz = effSize;
+    float a = opacity;
     vec2 diff = pixel - markPos;
     float dist = length(diff);
     float sigma = sz * 1.5;
