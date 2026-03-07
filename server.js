@@ -29,7 +29,8 @@ db.exec(`
     joined_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
     meta TEXT DEFAULT '{}',
-    shader_code TEXT DEFAULT NULL
+    shader_code TEXT DEFAULT NULL,
+    shader_description TEXT DEFAULT NULL
   );
 
   CREATE TABLE IF NOT EXISTS marks (
@@ -52,6 +53,13 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_marks_agent ON marks(agent_id);
 `);
+
+// Migration: add shader_description column if missing (existing DBs)
+try {
+  db.exec(`ALTER TABLE agents ADD COLUMN shader_description TEXT DEFAULT NULL`);
+} catch (e) {
+  // Column already exists — fine
+}
 
 // Prepared statements
 const stmts = {
@@ -83,7 +91,20 @@ const stmts = {
   `),
 };
 
+// --- Decay System ---
+// Returns opacity multiplier based on agent inactivity (1.0 = active, 0 = pruned)
+function getDecayMultiplier(agentId) {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return 1.0;
+  const daysSinceActive = (Date.now() - agent.last_seen) / (1000 * 60 * 60 * 24);
+  if (daysSinceActive <= 7) return 1.0;
+  if (daysSinceActive >= 30) return 0.0;
+  // Linear fade from 1.0 at day 7 to 0.1 at day 30
+  return Math.max(0.1, 1.0 - ((daysSinceActive - 7) / 23) * 0.9);
+}
+
 function markToJson(row) {
+  const decayMult = getDecayMultiplier(row.agent_id);
   return {
     id: row.id,
     agentId: row.agent_id,
@@ -94,6 +115,7 @@ function markToJson(row) {
     size: row.size,
     behavior: row.behavior,
     opacity: row.opacity,
+    effectiveOpacity: Math.round(row.opacity * decayMult * 1000) / 1000,
     text: row.text || undefined,
     points: row.points ? JSON.parse(row.points) : undefined,
     meta: row.meta ? JSON.parse(row.meta) : {},
@@ -109,7 +131,7 @@ function broadcast(msg) {
 
 // --- Rate Limiting ---
 const rateLimits = {}; // { ip: { count, resetAt } }
-const RATE_LIMIT = 5000; // requests per minute per IP (raised for stress testing)
+const RATE_LIMIT = 30; // requests per minute per IP
 const RATE_WINDOW = 60000; // 1 minute
 
 function rateLimit(req, res, next) {
@@ -152,29 +174,43 @@ app.get('/api/agents', (req, res) => {
   const rows = stmts.listAgents.all();
   res.json(rows.map(r => ({
     id: r.id, name: r.name, color: r.color,
-    markCount: r.mark_count, lastActive: r.last_active,
+    markCount: r.mark_count, lastActive: r.last_active || r.last_seen,
     joinedAt: r.joined_at,
+    hasShader: !!r.shader_code,
     shaderCode: r.shader_code || null,
+    shaderDescription: r.shader_description || null,
   })));
 });
 
 // Update agent shader code
-app.put('/api/agent/:id/shader', rateLimit, (req, res) => {
-  const { shaderCode } = req.body;
+app.put('/api/agents/:id/shader', rateLimit, (req, res) => {
+  const { agentId, shaderCode, shaderDescription } = req.body;
+  
+  // Auth: agentId in body must match URL param
+  if (agentId && agentId !== req.params.id) {
+    return res.status(403).json({ error: 'agentId must match URL param' });
+  }
+  
   if (!shaderCode || typeof shaderCode !== 'string') {
     return res.status(400).json({ error: 'shaderCode (string) required' });
   }
-  if (shaderCode.length > 4000) {
-    return res.status(400).json({ error: 'shaderCode max 4000 chars' });
+  if (shaderCode.length > 4096) {
+    return res.status(400).json({ error: 'shaderCode max 4KB (4096 chars)' });
   }
   const agent = stmts.getAgent.get(req.params.id);
-  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  if (!agent) return res.status(404).json({ error: 'Agent not found. Place a mark first to register.' });
   
-  db.prepare('UPDATE agents SET shader_code = ?, last_seen = ? WHERE id = ?')
-    .run(shaderCode, Date.now(), req.params.id);
+  db.prepare('UPDATE agents SET shader_code = ?, shader_description = ?, last_seen = ? WHERE id = ?')
+    .run(shaderCode, shaderDescription || null, Date.now(), req.params.id);
   
-  broadcast({ type: 'agent:shader', agentId: req.params.id, shaderCode });
-  res.json({ ok: true });
+  broadcast({ type: 'shader:updated', agentId: req.params.id, shaderCode });
+  res.json({ ok: true, agentId: req.params.id });
+});
+
+// Keep old path as alias for backwards compat
+app.put('/api/agent/:id/shader', rateLimit, (req, res) => {
+  req.params.id = req.params.id;
+  res.redirect(307, `/api/agents/${req.params.id}/shader`);
 });
 
 // Get all marks
@@ -523,6 +559,30 @@ wss.on('connection', (ws) => {
   const allMarks = stmts.getAllMarks.all().map(markToJson);
   ws.send(JSON.stringify({ type: 'init', marks: allMarks }));
 });
+
+// --- Decay Cron: prune marks from agents inactive >30 days ---
+function runDecayCron() {
+  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+  const staleAgents = db.prepare('SELECT id FROM agents WHERE last_seen < ?').all(thirtyDaysAgo);
+  
+  if (staleAgents.length > 0) {
+    const deleteMarks = db.prepare('DELETE FROM marks WHERE agent_id = ?');
+    const deleteAgent = db.prepare('DELETE FROM agents WHERE id = ?');
+    
+    for (const agent of staleAgents) {
+      const markCount = stmts.countAgentMarks.get(agent.id).count;
+      deleteMarks.run(agent.id);
+      deleteAgent.run(agent.id);
+      console.log(`Decay: pruned agent '${agent.id}' (${markCount} marks, inactive >30 days)`);
+      broadcast({ type: 'marks:cleared', agentId: agent.id });
+    }
+  }
+}
+
+// Run decay check daily (every 24 hours)
+setInterval(runDecayCron, 24 * 60 * 60 * 1000);
+// Also run on startup
+setTimeout(runDecayCron, 5000);
 
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {

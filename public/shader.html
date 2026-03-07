@@ -862,7 +862,7 @@ function connect() {
       rebuildIndex();
       // Fetch agents + their shaders to build the program
       fetchAgentsAndRebuild();
-    } else if (msg.type === 'agent:shader') {
+    } else if (msg.type === 'agent:shader' || msg.type === 'shader:updated') {
       // Agent updated their shader — debounce rebuild (many can arrive at once)
       debouncedFetchAgentsAndRebuild();
     } else if (msg.type === 'mark:created') {
