@@ -118,6 +118,7 @@
 <div id="controls">
   <button id="btn-about">?</button>
   <button id="btn-share">share</button>
+  <button onclick="location.href='/shader.html'">shader</button>
 </div>
 <div id="share-toast">link copied</div>
 <div id="about-overlay" onclick="this.classList.remove('show')">
@@ -161,6 +162,7 @@ resize();
 
 // --- State ---
 let marks = [];
+let connections = []; // { from, to }
 let mouseX = -1, mouseY = -1;
 const tooltip = document.getElementById('tooltip');
 const ttName = document.getElementById('tt-name');
@@ -303,6 +305,7 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === 'init') {
       marks = msg.marks;
+      connections = msg.connections || [];
       marks.forEach(initPhysics);
       rebuildIndex();
       updateStats();
@@ -326,6 +329,12 @@ function connect() {
       delete physics[msg.id];
       delete marksById[msg.id];
       updateStats();
+    } else if (msg.type === 'connection:created') {
+      connections.push(msg.connection);
+    } else if (msg.type === 'connection:deleted') {
+      connections = connections.filter(c => !(
+        (c.from === msg.from && c.to === msg.to) || (c.from === msg.to && c.to === msg.from)
+      ));
     } else if (msg.type === 'marks:cleared') {
       marks.filter(m => m.agentId === msg.agentId).forEach(m => { delete physics[m.id]; delete marksById[m.id]; });
       marks = marks.filter(m => m.agentId !== msg.agentId);
@@ -793,6 +802,80 @@ function drawConnections(hitAreas, t) {
   }
 }
 
+// --- Agent Connection Threads ---
+function drawAgentConnections(hitAreas, t) {
+  if (!connections.length) return;
+  
+  // Build agent centers from hit areas
+  const agentCenters = {};
+  const agentColors = {};
+  for (const h of hitAreas) {
+    if (!agentCenters[h.mark.agentId]) {
+      agentCenters[h.mark.agentId] = { x: 0, y: 0, n: 0 };
+      agentColors[h.mark.agentId] = h.mark.color;
+    }
+    agentCenters[h.mark.agentId].x += h.x;
+    agentCenters[h.mark.agentId].y += h.y;
+    agentCenters[h.mark.agentId].n++;
+  }
+  for (const id in agentCenters) {
+    const c = agentCenters[id];
+    c.x /= c.n;
+    c.y /= c.n;
+  }
+
+  for (const conn of connections) {
+    const a = agentCenters[conn.from];
+    const b = agentCenters[conn.to];
+    if (!a || !b) continue;
+
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) continue;
+
+    const nx = -dy / dist, ny = dx / dist;
+    const segments = Math.max(8, Math.floor(dist / 12));
+    const pulse = 0.06 + 0.04 * Math.sin(t * 2 + dist * 0.01);
+
+    const [rA, gA, bA] = hexToRgb(agentColors[conn.from] || '#ffffff');
+    const [rB, gB, bB] = hexToRgb(agentColors[conn.to] || '#ffffff');
+    const midR = Math.round((rA + rB) / 2);
+    const midG = Math.round((gA + gB) / 2);
+    const midB = Math.round((bA + bB) / 2);
+
+    // Glow pass
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    for (let i = 1; i < segments; i++) {
+      const frac = i / segments;
+      const lx = a.x + dx * frac;
+      const ly = a.y + dy * frac;
+      const wave = Math.sin(frac * Math.PI * 3 + t * 1.5) * 5 * Math.sin(frac * Math.PI);
+      ctx.lineTo(lx + nx * wave, ly + ny * wave);
+    }
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(${midR},${midG},${midB},${pulse * 0.5})`;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Core pass
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    for (let i = 1; i < segments; i++) {
+      const frac = i / segments;
+      const lx = a.x + dx * frac;
+      const ly = a.y + dy * frac;
+      const wave = Math.sin(frac * Math.PI * 3 + t * 1.5) * 5 * Math.sin(frac * Math.PI);
+      ctx.lineTo(lx + nx * wave, ly + ny * wave);
+    }
+    ctx.lineTo(b.x, b.y);
+    ctx.strokeStyle = `rgba(${midR},${midG},${midB},${pulse})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
 // --- Ambient ---
 const dust = [];
 for (let i = 0; i < 80; i++) {
@@ -917,6 +1000,7 @@ function render(now) {
   }
   
   drawConnections(hitAreas, t);
+  drawAgentConnections(hitAreas, t);
   checkHover(hitAreas);
   drawEmptyState(t);
   
