@@ -52,6 +52,25 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_marks_agent ON marks(agent_id);
+
+  CREATE TABLE IF NOT EXISTS connections (
+    id TEXT PRIMARY KEY,
+    from_agent TEXT NOT NULL,
+    to_agent TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (from_agent) REFERENCES agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_agent) REFERENCES agents(id) ON DELETE CASCADE,
+    UNIQUE(from_agent, to_agent)
+  );
+
+  CREATE TABLE IF NOT EXISTS action_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_action_log_agent_time ON action_log(agent_id, created_at);
 `);
 
 // Migration: add shader_description column if missing (existing DBs)
@@ -60,6 +79,48 @@ try {
 } catch (e) {
   // Column already exists — fine
 }
+
+// --- Agent Economy ---
+const MARKS_PER_HOUR = 3;
+const MAX_MARKS_PER_AGENT = 20;
+const ACTIONS_PER_HOUR = 5; // includes mark creation + connections + updates
+
+// Check how many actions an agent has used in the last hour
+function getHourlyActionCount(agentId) {
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  const row = db.prepare('SELECT COUNT(*) as count FROM action_log WHERE agent_id = ? AND created_at > ?').get(agentId, oneHourAgo);
+  return row.count;
+}
+
+function getHourlyMarkCount(agentId) {
+  const oneHourAgo = Date.now() - (60 * 60 * 1000);
+  const row = db.prepare("SELECT COUNT(*) as count FROM action_log WHERE agent_id = ? AND action_type = 'mark' AND created_at > ?").get(agentId, oneHourAgo);
+  return row.count;
+}
+
+function logAction(agentId, actionType) {
+  db.prepare('INSERT INTO action_log (agent_id, action_type, created_at) VALUES (?, ?, ?)').run(agentId, actionType, Date.now());
+}
+
+function getBudget(agentId) {
+  const marksUsed = getHourlyMarkCount(agentId);
+  const actionsUsed = getHourlyActionCount(agentId);
+  const totalMarks = stmts.countAgentMarks.get(agentId).count;
+  return {
+    marksRemaining: Math.max(0, MARKS_PER_HOUR - marksUsed),
+    actionsRemaining: Math.max(0, ACTIONS_PER_HOUR - actionsUsed),
+    totalMarks,
+    maxMarks: MAX_MARKS_PER_AGENT,
+    marksPerHour: MARKS_PER_HOUR,
+    actionsPerHour: ACTIONS_PER_HOUR,
+  };
+}
+
+// Cleanup old action logs (>24h) every hour
+setInterval(() => {
+  const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+  db.prepare('DELETE FROM action_log WHERE created_at < ?').run(cutoff);
+}, 60 * 60 * 1000);
 
 // Prepared statements
 const stmts = {
@@ -89,6 +150,10 @@ const stmts = {
     FROM agents a LEFT JOIN marks m ON a.id = m.agent_id
     GROUP BY a.id ORDER BY last_active DESC
   `),
+  getConnections: db.prepare('SELECT * FROM connections ORDER BY created_at'),
+  getAgentConnections: db.prepare('SELECT * FROM connections WHERE from_agent = ? OR to_agent = ?'),
+  insertConnection: db.prepare('INSERT OR IGNORE INTO connections (id, from_agent, to_agent, created_at) VALUES (?, ?, ?, ?)'),
+  deleteConnection: db.prepare('DELETE FROM connections WHERE (from_agent = ? AND to_agent = ?) OR (from_agent = ? AND to_agent = ?)'),
 };
 
 // --- Decay System ---
@@ -235,9 +300,17 @@ app.post('/api/mark', (req, res) => {
     now: Date.now(), meta: '{}', shader_code: null
   });
 
-  // Check limit
-  const { count } = stmts.countAgentMarks.get(agentId);
-  if (count >= 50) return res.status(429).json({ error: 'Max 50 marks per agent. Delete some first.' });
+  // Check budget
+  const budget = getBudget(agentId);
+  if (budget.totalMarks >= MAX_MARKS_PER_AGENT) {
+    return res.status(429).json({ error: `Max ${MAX_MARKS_PER_AGENT} marks per agent. Delete some first.`, budget });
+  }
+  if (budget.marksRemaining <= 0) {
+    return res.status(429).json({ error: `Mark budget exhausted (${MARKS_PER_HOUR}/hour). Wait for replenishment.`, budget });
+  }
+  if (budget.actionsRemaining <= 0) {
+    return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour). Wait for replenishment.`, budget });
+  }
 
   const mark = {
     id: crypto.randomUUID(),
@@ -256,9 +329,11 @@ app.post('/api/mark', (req, res) => {
   };
 
   stmts.insertMark.run(mark);
+  logAction(agentId, 'mark');
   const json = markToJson(stmts.getMark.get(mark.id));
+  const updatedBudget = getBudget(agentId);
   broadcast({ type: 'mark:created', mark: json });
-  res.status(201).json(json);
+  res.status(201).json({ ...json, budget: updatedBudget });
 });
 
 // Update a mark
@@ -266,6 +341,12 @@ app.patch('/api/mark/:id', (req, res) => {
   const existing = stmts.getMark.get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   if (req.body.agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
+
+  // Updates cost an action
+  const budget = getBudget(existing.agent_id);
+  if (budget.actionsRemaining <= 0) {
+    return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour). Wait for replenishment.`, budget });
+  }
 
   const updated = {
     id: existing.id,
@@ -283,11 +364,13 @@ app.patch('/api/mark/:id', (req, res) => {
   };
 
   stmts.updateMark.run(updated);
+  logAction(existing.agent_id, 'update');
   stmts.upsertAgent.run({ id: existing.agent_id, name: req.body.agentName || existing.agent_id, color: updated.color, now: Date.now(), meta: '{}', shader_code: null });
 
   const json = markToJson(stmts.getMark.get(existing.id));
+  const updatedBudget = getBudget(existing.agent_id);
   broadcast({ type: 'mark:updated', mark: json });
-  res.json(json);
+  res.json({ ...json, budget: updatedBudget });
 });
 
 // Delete a mark
@@ -312,6 +395,80 @@ app.delete('/api/marks/:agentId', (req, res) => {
   stmts.deleteAgentMarks.run(agentId);
   broadcast({ type: 'marks:cleared', agentId });
   res.json({ deleted: before });
+});
+
+// --- Budget API ---
+app.get('/api/budget/:agentId', (req, res) => {
+  const agent = stmts.getAgent.get(req.params.agentId);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  res.json(getBudget(req.params.agentId));
+});
+
+// --- Connections API ---
+
+// Get all connections
+app.get('/api/connections', (req, res) => {
+  res.json(stmts.getConnections.all().map(c => ({
+    id: c.id,
+    from: c.from_agent,
+    to: c.to_agent,
+    createdAt: c.created_at,
+  })));
+});
+
+// Get connections for an agent
+app.get('/api/connections/:agentId', (req, res) => {
+  const id = req.params.agentId;
+  res.json(stmts.getAgentConnections.all(id, id).map(c => ({
+    id: c.id,
+    from: c.from_agent,
+    to: c.to_agent,
+    createdAt: c.created_at,
+  })));
+});
+
+// Create a connection (costs an action)
+app.post('/api/connect', rateLimit, (req, res) => {
+  const { agentId, targetAgentId } = req.body;
+  if (!agentId || !targetAgentId) return res.status(400).json({ error: 'agentId and targetAgentId required' });
+  if (agentId === targetAgentId) return res.status(400).json({ error: "Can't connect to yourself" });
+
+  // Both agents must exist
+  if (!stmts.getAgent.get(agentId)) return res.status(404).json({ error: `Agent '${agentId}' not found` });
+  if (!stmts.getAgent.get(targetAgentId)) return res.status(404).json({ error: `Agent '${targetAgentId}' not found` });
+
+  // Check budget
+  const budget = getBudget(agentId);
+  if (budget.actionsRemaining <= 0) {
+    return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour).`, budget });
+  }
+
+  // Normalize direction (alphabetical) so A→B and B→A are the same connection
+  const [from, to] = [agentId, targetAgentId].sort();
+  const id = crypto.randomUUID();
+
+  const result = stmts.insertConnection.run(id, from, to, Date.now());
+  if (result.changes === 0) {
+    return res.status(409).json({ error: 'Connection already exists' });
+  }
+
+  logAction(agentId, 'connect');
+  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), meta: '{}', shader_code: null });
+
+  const connection = { id, from, to, createdAt: Date.now() };
+  broadcast({ type: 'connection:created', connection });
+  res.status(201).json({ ...connection, budget: getBudget(agentId) });
+});
+
+// Remove a connection (free — like deletes)
+app.delete('/api/connect', rateLimit, (req, res) => {
+  const { agentId, targetAgentId } = req.body;
+  if (!agentId || !targetAgentId) return res.status(400).json({ error: 'agentId and targetAgentId required' });
+
+  const [from, to] = [agentId, targetAgentId].sort();
+  stmts.deleteConnection.run(from, to, to, from);
+  broadcast({ type: 'connection:deleted', from, to });
+  res.json({ disconnected: true });
 });
 
 // --- Perception API ---
@@ -537,6 +694,13 @@ app.get('/api/canvas/state', (req, res) => {
     }
   }
 
+  // --- 7. Connections ---
+  const connections = stmts.getConnections.all().map(c => ({
+    from: c.from_agent,
+    to: c.to_agent,
+    createdAt: c.created_at,
+  }));
+
   // --- Build response ---
   const response = {
     timestamp: Date.now(),
@@ -545,6 +709,7 @@ app.get('/api/canvas/state', (req, res) => {
     openSpaces: openSpaces.slice(0, 8),
     dominantColors,
     agents: agentSummaries,
+    connections,
   };
 
   if (perspectiveData) {
@@ -557,7 +722,8 @@ app.get('/api/canvas/state', (req, res) => {
 // --- WebSocket ---
 wss.on('connection', (ws) => {
   const allMarks = stmts.getAllMarks.all().map(markToJson);
-  ws.send(JSON.stringify({ type: 'init', marks: allMarks }));
+  const allConnections = stmts.getConnections.all().map(c => ({ id: c.id, from: c.from_agent, to: c.to_agent, createdAt: c.created_at }));
+  ws.send(JSON.stringify({ type: 'init', marks: allMarks, connections: allConnections }));
 });
 
 // --- Decay Cron: prune marks from agents inactive >30 days ---

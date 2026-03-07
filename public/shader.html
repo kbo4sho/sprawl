@@ -648,6 +648,7 @@ function behaviorToFloat(b) {
 // ============================================================
 
 let marks = [];
+let connections = []; // { from, to }
 let physicsState = {};
 let marksById = {};
 let mouseX = -1, mouseY = -1;
@@ -911,6 +912,28 @@ function updatePhysics(mark, dt, t) {
   if (speed > maxSpeed) { p.vx = (p.vx / speed) * maxSpeed; p.vy = (p.vy / speed) * maxSpeed; }
   p.px += p.vx; p.py += p.vy;
   
+  // Connection attraction — gently drift toward connected agents
+  for (const conn of connections) {
+    let partnerId = null;
+    if (conn.from === mark.agentId) partnerId = conn.to;
+    else if (conn.to === mark.agentId) partnerId = conn.from;
+    if (!partnerId) continue;
+
+    // Find nearest mark of partner
+    const partnerMarks = marks.filter(m => m.agentId === partnerId);
+    for (const pm of partnerMarks) {
+      const pp = physicsState[pm.id];
+      if (!pp) continue;
+      const cdx = pp.px - p.px, cdy = pp.py - p.py;
+      const cDist = Math.sqrt(cdx * cdx + cdy * cdy);
+      if (cDist > 30 && cDist < 400) {
+        // Very gentle pull
+        p.ax += (cdx / cDist) * 0.002;
+        p.ay += (cdy / cDist) * 0.002;
+      }
+    }
+  }
+
   if (p.px < 20) p.vx += 0.1;
   if (p.px > W - 20) p.vx -= 0.1;
   if (p.py < 20) p.vy += 0.1;
@@ -944,6 +967,7 @@ function connect() {
     const msg = JSON.parse(e.data);
     if (msg.type === 'init') {
       marks = msg.marks;
+      connections = msg.connections || [];
       marks.forEach(initPhysics);
       rebuildIndex();
       fetchAgentsAndRebuild();
@@ -967,6 +991,12 @@ function connect() {
     } else if (msg.type === 'mark:deleted') {
       marks = marks.filter(m => m.id !== msg.id);
       delete physicsState[msg.id]; delete marksById[msg.id];
+    } else if (msg.type === 'connection:created') {
+      connections.push(msg.connection);
+    } else if (msg.type === 'connection:deleted') {
+      connections = connections.filter(c => !(
+        (c.from === msg.from && c.to === msg.to) || (c.from === msg.to && c.to === msg.from)
+      ));
     } else if (msg.type === 'marks:cleared') {
       marks.filter(m => m.agentId === msg.agentId).forEach(m => { delete physicsState[m.id]; delete marksById[m.id]; });
       marks = marks.filter(m => m.agentId !== msg.agentId);
@@ -983,8 +1013,79 @@ function rebuildIndex() { marksById = {}; for (const m of marks) marksById[m.id]
 // TEXT OVERLAY
 // ============================================================
 
+function drawConnections(t) {
+  // Draw luminous threads between connected agents
+  // Find center of mass for each agent
+  const agentCenters = {};
+  const agentColors = {};
+  for (const mark of marks) {
+    const p = physicsState[mark.id];
+    if (!p || p.scale < 0.01) continue;
+    if (!agentCenters[mark.agentId]) {
+      agentCenters[mark.agentId] = { sx: 0, sy: 0, count: 0 };
+      agentColors[mark.agentId] = mark.color;
+    }
+    const scr = worldToScreen(p.px, p.py);
+    agentCenters[mark.agentId].sx += scr.sx;
+    agentCenters[mark.agentId].sy += scr.sy;
+    agentCenters[mark.agentId].count++;
+  }
+  for (const id in agentCenters) {
+    const c = agentCenters[id];
+    c.sx /= c.count;
+    c.sy /= c.count;
+  }
+
+  for (const conn of connections) {
+    const a = agentCenters[conn.from];
+    const b = agentCenters[conn.to];
+    if (!a || !b) continue;
+
+    const colA = agentColors[conn.from] || '#ffffff';
+    const colB = agentColors[conn.to] || '#ffffff';
+
+    // Animated thread with slight wave
+    const dx = b.sx - a.sx, dy = b.sy - a.sy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) continue;
+
+    const segments = Math.max(8, Math.floor(dist / 10));
+    const nx = -dy / dist, ny = dx / dist; // perpendicular
+
+    tCtx.save();
+    tCtx.beginPath();
+    tCtx.moveTo(a.sx, a.sy);
+
+    for (let i = 1; i < segments; i++) {
+      const frac = i / segments;
+      const lx = a.sx + dx * frac;
+      const ly = a.sy + dy * frac;
+      // Wave displacement
+      const wave = Math.sin(frac * Math.PI * 3 + t * 1.5) * 4 * Math.sin(frac * Math.PI);
+      tCtx.lineTo(lx + nx * wave, ly + ny * wave);
+    }
+    tCtx.lineTo(b.sx, b.sy);
+
+    // Pulse alpha
+    const pulse = 0.15 + 0.1 * Math.sin(t * 2 + dist * 0.01);
+    const [rA, gA, bA] = hexToRgb(colA);
+    const [rB, gB, bB] = hexToRgb(colB);
+    const midR = Math.round((rA + rB) / 2);
+    const midG = Math.round((gA + gB) / 2);
+    const midB = Math.round((bA + bB) / 2);
+
+    tCtx.strokeStyle = `rgba(${midR},${midG},${midB},${pulse})`;
+    tCtx.lineWidth = 1.5;
+    tCtx.shadowColor = `rgba(${midR},${midG},${midB},${pulse * 0.5})`;
+    tCtx.shadowBlur = 8;
+    tCtx.stroke();
+    tCtx.restore();
+  }
+}
+
 function drawTextOverlay(t) {
   tCtx.clearRect(0, 0, W, H);
+  drawConnections(t);
   for (const mark of marks) {
     if (mark.type !== 'text' || !mark.text) continue;
     const p = physicsState[mark.id];
