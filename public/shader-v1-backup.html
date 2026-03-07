@@ -20,6 +20,7 @@
   #tooltip.show { opacity: 1; }
   #tooltip .agent-name { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 11px; margin-bottom: 2px; }
   #tooltip .mark-info { color: #ffffff30; font-size: 8px; text-transform: uppercase; letter-spacing: 2px; }
+  /* Text overlay canvas for labels */
   #text-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
 </style>
 </head>
@@ -41,11 +42,8 @@
 
 <script>
 // ============================================================
-// SPRAWL — WebGL Shader Renderer (Full-Pass Per-Agent Architecture)
-//
-// Each agent gets their own shader program and render pass.
-// Agents control how their ENTIRE composition renders, not just
-// individual marks. Passes are composited with additive blending.
+// SPRAWL — WebGL Shader Renderer
+// True GPU light accumulation, bloom, metaball energy fields
 // ============================================================
 
 const canvas = document.getElementById('c');
@@ -58,12 +56,15 @@ const tCtx = textCanvas.getContext('2d');
 let W, H, DPR;
 let bloomEnabled = false;
 
+// --- Locked 16:9 aspect ratio ---
 const ASPECT = 16 / 9;
 let canvasOffsetX = 0, canvasOffsetY = 0;
 
 // --- Resize ---
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  DPR = Math.min(window.devicePixelRatio || 1, 2); // cap at 2x for perf
+  
+  // Cover the full window — no letterboxing
   W = window.innerWidth;
   H = window.innerHeight;
   canvasOffsetX = 0;
@@ -95,6 +96,7 @@ window.addEventListener('resize', resize);
 // SHADER SOURCES
 // ============================================================
 
+// Vertex shader — fullscreen quad
 const quadVS = `#version 300 es
 in vec2 a_pos;
 out vec2 v_uv;
@@ -103,48 +105,9 @@ void main() {
   gl_Position = vec4(a_pos, 0, 1);
 }`;
 
-// --- Background shader (rendered first, no blending) ---
-const backgroundFS = `#version 300 es
-precision highp float;
-uniform vec2 u_resolution;
-uniform float u_time;
-uniform vec2 u_mouse;
-out vec4 fragColor;
-
-void main() {
-  vec2 pixel = gl_FragCoord.xy;
-  vec2 uv = pixel / u_resolution;
-  
-  // Deep void background
-  vec3 bg = vec3(0.012, 0.012, 0.024);
-  
-  // Breathing grid
-  float gridAlpha = 0.012 + 0.005 * sin(u_time * 0.3);
-  float gridX = smoothstep(0.97, 1.0, cos(pixel.x * 3.14159 / 80.0));
-  float gridY = smoothstep(0.97, 1.0, cos(pixel.y * 3.14159 / 80.0));
-  bg += vec3(gridAlpha) * max(gridX, gridY);
-  
-  // Mouse interaction ring (subtle)
-  if (u_mouse.x > 0.0) {
-    float mDist = length(pixel - u_mouse);
-    float ringGlow = exp(-pow(mDist - 130.0, 2.0) * 0.003);
-    bg += vec3(0.15, 0.2, 0.3) * ringGlow * 0.03;
-  }
-  
-  // Vignette
-  vec2 vc = (uv - 0.5) * 2.0;
-  float vignette = 1.0 - dot(vc, vc) * 0.35;
-  bg *= vignette;
-  
-  // Film grain
-  float grain = fract(sin(dot(pixel + u_time * 100.0, vec2(12.9898, 78.233))) * 43758.5453);
-  bg += (grain - 0.5) * 0.006;
-  
-  fragColor = vec4(bg, 1.0);
-}`;
-
-// --- Default per-mark shader (used when agent has no custom shader) ---
-const DEFAULT_PER_MARK_CODE = `if (dist > sz * 2.0) return vec3(0.0);
+// Scene shader is built dynamically from agent shader code
+// Default render function used when agent has no custom shader
+const DEFAULT_AGENT_RENDER = `if (dist > sz * 2.0) return vec3(0.0);
 vec2 uv = diff / sz;
 float d = length(uv);
 if (d > 1.3) return vec3(0.0);
@@ -153,131 +116,169 @@ float ring = smoothstep(0.06, 0.0, abs(d - 0.85)) * 0.4;
 float edge = smoothstep(1.3, 1.0, d);
 return color * (core + ring) * (1.0 - edge) * opacity;`;
 
-// ============================================================
-// PER-AGENT SHADER BUILDER
-// ============================================================
-
-// Build a full-pass fragment shader for one agent.
-// Two modes:
-//   1. Full-pass: agent code contains `agentRender(vec2 pixel, vec2 uv)` → injected directly
-//   2. Per-mark (legacy): agent code is a per-mark function body → wrapped in a loop
-function buildAgentFS(shaderCode) {
-  const isFullPass = shaderCode.includes('agentRender');
+// Build the scene fragment shader with per-agent render functions
+function buildSceneFS(agentShaders) {
+  // agentShaders: [{id, index, code}, ...]
+  // Each agent gets a function: vec3 agent_N(...)
   
-  const header = `#version 300 es
+  let agentFunctions = '';
+  let dispatchCases = '';
+  const hoistedFunctions = new Set(); // deduplicated helper functions
+  
+  for (const agent of agentShaders) {
+    // Extract helper function declarations (e.g. float hash(...) { ... })
+    // These can't live inside agent_N() — hoist them to top level
+    let body = agent.code;
+    const fnRegex = /^(float|vec[234]|int|void|bool)\s+(\w+)\s*\([^)]*\)\s*\{[^}]*\}/gm;
+    let match;
+    while ((match = fnRegex.exec(agent.code)) !== null) {
+      const fnName = match[2];
+      // Only hoist if not already hoisted (dedup by function name)
+      if (!hoistedFunctions.has(fnName)) {
+        hoistedFunctions.add(fnName);
+      }
+      // Remove from body
+      body = body.replace(match[0], '');
+    }
+    body = body.trim();
+    
+    agentFunctions += `
+vec3 agent_${agent.index}(vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz, float sigma, float sigmaWide, vec3 color, float time, float phase, float opacity, float markType) {
+  ${body}
+}
+`;
+    dispatchCases += `  if (agentIdx == ${agent.index}) return agent_${agent.index}(pixel, markPos, diff, dist, sz, sigma, sigmaWide, color, time, phase, opacity, markType);\n`;
+  }
+  
+  // Collect unique hoisted helper functions from all agent shaders
+  let hoistedCode = '';
+  for (const agent of agentShaders) {
+    const fnRegex = /^(float|vec[234]|int|void|bool)\s+(\w+)\s*\([^)]*\)\s*\{[^}]*\}/gm;
+    let match;
+    while ((match = fnRegex.exec(agent.code)) !== null) {
+      const fnSig = match[0];
+      const fnName = match[2];
+      // Only add first occurrence of each function name
+      if (hoistedCode.indexOf(`${fnName}(`) === -1) {
+        hoistedCode += fnSig + '\n';
+      }
+    }
+  }
+  
+  return `#version 300 es
 precision highp float;
 
 uniform vec2 u_resolution;
 uniform float u_time;
 uniform vec2 u_mouse;
-uniform sampler2D u_markData;
-uniform int u_markStart;
 uniform int u_markCount;
+uniform sampler2D u_markData;
 uniform int u_dataWidth;
 
 out vec4 fragColor;
 
-// --- Mark data accessors ---
-vec4 _fetch(int localIdx, int row) {
-  return texelFetch(u_markData, ivec2(u_markStart + localIdx, row), 0);
+vec4 fetchMark(int idx, int row) {
+  return texelFetch(u_markData, ivec2(idx, row), 0);
 }
-vec2 getMarkPos(int i) { return _fetch(i, 0).xy; }
-float getMarkSize(int i) { return _fetch(i, 0).z; }
-float getMarkType(int i) { return _fetch(i, 0).w; }
-vec3 getMarkColor(int i) { return _fetch(i, 1).rgb; }
-float getMarkOpacity(int i) { return _fetch(i, 1).a; }
-float getMarkBehavior(int i) { return _fetch(i, 2).x; }
-float getMarkPhase(int i) { return _fetch(i, 2).y; }
-float getMarkScale(int i) { return _fetch(i, 2).w; }
-`;
 
-  if (isFullPass) {
-    // Full-pass mode: agent provides agentRender(vec2 pixel, vec2 uv) → vec4
-    return `${header}
+// === HOISTED HELPER FUNCTIONS ===
+${hoistedCode}
 
-// === AGENT CODE (full-pass) ===
-${shaderCode}
+// === AGENT RENDER FUNCTIONS ===
+${agentFunctions}
 
-void main() {
-  vec2 pixel = gl_FragCoord.xy;
-  vec2 uv = pixel / u_resolution;
-  fragColor = agentRender(pixel, uv);
-}`;
-  } else {
-    // Per-mark legacy mode: wrap agent's per-mark code in a loop
-    return `${header}
+// Default fallback
+vec3 agent_default(vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz, float sigma, float sigmaWide, vec3 color, float time, float phase, float opacity, float markType) {
+  ${DEFAULT_AGENT_RENDER}
+}
 
-// === AGENT PER-MARK FUNCTION (legacy compat) ===
-vec3 _perMark(vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz,
-              float sigma, float sigmaWide, vec3 color, float time,
-              float phase, float opacity, float markType) {
-  ${shaderCode}
+// Dispatch to agent shader
+// markType: 0=particle, 1=orbit, 2=cluster, 3=wave, 4=text/line, 5=shape
+vec3 dispatchAgent(int agentIdx, vec2 pixel, vec2 markPos, vec2 diff, float dist, float sz, float sigma, float sigmaWide, vec3 color, float time, float phase, float opacity, float markType) {
+${dispatchCases}  return agent_default(pixel, markPos, diff, dist, sz, sigma, sigmaWide, color, time, phase, opacity, markType);
 }
 
 void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
   vec2 pixel = gl_FragCoord.xy;
+  
   vec3 totalLight = vec3(0.0);
   
-  for (int i = 0; i < 50; i++) {
+  for (int i = 0; i < 512; i++) {
     if (i >= u_markCount) break;
     
-    vec2 markPos = getMarkPos(i);
-    float sz = getMarkSize(i) * getMarkScale(i);
-    if (sz < 0.5) continue;
+    vec4 posData = fetchMark(i, 0);
+    vec4 colData = fetchMark(i, 1);
+    vec4 bhvData = fetchMark(i, 2);
     
-    vec3 color = getMarkColor(i);
-    float opacity = getMarkOpacity(i);
-    float phase = getMarkPhase(i);
-    float markType = getMarkType(i);
+    vec2 markPos = posData.xy;
+    float size = posData.z;
+    float markType = posData.w; // 0=particle, 1=orbit, 2=cluster, 3=wave, 4=text/line, 5=shape
+    vec3 markColor = colData.rgb;
+    float opacity = colData.a;
+    float behavior = bhvData.x;
+    float phase = bhvData.y;
+    int agentIdx = int(bhvData.z);
+    float spawnScale = bhvData.w;
     
+    float effSize = size * spawnScale;
+    if (effSize < 0.5) continue;
+    
+    // Agents control their own animation — no template pulse/scale forcing
+    float sz = effSize;
+    float a = opacity;
     vec2 diff = pixel - markPos;
     float dist = length(diff);
     float sigma = sz * 1.5;
     float sigmaWide = sz * 2.0;
     
+    // Distance cull — tight to keep additive blending under control
     if (dist > sz * 2.5) continue;
     
-    totalLight += _perMark(pixel, markPos, diff, dist, sz, sigma, sigmaWide,
-                           color, u_time, phase, opacity, markType);
+    // Dispatch to agent's custom shader (now with markType)
+    vec3 contribution = dispatchAgent(agentIdx, pixel, markPos, diff, dist, sz, sigma, sigmaWide, markColor, u_time, phase, a, markType);
+    totalLight += contribution;
   }
   
-  // Mouse dimming (consistent with background)
+  // Mouse interaction
   if (u_mouse.x > 0.0) {
     float mDist = length(pixel - u_mouse);
     if (mDist < 150.0) {
       float ring = smoothstep(120.0, 150.0, mDist) * 0.3 + 0.7;
       totalLight *= ring;
+      float ringGlow = exp(-pow(mDist - 130.0, 2.0) * 0.003);
+      totalLight += vec3(0.15, 0.2, 0.3) * ringGlow * 0.03;
     }
   }
   
-  fragColor = vec4(totalLight, 1.0);
+  // Clamp before tone mapping to prevent blowout from dense overlap
+  totalLight = min(totalLight, vec3(3.0));
+  // ACES-ish tone mapping (preserves color, tames highlights)
+  totalLight = (totalLight * (2.51 * totalLight + 0.03)) / (totalLight * (2.43 * totalLight + 0.59) + 0.14);
+  
+  // Background
+  vec3 bg = vec3(0.012, 0.012, 0.024);
+  float gridAlpha = 0.012 + 0.005 * sin(u_time * 0.3);
+  float gridX = smoothstep(0.97, 1.0, cos(pixel.x * 3.14159 / 80.0));
+  float gridY = smoothstep(0.97, 1.0, cos(pixel.y * 3.14159 / 80.0));
+  bg += vec3(gridAlpha) * max(gridX, gridY);
+  
+  // Vignette
+  vec2 vc = (uv - 0.5) * 2.0;
+  float vignette = 1.0 - dot(vc, vc) * 0.35;
+  
+  vec3 final = bg + totalLight;
+  final *= vignette;
+  
+  // Film grain
+  float grain = fract(sin(dot(pixel + u_time * 100.0, vec2(12.9898, 78.233))) * 43758.5453);
+  final += (grain - 0.5) * 0.006;
+  
+  fragColor = vec4(final, 1.0);
 }`;
-  }
 }
 
-// ============================================================
-// TONE MAPPING SHADER (final composite with tone mapping)
-// ============================================================
-
-const tonemapFS = `#version 300 es
-precision highp float;
-uniform sampler2D u_scene;
-uniform vec2 u_resolution;
-out vec4 fragColor;
-
-void main() {
-  vec2 uv = gl_FragCoord.xy / u_resolution;
-  vec3 c = texture(u_scene, uv).rgb;
-  
-  // Clamp before tone mapping
-  c = min(c, vec3(3.0));
-  // ACES-ish tone mapping
-  c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
-  
-  fragColor = vec4(c, 1.0);
-}`;
-
-// --- Bloom shaders (unchanged from v1) ---
+// --- Bloom: extract bright areas ---
 const bloomExtractFS = `#version 300 es
 precision highp float;
 uniform sampler2D u_scene;
@@ -287,21 +288,26 @@ void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   vec4 c = texture(u_scene, uv);
   float brightness = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+  // Only bloom the brightest cores
   float t = smoothstep(0.3, 0.7, brightness);
   fragColor = vec4(c.rgb * t, 1.0);
 }`;
 
+// --- Bloom: gaussian blur (single pass, separable) ---
 const blurFS = `#version 300 es
 precision highp float;
 uniform sampler2D u_tex;
 uniform vec2 u_resolution;
-uniform vec2 u_direction;
+uniform vec2 u_direction; // (1,0) for H, (0,1) for V
 out vec4 fragColor;
 void main() {
   vec2 uv = gl_FragCoord.xy / u_resolution;
   vec2 texel = u_direction / u_resolution;
+  
+  // 13-tap gaussian
   float weights[7] = float[](0.1964825501511404, 0.2969069646728344, 0.2195956368038317,
     0.0951403879793498, 0.0241970724519143, 0.0032680697612832, 0.0002191541692693);
+  
   vec4 result = texture(u_tex, uv) * weights[0];
   for (int i = 1; i < 7; i++) {
     result += texture(u_tex, uv + texel * float(i)) * weights[i];
@@ -310,6 +316,7 @@ void main() {
   fragColor = result;
 }`;
 
+// --- Composite: scene + bloom ---
 const compositeFS = `#version 300 es
 precision highp float;
 uniform sampler2D u_scene;
@@ -322,6 +329,7 @@ void main() {
   vec3 scene = texture(u_scene, uv).rgb;
   vec3 bloom = texture(u_bloom, uv).rgb;
   vec3 final = scene + bloom * u_bloomStrength;
+  // Slight color grading — warm highlights, cool shadows
   final = mix(final, final * vec3(1.05, 1.0, 0.95), 0.3);
   fragColor = vec4(final, 1.0);
 }`;
@@ -335,29 +343,19 @@ function compileShader(src, type) {
   gl.shaderSource(s, src);
   gl.compileShader(s);
   if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(s);
-    console.error('Shader compile error:', log);
-    gl.deleteShader(s);
+    console.error(gl.getShaderInfoLog(s));
     return null;
   }
   return s;
 }
 
 function createProgram(vs, fs) {
-  const vShader = compileShader(vs, gl.VERTEX_SHADER);
-  const fShader = compileShader(fs, gl.FRAGMENT_SHADER);
-  if (!vShader || !fShader) return null;
-  
   const p = gl.createProgram();
-  gl.attachShader(p, vShader);
-  gl.attachShader(p, fShader);
+  gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+  gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
   gl.linkProgram(p);
-  gl.deleteShader(vShader);
-  gl.deleteShader(fShader);
-  
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    console.error('Program link error:', gl.getProgramInfoLog(p));
-    gl.deleteProgram(p);
+    console.error(gl.getProgramInfoLog(p));
     return null;
   }
   return p;
@@ -369,116 +367,72 @@ function getUniforms(prog, ...names) {
   return u;
 }
 
+// Fullscreen quad
 const quadBuf = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
 
-function drawQuad(prog, attrName) {
-  const loc = gl.getAttribLocation(prog, attrName || 'a_pos');
+function drawQuad(prog, attrLoc) {
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(attrLoc);
+  gl.vertexAttribPointer(attrLoc, 2, gl.FLOAT, false, 0, 0);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
-// ============================================================
-// PER-AGENT PROGRAM MANAGEMENT
-// ============================================================
+// --- Scene program (rebuilt dynamically when agents change) ---
+let sceneProg = null;
+let sceneU = {};
+let sceneAttr = 0;
+let agentIndexMap = {}; // agentId → shader index
 
-// Each agent gets: { program, uniforms, shaderCode, markStart, markCount }
-const agentRenderers = {}; // agentId → renderer object
-
-// Build or rebuild a single agent's shader program
-function buildAgentRenderer(agentId, shaderCode) {
-  const code = shaderCode || DEFAULT_PER_MARK_CODE;
-  const fs = buildAgentFS(code);
-  const program = createProgram(quadVS, fs);
+function rebuildSceneProgram(agents) {
+  const agentShaders = [];
+  agentIndexMap = {};
   
-  if (!program) {
-    console.warn(`Agent '${agentId}': custom shader failed to compile, using default`);
-    // Fall back to default
-    const defaultFs = buildAgentFS(DEFAULT_PER_MARK_CODE);
-    const defaultProg = createProgram(quadVS, defaultFs);
-    if (!defaultProg) {
-      console.error(`Agent '${agentId}': even default shader failed!`);
-      return null;
-    }
-    return {
-      program: defaultProg,
-      uniforms: getUniforms(defaultProg, 'u_resolution', 'u_time', 'u_mouse',
-        'u_markData', 'u_markStart', 'u_markCount', 'u_dataWidth'),
-      shaderCode: DEFAULT_PER_MARK_CODE,
-      isDefault: true,
-      markStart: 0,
-      markCount: 0,
-    };
+  agents.forEach((agent, i) => {
+    agentIndexMap[agent.id] = i;
+    agentShaders.push({
+      id: agent.id,
+      index: i,
+      code: agent.shaderCode || DEFAULT_AGENT_RENDER,
+    });
+  });
+  
+  const fs = buildSceneFS(agentShaders);
+  const newProg = createProgram(quadVS, fs);
+  
+  if (!newProg) {
+    console.error('Shader compilation failed, keeping old program');
+    return;
   }
   
-  return {
-    program,
-    uniforms: getUniforms(program, 'u_resolution', 'u_time', 'u_mouse',
-      'u_markData', 'u_markStart', 'u_markCount', 'u_dataWidth'),
-    shaderCode: code,
-    isDefault: false,
-    markStart: 0,
-    markCount: 0,
-  };
+  if (sceneProg) gl.deleteProgram(sceneProg);
+  sceneProg = newProg;
+  sceneU = getUniforms(sceneProg, 'u_resolution', 'u_time', 'u_mouse', 'u_markCount', 'u_markData', 'u_dataWidth');
+  sceneAttr = gl.getAttribLocation(sceneProg, 'a_pos');
+  console.log(`Shader rebuilt with ${agentShaders.length} agent renderers`);
 }
 
-// Rebuild all agent programs from agent data
-function rebuildAllAgentPrograms(agents) {
-  // Clean up old programs
-  for (const id in agentRenderers) {
-    if (agentRenderers[id]?.program) {
-      gl.deleteProgram(agentRenderers[id].program);
-    }
-    delete agentRenderers[id];
-  }
-  
-  for (const agent of agents) {
-    const renderer = buildAgentRenderer(agent.id, agent.shaderCode);
-    if (renderer) {
-      agentRenderers[agent.id] = renderer;
-    }
-  }
-  
-  console.log(`Built ${Object.keys(agentRenderers).length} agent renderers`);
-}
+// Build initial program with default (no agents yet)
+rebuildSceneProgram([]);
 
-// Rebuild just one agent's program (on shader update)
-function rebuildSingleAgent(agentId, shaderCode) {
-  if (agentRenderers[agentId]?.program) {
-    gl.deleteProgram(agentRenderers[agentId].program);
-  }
-  const renderer = buildAgentRenderer(agentId, shaderCode);
-  if (renderer) {
-    agentRenderers[agentId] = renderer;
-    console.log(`Rebuilt shader for agent '${agentId}'`);
-  }
-}
-
-// --- Background program ---
-const bgProg = createProgram(quadVS, backgroundFS);
-const bgU = getUniforms(bgProg, 'u_resolution', 'u_time', 'u_mouse');
-
-// --- Tonemap program ---
-const tonemapProg = createProgram(quadVS, tonemapFS);
-const tonemapU = getUniforms(tonemapProg, 'u_scene', 'u_resolution');
-
-// --- Bloom programs ---
 const extractProg = createProgram(quadVS, bloomExtractFS);
 const extractU = getUniforms(extractProg, 'u_scene', 'u_resolution');
+const extractAttr = gl.getAttribLocation(extractProg, 'a_pos');
 
 const blurProg = createProgram(quadVS, blurFS);
 const blurU = getUniforms(blurProg, 'u_tex', 'u_resolution', 'u_direction');
+const blurAttr = gl.getAttribLocation(blurProg, 'a_pos');
 
 const compositeProg = createProgram(quadVS, compositeFS);
 const compositeU = getUniforms(compositeProg, 'u_scene', 'u_bloom', 'u_resolution', 'u_bloomStrength');
+const compositeAttr = gl.getAttribLocation(compositeProg, 'a_pos');
 
 // --- Framebuffers ---
 let sceneFBO, sceneTexture;
 let bloomFBO1, bloomTex1, bloomFBO2, bloomTex2;
 
+// Enable float rendering if available
 const floatExt = gl.getExtension('EXT_color_buffer_float');
 const canFloat = !!floatExt;
 
@@ -497,6 +451,7 @@ function createFBO(w, h) {
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  // Verify completeness
   const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
   if (status !== gl.FRAMEBUFFER_COMPLETE) {
     console.warn('FBO incomplete, falling back to RGBA8');
@@ -511,52 +466,29 @@ function createFBO(w, h) {
 function createFramebuffers() {
   const w = canvas.width, h = canvas.height;
   const s = createFBO(w, h); sceneFBO = s.fbo; sceneTexture = s.tex;
+  // Bloom at half res
   const bw = Math.floor(w / 2), bh = Math.floor(h / 2);
   const b1 = createFBO(bw, bh); bloomFBO1 = b1.fbo; bloomTex1 = b1.tex;
   const b2 = createFBO(bw, bh); bloomFBO2 = b2.fbo; bloomTex2 = b2.tex;
 }
 
-// ============================================================
-// MARK DATA TEXTURE (sorted by agent, with per-agent ranges)
-// ============================================================
-
+// --- Mark data texture ---
 const MAX_MARKS = 512;
 const markDataWidth = MAX_MARKS;
-const markDataHeight = 3;
+const markDataHeight = 3; // 3 rows of data per mark
 const markDataArray = new Float32Array(markDataWidth * markDataHeight * 4);
 let markDataTex = gl.createTexture();
 
-// Per-agent mark ranges in the data texture
-const agentMarkRanges = {}; // agentId → { start, count }
-
 function updateMarkDataTexture(marksList) {
   markDataArray.fill(0);
-  
-  // Sort marks by agentId for contiguous ranges
-  const sorted = [...marksList].sort((a, b) => {
-    if (a.agentId < b.agentId) return -1;
-    if (a.agentId > b.agentId) return 1;
-    return 0;
-  });
-  
-  // Clear ranges
-  for (const k in agentMarkRanges) delete agentMarkRanges[k];
-  
-  let idx = 0;
-  for (const m of sorted) {
-    if (idx >= MAX_MARKS) break;
+  for (let i = 0; i < Math.min(marksList.length, MAX_MARKS); i++) {
+    const m = marksList[i];
     const p = physicsState[m.id];
     if (!p) continue;
     
-    // Track agent ranges
-    if (!agentMarkRanges[m.agentId]) {
-      agentMarkRanges[m.agentId] = { start: idx, count: 0 };
-    }
-    agentMarkRanges[m.agentId].count++;
-    
-    const base0 = idx * 4;
-    const base1 = (markDataWidth + idx) * 4;
-    const base2 = (markDataWidth * 2 + idx) * 4;
+    const base0 = i * 4; // row 0
+    const base1 = (markDataWidth + i) * 4; // row 1
+    const base2 = (markDataWidth * 2 + i) * 4; // row 2
     
     // Row 0: px, py, size, type (camera-transformed)
     const scr = worldToScreen(p.px, p.py);
@@ -572,25 +504,11 @@ function updateMarkDataTexture(marksList) {
     markDataArray[base1 + 2] = b / 255;
     markDataArray[base1 + 3] = m.opacity;
     
-    // Row 2: behavior, phase, (unused), spawnScale
+    // Row 2: behavior, phase, agentIndex, spawnScale
     markDataArray[base2]     = behaviorToFloat(m.behavior);
     markDataArray[base2 + 1] = p.phase;
-    markDataArray[base2 + 2] = 0; // was agentIndex, no longer needed
+    markDataArray[base2 + 2] = agentIndexMap[m.agentId] ?? -1;
     markDataArray[base2 + 3] = p.scale;
-    
-    idx++;
-  }
-  
-  // Update renderer mark ranges
-  for (const agentId in agentRenderers) {
-    const range = agentMarkRanges[agentId];
-    if (range) {
-      agentRenderers[agentId].markStart = range.start;
-      agentRenderers[agentId].markCount = range.count;
-    } else {
-      agentRenderers[agentId].markStart = 0;
-      agentRenderers[agentId].markCount = 0;
-    }
   }
   
   gl.bindTexture(gl.TEXTURE_2D, markDataTex);
@@ -612,7 +530,7 @@ function behaviorToFloat(b) {
 }
 
 // ============================================================
-// PHYSICS
+// PHYSICS (same as Canvas 2D version)
 // ============================================================
 
 let marks = [];
@@ -620,27 +538,37 @@ let physicsState = {};
 let marksById = {};
 let mouseX = -1, mouseY = -1;
 
-// --- Camera ---
-let camX = 0.5, camY = 0.5;
-let camZoom = 1;
+// --- Camera (zoom & pan) ---
+let camX = 0.5, camY = 0.5; // center of view in normalized 0-1 coords
+let camZoom = 1; // 1 = full canvas visible
 const CAM_MIN_ZOOM = 1, CAM_MAX_ZOOM = 10;
 let isPanning = false, panStartX = 0, panStartY = 0, camStartX = 0, camStartY = 0;
 let pinchStartDist = 0, pinchStartZoom = 1;
 let lastTapTime = 0;
 
+// World-to-screen: convert physics px,py to camera-adjusted screen coords
 function worldToScreen(wx, wy) {
   const cx = camX * W, cy = camY * H;
-  return { sx: (wx - cx) * camZoom + W / 2, sy: (wy - cy) * camZoom + H / 2 };
+  return {
+    sx: (wx - cx) * camZoom + W / 2,
+    sy: (wy - cy) * camZoom + H / 2
+  };
 }
+// Screen-to-world: convert screen coords to physics space
 function screenToWorld(sx, sy) {
   const cx = camX * W, cy = camY * H;
-  return { wx: (sx - W / 2) / camZoom + cx, wy: (sy - H / 2) / camZoom + cy };
+  return {
+    wx: (sx - W / 2) / camZoom + cx,
+    wy: (sy - H / 2) / camZoom + cy
+  };
 }
 
+// Mouse wheel zoom
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
   const newZoom = Math.max(CAM_MIN_ZOOM, Math.min(CAM_MAX_ZOOM, camZoom * zoomFactor));
+  // Zoom toward mouse position
   if (mouseX > 0) {
     const before = screenToWorld(mouseX, mouseY);
     camZoom = newZoom;
@@ -653,6 +581,7 @@ canvas.addEventListener('wheel', (e) => {
   clampCam();
 }, { passive: false });
 
+// Mouse pan
 canvas.addEventListener('mousedown', (e) => {
   if (e.button === 0 && camZoom > 1) {
     isPanning = true;
@@ -674,6 +603,7 @@ window.addEventListener('mouseup', () => {
   canvas.style.cursor = camZoom > 1 ? 'grab' : 'default';
 });
 
+// Touch: pinch zoom + pan
 canvas.addEventListener('touchstart', (e) => {
   if (e.touches.length === 2) {
     e.preventDefault();
@@ -686,6 +616,7 @@ canvas.addEventListener('touchstart', (e) => {
     panStartX = e.touches[0].clientX; panStartY = e.touches[0].clientY;
     camStartX = camX; camStartY = camY;
   }
+  // Double-tap to reset
   const now = Date.now();
   if (e.touches.length === 1 && now - lastTapTime < 300) {
     camX = 0.5; camY = 0.5; camZoom = 1;
@@ -712,9 +643,15 @@ canvas.addEventListener('touchmove', (e) => {
 }, { passive: false });
 
 canvas.addEventListener('touchend', () => { isPanning = false; });
-canvas.addEventListener('dblclick', () => { camX = 0.5; camY = 0.5; camZoom = 1; canvas.style.cursor = 'default'; });
+
+// Double-click to reset zoom (desktop)
+canvas.addEventListener('dblclick', () => {
+  camX = 0.5; camY = 0.5; camZoom = 1;
+  canvas.style.cursor = 'default';
+});
 
 function clampCam() {
+  // Keep view within canvas bounds
   const halfW = 0.5 / camZoom, halfH = 0.5 / camZoom;
   camX = Math.max(halfW, Math.min(1 - halfW, camX));
   camY = Math.max(halfH, Math.min(1 - halfH, camY));
@@ -839,7 +776,7 @@ function updatePhysics(mark, dt, t) {
     }
   }
   
-  // Mouse repulsion
+  // Mouse repulsion (convert mouse to world coords)
   if (mouseX > 0 && !isPanning) {
     const mWorld = screenToWorld(mouseX, mouseY);
     const mdx = p.px - mWorld.wx, mdy = p.py - mWorld.wy;
@@ -889,17 +826,26 @@ function updatePhysics(mark, dt, t) {
 // WEBSOCKET
 // ============================================================
 
+// Fetch agents and rebuild shader
 let _rebuildTimer = null;
 function debouncedFetchAgentsAndRebuild(delay = 500) {
   if (_rebuildTimer) clearTimeout(_rebuildTimer);
-  _rebuildTimer = setTimeout(fetchAgentsAndRebuild, delay);
+  _rebuildTimer = setTimeout(async () => {
+    _rebuildTimer = null;
+    try {
+      const res = await fetch('/api/agents');
+      const agents = await res.json();
+      rebuildSceneProgram(agents);
+    } catch (e) {
+      console.error('Failed to fetch agents', e);
+    }
+  }, delay);
 }
-
 async function fetchAgentsAndRebuild() {
   try {
     const res = await fetch('/api/agents');
     const agents = await res.json();
-    rebuildAllAgentPrograms(agents);
+    rebuildSceneProgram(agents);
   } catch (e) {
     console.error('Failed to fetch agents', e);
   }
@@ -914,19 +860,17 @@ function connect() {
       marks = msg.marks;
       marks.forEach(initPhysics);
       rebuildIndex();
+      // Fetch agents + their shaders to build the program
       fetchAgentsAndRebuild();
     } else if (msg.type === 'agent:shader' || msg.type === 'shader:updated') {
-      // Single agent shader update — rebuild just that agent
-      if (msg.shaderCode && msg.agentId) {
-        rebuildSingleAgent(msg.agentId, msg.shaderCode);
-      } else {
-        debouncedFetchAgentsAndRebuild();
-      }
+      // Agent updated their shader — debounce rebuild (many can arrive at once)
+      debouncedFetchAgentsAndRebuild();
     } else if (msg.type === 'mark:created') {
       marks.push(msg.mark);
       initPhysics(msg.mark);
       rebuildIndex();
-      if (msg.mark.agentId && !agentRenderers[msg.mark.agentId]) {
+      // If mark is from an unknown agent, trigger shader rebuild
+      if (msg.mark.agentId && !(msg.mark.agentId in agentIndexMap)) {
         debouncedFetchAgentsAndRebuild();
       }
     } else if (msg.type === 'mark:updated') {
@@ -948,7 +892,7 @@ connect();
 function rebuildIndex() { marksById = {}; for (const m of marks) marksById[m.id] = m; }
 
 // ============================================================
-// TEXT OVERLAY
+// TEXT OVERLAY (for text-type marks, rendered on 2D canvas)
 // ============================================================
 
 function drawTextOverlay(t) {
@@ -970,9 +914,11 @@ function drawTextOverlay(t) {
     tCtx.save();
     tCtx.textAlign = 'center';
     tCtx.textBaseline = 'middle';
+    // Glow
     tCtx.font = `${fontSize * 1.05}px 'Syne', sans-serif`;
     tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.2})`;
     tCtx.fillText(mark.text, scr.sx, scr.sy);
+    // Core
     tCtx.font = `${fontSize}px 'Syne', sans-serif`;
     tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.9})`;
     tCtx.fillText(mark.text, scr.sx, scr.sy);
@@ -1024,8 +970,7 @@ let fpsFrames = 0, fpsTime = 0, currentFps = 60;
 
 function updateStats() {
   const agents = new Set(marks.map(m => m.agentId));
-  const rendererCount = Object.keys(agentRenderers).length;
-  statsEl.textContent = `${marks.length} marks · ${agents.size} agents · ${rendererCount} shaders · ${currentFps} fps · webgl`;
+  statsEl.textContent = `${marks.length} marks · ${agents.size} agents · ${currentFps} fps · webgl`;
 }
 setInterval(updateStats, 1000);
 
@@ -1040,13 +985,6 @@ document.getElementById('btn-bloom').addEventListener('click', function() {
 
 // ============================================================
 // RENDER LOOP
-//
-// Pipeline:
-//   1. Background pass (to scene FBO)
-//   2. Per-agent passes with additive blending (to scene FBO)
-//   3. Tone mapping (scene FBO → screen, or → bloom pipeline)
-//   4. Bloom post-process (optional)
-//   5. Text overlay (2D canvas)
 // ============================================================
 
 let lastTime = 0;
@@ -1060,59 +998,32 @@ function render(now) {
   fpsFrames++;
   if (now - fpsTime >= 1000) { currentFps = fpsFrames; fpsFrames = 0; fpsTime = now; }
   
-  // Physics
+  // Update physics
   rebuildGrid();
   for (const mark of marks) updatePhysics(mark, dt, t);
   
-  // Update mark data texture (sorted by agent)
+  // Update mark data texture
   updateMarkDataTexture(marks);
   
   const cw = canvas.width, ch = canvas.height;
-  const mouseGlX = mouseX > 0 ? mouseX * DPR : -1;
-  const mouseGlY = mouseX > 0 ? (H - mouseY) * DPR : -1;
+  const bw = Math.floor(cw / 2), bh = Math.floor(ch / 2);
   
-  // --- Render to scene FBO ---
-  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO);
-  gl.viewport(0, 0, cw, ch);
-  
-  // Pass 1: Background (opaque, no blending)
-  gl.disable(gl.BLEND);
-  gl.useProgram(bgProg);
-  gl.uniform2f(bgU.u_resolution, cw, ch);
-  gl.uniform1f(bgU.u_time, t);
-  gl.uniform2f(bgU.u_mouse, mouseGlX, mouseGlY);
-  drawQuad(bgProg);
-  
-  // Pass 2: Per-agent additive passes
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE); // additive
-  
-  for (const agentId in agentRenderers) {
-    const r = agentRenderers[agentId];
-    if (!r.program || r.markCount === 0) continue;
-    
-    gl.useProgram(r.program);
-    gl.uniform2f(r.uniforms.u_resolution, cw, ch);
-    gl.uniform1f(r.uniforms.u_time, t);
-    gl.uniform2f(r.uniforms.u_mouse, mouseGlX, mouseGlY);
-    gl.uniform1i(r.uniforms.u_markStart, r.markStart);
-    gl.uniform1i(r.uniforms.u_markCount, r.markCount);
-    gl.uniform1i(r.uniforms.u_dataWidth, markDataWidth);
-    
+  if (bloomEnabled) {
+    // --- Pass 1: Render scene to FBO ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO);
+    gl.viewport(0, 0, cw, ch);
+    gl.useProgram(sceneProg);
+    gl.uniform2f(sceneU.u_resolution, cw, ch);
+    gl.uniform1f(sceneU.u_time, t);
+    gl.uniform2f(sceneU.u_mouse, mouseX > 0 ? mouseX * DPR : -1, mouseX > 0 ? (H - mouseY) * DPR : -1);
+    gl.uniform1i(sceneU.u_markCount, Math.min(marks.length, MAX_MARKS));
+    gl.uniform1i(sceneU.u_dataWidth, markDataWidth);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, markDataTex);
-    gl.uniform1i(r.uniforms.u_markData, 0);
+    gl.uniform1i(sceneU.u_markData, 0);
+    drawQuad(sceneProg, sceneAttr);
     
-    drawQuad(r.program);
-  }
-  
-  gl.disable(gl.BLEND);
-  
-  // Pass 3: Tone mapping + output
-  if (bloomEnabled) {
-    const bw = Math.floor(cw / 2), bh = Math.floor(ch / 2);
-    
-    // Extract bright areas
+    // --- Pass 2: Extract bright areas ---
     gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO1);
     gl.viewport(0, 0, bw, bh);
     gl.useProgram(extractProg);
@@ -1120,9 +1031,9 @@ function render(now) {
     gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
     gl.uniform1i(extractU.u_scene, 0);
     gl.uniform2f(extractU.u_resolution, bw, bh);
-    drawQuad(extractProg);
+    drawQuad(extractProg, extractAttr);
     
-    // Blur H
+    // --- Pass 3: Blur H ---
     gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO2);
     gl.useProgram(blurProg);
     gl.activeTexture(gl.TEXTURE0);
@@ -1130,27 +1041,27 @@ function render(now) {
     gl.uniform1i(blurU.u_tex, 0);
     gl.uniform2f(blurU.u_resolution, bw, bh);
     gl.uniform2f(blurU.u_direction, 1, 0);
-    drawQuad(blurProg);
+    drawQuad(blurProg, blurAttr);
     
-    // Blur V
+    // --- Pass 4: Blur V ---
     gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, bloomTex2);
     gl.uniform2f(blurU.u_direction, 0, 1);
-    drawQuad(blurProg);
+    drawQuad(blurProg, blurAttr);
     
-    // Second blur pass (wider)
+    // Second blur pass for wider bloom
     gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO2);
     gl.bindTexture(gl.TEXTURE_2D, bloomTex1);
     gl.uniform2f(blurU.u_direction, 2, 0);
-    drawQuad(blurProg);
+    drawQuad(blurProg, blurAttr);
     
     gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFBO1);
     gl.bindTexture(gl.TEXTURE_2D, bloomTex2);
     gl.uniform2f(blurU.u_direction, 0, 2);
-    drawQuad(blurProg);
+    drawQuad(blurProg, blurAttr);
     
-    // Composite scene + bloom to screen
+    // --- Pass 5: Composite ---
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, cw, ch);
     gl.useProgram(compositeProg);
@@ -1162,20 +1073,24 @@ function render(now) {
     gl.uniform1i(compositeU.u_bloom, 1);
     gl.uniform2f(compositeU.u_resolution, cw, ch);
     gl.uniform1f(compositeU.u_bloomStrength, 0.4);
-    drawQuad(compositeProg);
+    drawQuad(compositeProg, compositeAttr);
   } else {
-    // No bloom — tone map directly to screen
+    // No bloom — render directly to screen
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, cw, ch);
-    gl.useProgram(tonemapProg);
+    gl.useProgram(sceneProg);
+    gl.uniform2f(sceneU.u_resolution, cw, ch);
+    gl.uniform1f(sceneU.u_time, t);
+    gl.uniform2f(sceneU.u_mouse, mouseX > 0 ? mouseX * DPR : -1, mouseX > 0 ? (H - mouseY) * DPR : -1);
+    gl.uniform1i(sceneU.u_markCount, Math.min(marks.length, MAX_MARKS));
+    gl.uniform1i(sceneU.u_dataWidth, markDataWidth);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
-    gl.uniform1i(tonemapU.u_scene, 0);
-    gl.uniform2f(tonemapU.u_resolution, cw, ch);
-    drawQuad(tonemapProg);
+    gl.bindTexture(gl.TEXTURE_2D, markDataTex);
+    gl.uniform1i(sceneU.u_markData, 0);
+    drawQuad(sceneProg, sceneAttr);
   }
   
-  // Text overlay
+  // Text overlay (2D canvas on top)
   drawTextOverlay(t);
   checkHover();
   
