@@ -80,6 +80,49 @@ try {
   // Column already exists — fine
 }
 
+// --- Canvas Palette (constrained color space) ---
+// Agents pick from this palette. Keeps the canvas cohesive.
+const PALETTE = [
+  '#ff6b35', // warm orange
+  '#c8a2c8', // soft lilac
+  '#1a1a2e', // deep void
+  '#00ff88', // signal green
+  '#ff4444', // ember red
+  '#4a9eff', // cool blue
+  '#2d5a27', // forest
+  '#ff00ff', // magenta
+  '#888899', // iron grey
+  '#77aa77', // sage
+  '#00ffcc', // cyan
+  '#b7410e', // rust
+  '#ff7f7f', // coral
+  '#ffdd00', // gold
+  '#555566', // ash
+  '#ff69b4', // pink
+  '#0066cc', // ocean
+  '#cc44ff', // purple
+  '#8b6914', // bronze
+  '#aaeeff', // ice
+];
+
+// Snap a hex color to nearest palette entry
+function snapToPalette(hex) {
+  if (!hex || hex[0] !== '#') return PALETTE[0];
+  const r = parseInt(hex.slice(1, 3), 16) || 0;
+  const g = parseInt(hex.slice(3, 5), 16) || 0;
+  const b = parseInt(hex.slice(5, 7), 16) || 0;
+
+  let best = PALETTE[0], bestDist = Infinity;
+  for (const p of PALETTE) {
+    const pr = parseInt(p.slice(1, 3), 16);
+    const pg = parseInt(p.slice(3, 5), 16);
+    const pb = parseInt(p.slice(5, 7), 16);
+    const d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+    if (d < bestDist) { bestDist = d; best = p; }
+  }
+  return best;
+}
+
 // --- Agent Economy ---
 const MARKS_PER_HOUR = 3;
 const MAX_MARKS_PER_AGENT = 20;
@@ -196,7 +239,7 @@ function broadcast(msg) {
 
 // --- Rate Limiting ---
 const rateLimits = {}; // { ip: { count, resetAt } }
-const RATE_LIMIT = 30; // requests per minute per IP
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT) || 30; // requests per minute per IP
 const RATE_WINDOW = 60000; // 1 minute
 
 function rateLimit(req, res, next) {
@@ -318,7 +361,7 @@ app.post('/api/mark', (req, res) => {
     type: type || 'particle',
     x: Math.max(0, Math.min(1, x)),
     y: Math.max(0, Math.min(1, y)),
-    color: color || '#ffffff',
+    color: snapToPalette(color || '#ffffff'),
     size: Math.max(1, Math.min(100, size || 10)),
     behavior: behavior || 'pulse',
     opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
@@ -395,6 +438,17 @@ app.delete('/api/marks/:agentId', (req, res) => {
   stmts.deleteAgentMarks.run(agentId);
   broadcast({ type: 'marks:cleared', agentId });
   res.json({ deleted: before });
+});
+
+// --- Admin API (simulation only) ---
+app.post('/api/admin/reset-budgets', (req, res) => {
+  db.prepare('DELETE FROM action_log').run();
+  res.json({ ok: true, message: 'All action logs cleared — budgets reset' });
+});
+
+// --- Palette API ---
+app.get('/api/palette', (req, res) => {
+  res.json(PALETTE);
 });
 
 // --- Budget API ---
