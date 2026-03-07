@@ -512,10 +512,11 @@ function updateMarkDataTexture(marksList) {
     const base1 = (markDataWidth + i) * 4; // row 1
     const base2 = (markDataWidth * 2 + i) * 4; // row 2
     
-    // Row 0: px, py, size, type
-    markDataArray[base0]     = p.px * DPR;
-    markDataArray[base0 + 1] = (H - p.py) * DPR; // flip Y for GL
-    markDataArray[base0 + 2] = m.size * DPR * p.scale;
+    // Row 0: px, py, size, type (camera-transformed)
+    const scr = worldToScreen(p.px, p.py);
+    markDataArray[base0]     = scr.sx * DPR;
+    markDataArray[base0 + 1] = (H - scr.sy) * DPR; // flip Y for GL
+    markDataArray[base0 + 2] = m.size * DPR * p.scale * camZoom;
     markDataArray[base0 + 3] = typeToFloat(m.type);
     
     // Row 1: r, g, b, opacity
@@ -558,6 +559,125 @@ let marks = [];
 let physicsState = {};
 let marksById = {};
 let mouseX = -1, mouseY = -1;
+
+// --- Camera (zoom & pan) ---
+let camX = 0.5, camY = 0.5; // center of view in normalized 0-1 coords
+let camZoom = 1; // 1 = full canvas visible
+const CAM_MIN_ZOOM = 1, CAM_MAX_ZOOM = 10;
+let isPanning = false, panStartX = 0, panStartY = 0, camStartX = 0, camStartY = 0;
+let pinchStartDist = 0, pinchStartZoom = 1;
+let lastTapTime = 0;
+
+// World-to-screen: convert physics px,py to camera-adjusted screen coords
+function worldToScreen(wx, wy) {
+  const cx = camX * W, cy = camY * H;
+  return {
+    sx: (wx - cx) * camZoom + W / 2,
+    sy: (wy - cy) * camZoom + H / 2
+  };
+}
+// Screen-to-world: convert screen coords to physics space
+function screenToWorld(sx, sy) {
+  const cx = camX * W, cy = camY * H;
+  return {
+    wx: (sx - W / 2) / camZoom + cx,
+    wy: (sy - H / 2) / camZoom + cy
+  };
+}
+
+// Mouse wheel zoom
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  const newZoom = Math.max(CAM_MIN_ZOOM, Math.min(CAM_MAX_ZOOM, camZoom * zoomFactor));
+  // Zoom toward mouse position
+  if (mouseX > 0) {
+    const before = screenToWorld(mouseX, mouseY);
+    camZoom = newZoom;
+    const after = screenToWorld(mouseX, mouseY);
+    camX += (before.wx - after.wx) / W;
+    camY += (before.wy - after.wy) / H;
+  } else {
+    camZoom = newZoom;
+  }
+  clampCam();
+}, { passive: false });
+
+// Mouse pan
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0 && camZoom > 1) {
+    isPanning = true;
+    panStartX = e.clientX; panStartY = e.clientY;
+    camStartX = camX; camStartY = camY;
+    canvas.style.cursor = 'grabbing';
+  }
+});
+window.addEventListener('mousemove', (e) => {
+  if (!isPanning) return;
+  const dx = (e.clientX - panStartX) / camZoom;
+  const dy = (e.clientY - panStartY) / camZoom;
+  camX = camStartX - dx / W;
+  camY = camStartY - dy / H;
+  clampCam();
+});
+window.addEventListener('mouseup', () => {
+  isPanning = false;
+  canvas.style.cursor = camZoom > 1 ? 'grab' : 'default';
+});
+
+// Touch: pinch zoom + pan
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+    pinchStartZoom = camZoom;
+  } else if (e.touches.length === 1 && camZoom > 1) {
+    isPanning = true;
+    panStartX = e.touches[0].clientX; panStartY = e.touches[0].clientY;
+    camStartX = camX; camStartY = camY;
+  }
+  // Double-tap to reset
+  const now = Date.now();
+  if (e.touches.length === 1 && now - lastTapTime < 300) {
+    camX = 0.5; camY = 0.5; camZoom = 1;
+    canvas.style.cursor = 'default';
+  }
+  lastTapTime = now;
+}, { passive: false });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (e.touches.length === 2) {
+    e.preventDefault();
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    camZoom = Math.max(CAM_MIN_ZOOM, Math.min(CAM_MAX_ZOOM, pinchStartZoom * (dist / pinchStartDist)));
+    clampCam();
+  } else if (e.touches.length === 1 && isPanning) {
+    const dx = (e.touches[0].clientX - panStartX) / camZoom;
+    const dy = (e.touches[0].clientY - panStartY) / camZoom;
+    camX = camStartX - dx / W;
+    camY = camStartY - dy / H;
+    clampCam();
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => { isPanning = false; });
+
+// Double-click to reset zoom (desktop)
+canvas.addEventListener('dblclick', () => {
+  camX = 0.5; camY = 0.5; camZoom = 1;
+  canvas.style.cursor = 'default';
+});
+
+function clampCam() {
+  // Keep view within canvas bounds
+  const halfW = 0.5 / camZoom, halfH = 0.5 / camZoom;
+  camX = Math.max(halfW, Math.min(1 - halfW, camX));
+  camY = Math.max(halfH, Math.min(1 - halfH, camY));
+}
 
 function hexToRgb(hex) {
   if (!hex || hex[0] !== '#') return [255,255,255];
@@ -678,9 +798,10 @@ function updatePhysics(mark, dt, t) {
     }
   }
   
-  // Mouse repulsion
-  if (mouseX > 0) {
-    const mdx = p.px - mouseX, mdy = p.py - mouseY;
+  // Mouse repulsion (convert mouse to world coords)
+  if (mouseX > 0 && !isPanning) {
+    const mWorld = screenToWorld(mouseX, mouseY);
+    const mdx = p.px - mWorld.wx, mdy = p.py - mWorld.wy;
     const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
     if (mDist < 120 && mDist > 0) {
       const repel = (1 - mDist / 120) * 0.5;
@@ -804,8 +925,9 @@ function drawTextOverlay(t) {
     if (!p || p.scale < 0.01) continue;
     
     const [r, g, b] = hexToRgb(mark.color);
-    const sz = mark.size * p.scale;
+    const sz = mark.size * p.scale * camZoom;
     const fontSize = sz * (mark.text.length > 10 ? 0.8 : 1);
+    const scr = worldToScreen(p.px, p.py);
     let alphaM = 1;
     if (mark.behavior === 'pulse') alphaM = 0.75 + 0.25 * Math.sin(t * 2.5 + p.phase);
     if (mark.behavior === 'shimmer') alphaM = 0.3 + 0.7 * Math.abs(Math.sin(t * 5 + p.phase));
@@ -817,11 +939,11 @@ function drawTextOverlay(t) {
     // Glow
     tCtx.font = `${fontSize * 1.05}px 'Syne', sans-serif`;
     tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.2})`;
-    tCtx.fillText(mark.text, p.px, p.py);
+    tCtx.fillText(mark.text, scr.sx, scr.sy);
     // Core
     tCtx.font = `${fontSize}px 'Syne', sans-serif`;
     tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.9})`;
-    tCtx.fillText(mark.text, p.px, p.py);
+    tCtx.fillText(mark.text, scr.sx, scr.sy);
     tCtx.restore();
   }
 }
@@ -838,14 +960,15 @@ canvas.addEventListener('mousemove', (e) => { mouseX = e.clientX - canvasOffsetX
 canvas.addEventListener('mouseleave', () => { mouseX = mouseY = -1; });
 
 function checkHover() {
-  if (mouseX < 0) { tooltip.classList.remove('show'); return; }
+  if (mouseX < 0 || isPanning) { tooltip.classList.remove('show'); return; }
   let closest = null, closestDist = Infinity;
   for (const mark of marks) {
     const p = physicsState[mark.id];
     if (!p) continue;
-    const dx = mouseX - p.px, dy = mouseY - p.py;
+    const scr = worldToScreen(p.px, p.py);
+    const dx = mouseX - scr.sx, dy = mouseY - scr.sy;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const r = mark.size * 2.5;
+    const r = mark.size * 2.5 * camZoom;
     if (dist < r + 15 && dist < closestDist) { closest = { mark, dist }; closestDist = dist; }
   }
   if (closest) {
