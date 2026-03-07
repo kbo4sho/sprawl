@@ -63,7 +63,7 @@ let canvasOffsetX = 0, canvasOffsetY = 0;
 
 // --- Resize ---
 function resize() {
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  DPR = Math.min(window.devicePixelRatio || 1, 1.5); // capped for perf with multi-pass
   W = window.innerWidth;
   H = window.innerHeight;
   canvasOffsetX = 0;
@@ -581,7 +581,7 @@ function updateMarkDataTexture(marksList) {
     idx++;
   }
   
-  // Update renderer mark ranges
+  // Update renderer mark ranges + compute scissor rects
   for (const agentId in agentRenderers) {
     const range = agentMarkRanges[agentId];
     if (range) {
@@ -590,7 +590,33 @@ function updateMarkDataTexture(marksList) {
     } else {
       agentRenderers[agentId].markStart = 0;
       agentRenderers[agentId].markCount = 0;
+      agentRenderers[agentId].scissor = null;
+      continue;
     }
+    
+    // Compute bounding box of this agent's marks (in GL pixel coords)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let i = range.start; i < range.start + range.count; i++) {
+      const base = i * 4;
+      const px = markDataArray[base];     // screen X * DPR
+      const py = markDataArray[base + 1]; // screen Y * DPR (GL flipped)
+      const sz = markDataArray[base + 2]; // size * DPR
+      const pad = sz * 3.0; // generous padding for glow/connections
+      minX = Math.min(minX, px - pad);
+      minY = Math.min(minY, py - pad);
+      maxX = Math.max(maxX, px + pad);
+      maxY = Math.max(maxY, py + pad);
+    }
+    // Expand for inter-mark connections (veins can stretch between marks)
+    const expand = 50 * DPR;
+    minX -= expand; minY -= expand; maxX += expand; maxY += expand;
+    // Clamp to canvas
+    const cw = canvas.width, ch = canvas.height;
+    minX = Math.max(0, Math.floor(minX));
+    minY = Math.max(0, Math.floor(minY));
+    maxX = Math.min(cw, Math.ceil(maxX));
+    maxY = Math.min(ch, Math.ceil(maxY));
+    agentRenderers[agentId].scissor = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
   
   gl.bindTexture(gl.TEXTURE_2D, markDataTex);
@@ -1083,13 +1109,21 @@ function render(now) {
   gl.uniform2f(bgU.u_mouse, mouseGlX, mouseGlY);
   drawQuad(bgProg);
   
-  // Pass 2: Per-agent additive passes
+  // Pass 2: Per-agent additive passes (scissored to bounding box)
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.ONE, gl.ONE); // additive
+  gl.enable(gl.SCISSOR_TEST);
   
   for (const agentId in agentRenderers) {
     const r = agentRenderers[agentId];
     if (!r.program || r.markCount === 0) continue;
+    
+    // Scissor to agent's bounding box — skip pixels far from marks
+    if (r.scissor && r.scissor.w > 0 && r.scissor.h > 0) {
+      gl.scissor(r.scissor.x, r.scissor.y, r.scissor.w, r.scissor.h);
+    } else {
+      gl.scissor(0, 0, cw, ch);
+    }
     
     gl.useProgram(r.program);
     gl.uniform2f(r.uniforms.u_resolution, cw, ch);
@@ -1106,6 +1140,7 @@ function render(now) {
     drawQuad(r.program);
   }
   
+  gl.disable(gl.SCISSOR_TEST);
   gl.disable(gl.BLEND);
   
   // Pass 3: Tone mapping + output
