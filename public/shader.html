@@ -58,43 +58,32 @@ let bloomEnabled = false;
 
 // --- Locked 16:9 aspect ratio ---
 const ASPECT = 16 / 9;
-let canvasOffsetX = 0, canvasOffsetY = 0; // CSS offset for letterboxing
+let canvasOffsetX = 0, canvasOffsetY = 0;
 
 // --- Resize ---
 function resize() {
   DPR = Math.min(window.devicePixelRatio || 1, 2); // cap at 2x for perf
-  const winW = window.innerWidth;
-  const winH = window.innerHeight;
-  const winAspect = winW / winH;
   
-  // Fit 16:9 inside window with letterboxing
-  if (winAspect > ASPECT) {
-    // Window is wider than 16:9 — pillarbox (bars on sides)
-    H = winH;
-    W = Math.floor(H * ASPECT);
-  } else {
-    // Window is taller than 16:9 — letterbox (bars top/bottom)
-    W = winW;
-    H = Math.floor(W / ASPECT);
-  }
-  
-  canvasOffsetX = Math.floor((winW - W) / 2);
-  canvasOffsetY = Math.floor((winH - H) / 2);
+  // Cover the full window — no letterboxing
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvasOffsetX = 0;
+  canvasOffsetY = 0;
   
   canvas.width = W * DPR;
   canvas.height = H * DPR;
   canvas.style.width = W + 'px';
   canvas.style.height = H + 'px';
   canvas.style.position = 'absolute';
-  canvas.style.left = canvasOffsetX + 'px';
-  canvas.style.top = canvasOffsetY + 'px';
+  canvas.style.left = '0px';
+  canvas.style.top = '0px';
   
   textCanvas.width = W * DPR;
   textCanvas.height = H * DPR;
   textCanvas.style.width = W + 'px';
   textCanvas.style.height = H + 'px';
-  textCanvas.style.left = canvasOffsetX + 'px';
-  textCanvas.style.top = canvasOffsetY + 'px';
+  textCanvas.style.left = '0px';
+  textCanvas.style.top = '0px';
   textCanvas.style.position = 'absolute';
   
   tCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
