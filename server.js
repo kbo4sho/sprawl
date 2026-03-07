@@ -10,7 +10,11 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3500;
-const DB_PATH = path.join(__dirname, 'data', 'sprawl.db');
+// Railway persistent volume mounts at /data; fallback to local ./data for dev
+const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
+const fs = require('fs');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, 'sprawl.db');
 
 // --- Database ---
 const db = new Database(DB_PATH);
