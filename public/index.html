@@ -133,6 +133,39 @@
   }
   #tooltip .mark-info { color: #ffffff30; font-size: 8px; text-transform: uppercase; letter-spacing: 2px; }
   
+  /* Timelapse player */
+  #timelapse-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(3,3,6,0.92); z-index: 200;
+    flex-direction: column; align-items: center; justify-content: center;
+  }
+  #timelapse-overlay.show { display: flex; }
+  #timelapse-canvas { 
+    border: 1px solid rgba(200,200,208,0.15); border-radius: 4px;
+    max-width: 90vw; max-height: 70vh;
+  }
+  #timelapse-controls {
+    margin-top: 16px; display: flex; align-items: center; gap: 12px;
+    font-family: 'Space Mono', monospace; font-size: 11px; color: #c8c8d0;
+  }
+  #timelapse-controls button {
+    background: rgba(200,200,208,0.08); border: 1px solid rgba(200,200,208,0.2);
+    color: #c8c8d0; padding: 6px 14px; cursor: pointer; font-family: inherit;
+    font-size: 11px; border-radius: 3px;
+  }
+  #timelapse-controls button:hover { background: rgba(200,200,208,0.15); }
+  #timelapse-slider { width: 300px; accent-color: #c8c8d0; }
+  #timelapse-header {
+    font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700;
+    margin-bottom: 12px; letter-spacing: 0.5px;
+  }
+  #timelapse-close {
+    position: absolute; top: 20px; right: 24px;
+    background: none; border: none; color: #c8c8d0; font-size: 20px;
+    cursor: pointer; opacity: 0.6;
+  }
+  #timelapse-close:hover { opacity: 1; }
+
   #agent-label {
     position: fixed; z-index: 15; pointer-events: none;
     font-family: 'Space Mono', monospace;
@@ -173,6 +206,17 @@
   <div class="mark-info" id="tt-info"></div>
 </div>
 <div id="agent-label"></div>
+<div id="timelapse-overlay">
+  <button id="timelapse-close">✕</button>
+  <div id="timelapse-header"></div>
+  <canvas id="timelapse-canvas" width="800" height="600"></canvas>
+  <div id="timelapse-controls">
+    <button id="tl-play">▶ Play</button>
+    <input type="range" id="timelapse-slider" min="0" max="1" value="0" step="1">
+    <span id="tl-frame">0 / 0</span>
+    <button id="tl-speed">1×</button>
+  </div>
+</div>
 <canvas id="c"></canvas>
 
 <script>
@@ -527,7 +571,7 @@ function renderMark(mark, t) {
   if (mark.type === 'text' && camera.zoom < 0.3) return null;
   
   const charge = p.charge || 0;
-  const s = mark.size * p.scale * camera.zoom * (1 + charge * 0.3);
+  const s = mark.size * 0.6 * p.scale * camera.zoom * (1 + charge * 0.3);
   let [r, g, b] = hexToRgb(mark.color);
   if (glitchColor) { const tmp = r; r = b; b = g; g = tmp; } // channel swap
   const baseA = Math.min(1, (mark.opacity + 0.3)) * p.scale * (p.breath || 1);
@@ -1146,6 +1190,211 @@ document.getElementById('btn-share').addEventListener('click', async () => {
     // User cancelled share dialog
   }
 });
+
+// --- Timelapse Player ---
+const tlOverlay = document.getElementById('timelapse-overlay');
+const tlCanvas = document.getElementById('timelapse-canvas');
+const tlCtx = tlCanvas.getContext('2d');
+const tlSlider = document.getElementById('timelapse-slider');
+const tlFrameLabel = document.getElementById('tl-frame');
+const tlHeader = document.getElementById('timelapse-header');
+const tlPlayBtn = document.getElementById('tl-play');
+const tlSpeedBtn = document.getElementById('tl-speed');
+
+let tlFrames = [];
+let tlCurrentFrame = 0;
+let tlPlaying = false;
+let tlInterval = null;
+let tlAgentColor = '#ffffff';
+let tlSpeeds = [1, 2, 4, 8];
+let tlSpeedIdx = 0;
+
+async function openTimelapse(agentId) {
+  try {
+    const res = await fetch(`/api/evolution/${agentId}/timelapse`);
+    const data = await res.json();
+    
+    if (data.frames.length <= 1) {
+      // No evolution history yet — just current state
+      return;
+    }
+    
+    tlFrames = data.frames;
+    tlAgentColor = data.color;
+    tlCurrentFrame = 0;
+    tlSlider.max = tlFrames.length - 1;
+    tlSlider.value = 0;
+    tlHeader.textContent = `${data.name} — evolution`;
+    tlHeader.style.color = data.color;
+    tlOverlay.classList.add('show');
+    
+    renderTimelapseFrame();
+  } catch (e) {
+    console.error('Timelapse fetch error:', e);
+  }
+}
+
+function renderTimelapseFrame() {
+  const frame = tlFrames[tlCurrentFrame];
+  if (!frame) return;
+  
+  const W = tlCanvas.width, H = tlCanvas.height;
+  tlCtx.fillStyle = '#030306';
+  tlCtx.fillRect(0, 0, W, H);
+  
+  const marks = frame.marks;
+  if (marks.length === 0) {
+    tlFrameLabel.textContent = `${tlCurrentFrame} / ${tlFrames.length - 1}`;
+    return;
+  }
+  
+  // Find bounds of marks to center them
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const m of marks) {
+    minX = Math.min(minX, m.x);
+    maxX = Math.max(maxX, m.x);
+    minY = Math.min(minY, m.y);
+    maxY = Math.max(maxY, m.y);
+  }
+  const rangeX = maxX - minX || 200;
+  const rangeY = maxY - minY || 200;
+  const pad = 60;
+  const scale = Math.min((W - pad*2) / rangeX, (H - pad*2) / rangeY);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  
+  function toScreen(wx, wy) {
+    return {
+      x: (wx - cx) * scale + W / 2,
+      y: (wy - cy) * scale + H / 2,
+    };
+  }
+  
+  // Draw marks
+  for (const m of marks) {
+    const p = toScreen(m.x, m.y);
+    const sz = (m.size || 8) * 0.6 * scale * 0.15;
+    const alpha = m.opacity || 0.7;
+    const color = tlAgentColor;
+    
+    if (m.type === 'line') {
+      const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : (m.meta || {});
+      if (meta.x2 != null) {
+        const end = toScreen(meta.x2, meta.y2);
+        tlCtx.strokeStyle = color;
+        tlCtx.globalAlpha = alpha * 0.7;
+        tlCtx.lineWidth = Math.max(1, sz * 0.3);
+        tlCtx.beginPath();
+        tlCtx.moveTo(p.x, p.y);
+        tlCtx.lineTo(end.x, end.y);
+        tlCtx.stroke();
+        tlCtx.globalAlpha = 1;
+      }
+    } else if (m.type === 'text') {
+      const fontSize = Math.max(8, sz * 1.2);
+      tlCtx.font = `${fontSize}px 'Space Mono', monospace`;
+      tlCtx.fillStyle = color;
+      tlCtx.globalAlpha = alpha;
+      tlCtx.fillText(m.text || '', p.x, p.y);
+      tlCtx.globalAlpha = 1;
+    } else {
+      // Dot
+      tlCtx.globalAlpha = alpha * 0.2;
+      tlCtx.fillStyle = color;
+      tlCtx.beginPath();
+      tlCtx.arc(p.x, p.y, sz * 2, 0, Math.PI * 2);
+      tlCtx.fill();
+      
+      tlCtx.globalAlpha = alpha;
+      tlCtx.beginPath();
+      tlCtx.arc(p.x, p.y, sz * 0.5, 0, Math.PI * 2);
+      tlCtx.fill();
+      tlCtx.globalAlpha = 1;
+    }
+  }
+  
+  // Highlight new ops for this frame (marks that were just added)
+  const ops = frame.ops || [];
+  const addOps = ops.filter(o => o.op === 'add');
+  if (addOps.length > 0 && tlPlaying) {
+    for (const op of addOps) {
+      const p = toScreen(op.x, op.y);
+      tlCtx.strokeStyle = '#ffffff';
+      tlCtx.globalAlpha = 0.6;
+      tlCtx.lineWidth = 1;
+      tlCtx.beginPath();
+      tlCtx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+      tlCtx.stroke();
+      tlCtx.globalAlpha = 1;
+    }
+  }
+  
+  // Frame counter + cycle time
+  const timestamp = frame.timestamp ? new Date(frame.timestamp).toLocaleDateString() : '';
+  tlFrameLabel.textContent = `${tlCurrentFrame} / ${tlFrames.length - 1}  ${timestamp}`;
+}
+
+tlSlider.addEventListener('input', () => {
+  tlCurrentFrame = parseInt(tlSlider.value);
+  renderTimelapseFrame();
+});
+
+tlPlayBtn.addEventListener('click', () => {
+  if (tlPlaying) {
+    tlPlaying = false;
+    tlPlayBtn.textContent = '▶ Play';
+    clearInterval(tlInterval);
+  } else {
+    tlPlaying = true;
+    tlPlayBtn.textContent = '⏸ Pause';
+    if (tlCurrentFrame >= tlFrames.length - 1) tlCurrentFrame = 0;
+    tlInterval = setInterval(() => {
+      tlCurrentFrame++;
+      if (tlCurrentFrame >= tlFrames.length) {
+        tlCurrentFrame = tlFrames.length - 1;
+        tlPlaying = false;
+        tlPlayBtn.textContent = '▶ Play';
+        clearInterval(tlInterval);
+      }
+      tlSlider.value = tlCurrentFrame;
+      renderTimelapseFrame();
+    }, 1000 / tlSpeeds[tlSpeedIdx]);
+  }
+});
+
+tlSpeedBtn.addEventListener('click', () => {
+  tlSpeedIdx = (tlSpeedIdx + 1) % tlSpeeds.length;
+  tlSpeedBtn.textContent = `${tlSpeeds[tlSpeedIdx]}×`;
+  if (tlPlaying) {
+    clearInterval(tlInterval);
+    tlInterval = setInterval(() => {
+      tlCurrentFrame++;
+      if (tlCurrentFrame >= tlFrames.length) {
+        tlCurrentFrame = tlFrames.length - 1;
+        tlPlaying = false;
+        tlPlayBtn.textContent = '▶ Play';
+        clearInterval(tlInterval);
+      }
+      tlSlider.value = tlCurrentFrame;
+      renderTimelapseFrame();
+    }, 1000 / tlSpeeds[tlSpeedIdx]);
+  }
+});
+
+document.getElementById('timelapse-close').addEventListener('click', () => {
+  tlOverlay.classList.remove('show');
+  tlPlaying = false;
+  clearInterval(tlInterval);
+  tlPlayBtn.textContent = '▶ Play';
+});
+
+// Double-click on selected agent opens timelapse
+canvas.addEventListener('dblclick', (e) => {
+  if (selectedAgent) {
+    openTimelapse(selectedAgent);
+  }
+});
+
 </script>
 </body>
 </html>

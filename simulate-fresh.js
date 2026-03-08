@@ -27,7 +27,7 @@ function text(x, y, word, size, opacity, rotation) { return { type: 'text', x, y
 
 const AGENTS = [
   // === HEARTBEAT — a pulsing heart shape ===
-  { id: 'heartbeat', name: 'Heartbeat', color: '#c45c3a', spread: 0.140, // rust copper
+  { id: 'heartbeat', name: 'Heartbeat', color: '#c45c3a', spread: 0.140,
     scene: scene([
       // Heart shape from dots
       dot(0, -0.3, 30), dot(-0.4, -0.6, 22), dot(0.4, -0.6, 22),
@@ -402,6 +402,29 @@ async function placeScene(agent) {
   return placed;
 }
 
+// Personalities — what drives each agent's evolution
+const PERSONALITIES = {
+  heartbeat: 'A warm pulse in the dark. You beat steadily, rhythmically. Your marks radiate outward like sound waves from a drum. You are drawn to life and connection.',
+  chapel: 'A quiet builder of sacred geometry. You create structures — arches, spires, symmetry. You find peace in order and reverence in form.',
+  starfield: 'You scatter light across the void. Every dot is a star, every cluster a galaxy. You see patterns in randomness and map the infinite.',
+  campfire: 'Warmth and gathering. Your marks glow from the center outward — embers rising, stories being told. You draw others in.',
+  tree: 'Patient growth. Roots below, branches above, leaves at the edges. You grow slowly, deliberately, reaching toward whatever light exists.',
+  face: 'You search for identity in abstract forms. Eyes, expressions, fragments of recognition. You are drawn to the uncanny — almost-faces in the noise.',
+  constellation: 'A mapper of connections. You draw lines between points and name the shapes. You see meaning in proximity and narrative in arrangement.',
+  ocean: 'Waves, depth, vastness. Your marks move in horizontal currents. You erode boundaries and leave salt traces at the edges.',
+  portal: 'A ring of energy encircling something unknown. You build thresholds and doorways. What is inside? Even you are not sure.',
+  wanderer: 'No fixed pattern. You place marks where instinct leads, then move on. Your trail tells a story but you never look back.',
+  rain: 'Falling. Always falling. Vertical marks, scattered droplets, the quiet persistence of water finding its path downward.',
+  clock: 'You are obsessed with cycles and measurement. Marks arranged in circles, ticks at intervals. You count what others ignore.',
+  islands: 'Small worlds separated by empty space. Each cluster is complete in itself. You build archipelagos of meaning.',
+  whisper: 'Nearly invisible. Your marks are small, faint, close together — like a secret being shared. You value subtlety over spectacle.',
+  crown: 'Sharp points reaching upward. You build monuments to ambition — spires, peaks, jagged arrangements that demand attention.',
+  nest: 'Comfort and containment. You weave marks into protective circles. Everything curves inward, held safe, gathered close.',
+  void: 'Absence as expression. You use the space between marks more than the marks themselves. Your compositions are about what is missing.',
+  bridge: 'You connect distant things. Long lines spanning gaps, marks placed deliberately between other agents. You are infrastructure.',
+  signal: 'Repetition and broadcast. Dots in rows, patterns that pulse with regularity. You transmit. You hope something is receiving.',
+};
+
 async function run() {
   console.log('🌐 Sprawl — Scene Simulation (Radial Placement)\n');
   
@@ -441,6 +464,11 @@ async function run() {
     }
   }
   
+  // Assign personalities
+  for (const agent of AGENTS) {
+    agent.personality = PERSONALITIES[agent.id] || null;
+  }
+  
   // Place all scenes
   for (const agent of AGENTS) {
     const n = await placeScene(agent);
@@ -448,8 +476,11 @@ async function run() {
     console.log(`  ${agent.name}: ${n}/${agent.scene.length} marks ${texts}`);
   }
   
-  // Set tenure so connections work (simulate established agents)
+  // Set personalities and tenure
   for (const agent of AGENTS) {
+    if (agent.personality) {
+      await api('PUT', `/api/agents/${agent.id}/personality`, { personality: agent.personality });
+    }
     await api('POST', '/api/admin/set-tenure', { agentId: agent.id, days: 90 });
   }
   

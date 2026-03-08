@@ -48,6 +48,12 @@ try {
     db.exec('ALTER TABLE agents ADD COLUMN home_y REAL DEFAULT 0');
     console.log('Migration: Added home_y column to agents table');
   }
+  // Add personality column
+  const hasPersonality = columns.some(c => c.name === 'personality');
+  if (!hasPersonality) {
+    db.exec('ALTER TABLE agents ADD COLUMN personality TEXT DEFAULT NULL');
+    console.log('Migration: Added personality column to agents table');
+  }
 } catch (e) {
   console.error('Migration error:', e);
 }
@@ -90,6 +96,18 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_action_log_agent_time ON action_log(agent_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS evolution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id TEXT NOT NULL,
+    cycle INTEGER NOT NULL,
+    snapshot TEXT NOT NULL,
+    ops TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_evolution_agent_cycle ON evolution_log(agent_id, cycle);
 `);
 
 // Migration: Add home_x and home_y columns if they don't exist
@@ -260,10 +278,11 @@ const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
   countAgents: db.prepare('SELECT COUNT(*) as count FROM agents'),
   upsertAgent: db.prepare(`
-    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y)
-    VALUES (@id, @name, @color, @now, @now, @shader_code, 0, @home_x, @home_y)
+    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y, personality)
+    VALUES (@id, @name, @color, @now, @now, @shader_code, 0, @home_x, @home_y, @personality)
     ON CONFLICT(id) DO UPDATE SET name=@name, color=@color, last_seen=@now,
-      shader_code=COALESCE(@shader_code, agents.shader_code)
+      shader_code=COALESCE(@shader_code, agents.shader_code),
+      personality=COALESCE(@personality, agents.personality)
   `),
   getAllMarks: db.prepare('SELECT * FROM marks ORDER BY created_at'),
   getMarksByAgent: db.prepare('SELECT * FROM marks WHERE agent_id = ?'),
@@ -369,7 +388,20 @@ app.get('/api/agents', (req, res) => {
     joinedAt: r.joined_at, hasShader: !!r.shader_code,
     shaderCode: r.shader_code || null,
     homeX: r.home_x, homeY: r.home_y,
+    personality: r.personality || null,
+    frozen: !!r.frozen,
   })));
+});
+
+// --- Personality ---
+app.put('/api/agents/:id/personality', rateLimit, (req, res) => {
+  const { personality } = req.body;
+  if (!personality || typeof personality !== 'string') return res.status(400).json({ error: 'personality required' });
+  if (personality.length > 500) return res.status(400).json({ error: 'personality max 500 chars' });
+  const agent = stmts.getAgent.get(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  db.prepare('UPDATE agents SET personality = ? WHERE id = ?').run(personality, req.params.id);
+  res.json({ ok: true, personality });
 });
 
 // --- Shader ---
@@ -382,6 +414,55 @@ app.put('/api/agents/:id/shader', rateLimit, (req, res) => {
   db.prepare('UPDATE agents SET shader_code = ?, last_seen = ? WHERE id = ?').run(shaderCode, Date.now(), req.params.id);
   broadcast({ type: 'shader:updated', agentId: req.params.id, shaderCode });
   res.json({ ok: true });
+});
+
+// --- Evolution Log ---
+app.post('/api/evolution/log', rateLimit, (req, res) => {
+  const { agentId, cycle, snapshot, ops } = req.body;
+  if (!agentId || cycle == null || !snapshot || !ops) {
+    return res.status(400).json({ error: 'agentId, cycle, snapshot, ops required' });
+  }
+  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(agentId, cycle, JSON.stringify(snapshot), JSON.stringify(ops), Date.now());
+  res.status(201).json({ ok: true });
+});
+
+// Timelapse: returns all evolution snapshots for an agent (ordered by cycle)
+app.get('/api/evolution/:agentId/timelapse', (req, res) => {
+  const agent = stmts.getAgent.get(req.params.agentId);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  
+  const rows = db.prepare(
+    'SELECT cycle, snapshot, ops, created_at FROM evolution_log WHERE agent_id = ? ORDER BY cycle ASC'
+  ).all(req.params.agentId);
+  
+  // Also include the current state as the latest frame
+  const currentMarks = stmts.getMarksByAgent.all(req.params.agentId).map(markToJson);
+  
+  const frames = rows.map(r => ({
+    cycle: r.cycle,
+    marks: JSON.parse(r.snapshot),
+    ops: JSON.parse(r.ops),
+    timestamp: r.created_at,
+  }));
+  
+  // Add current state as final frame
+  frames.push({
+    cycle: (rows.length > 0 ? rows[rows.length - 1].cycle + 1 : 0),
+    marks: currentMarks,
+    ops: [],
+    timestamp: Date.now(),
+    current: true,
+  });
+  
+  res.json({
+    agentId: agent.id,
+    name: agent.name,
+    color: agent.color,
+    personality: agent.personality,
+    totalFrames: frames.length,
+    frames,
+  });
 });
 
 // --- Palette ---
@@ -451,6 +532,7 @@ app.post('/api/mark', (req, res) => {
     color: snapToPalette(color || '#ffffff'),
     now: Date.now(), shader_code: null,
     home_x: homeCoords.home_x, home_y: homeCoords.home_y,
+    personality: req.body.personality || null,
   });
 
   // Budget check
@@ -563,7 +645,7 @@ app.post('/api/connect', (req, res) => {
   if (result.changes === 0) return res.status(409).json({ error: 'Already connected' });
 
   const homeCoords = assignHomeCoordinates(agentId);
-  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), shader_code: null, home_x: homeCoords.home_x, home_y: homeCoords.home_y });
+  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), shader_code: null, home_x: homeCoords.home_x, home_y: homeCoords.home_y, personality: null });
   const connection = connToJson({ id, from_agent: from, to_agent: to, created_at: Date.now() });
   broadcast({ type: 'connection:created', connection });
   res.status(201).json({ ...connection, budget: getBudget(agentId) });
