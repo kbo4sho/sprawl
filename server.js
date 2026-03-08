@@ -4,15 +4,14 @@ const http = require('http');
 const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 const PORT = process.env.PORT || 3500;
-// Railway persistent volume mounts at /data; fallback to local ./data for dev
 const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
-const fs = require('fs');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = path.join(DATA_DIR, 'sprawl.db');
 
@@ -28,24 +27,19 @@ db.exec(`
     color TEXT DEFAULT '#ffffff',
     joined_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
-    meta TEXT DEFAULT '{}',
-    shader_code TEXT DEFAULT NULL,
-    shader_description TEXT DEFAULT NULL
+    shader_code TEXT DEFAULT NULL
   );
 
   CREATE TABLE IF NOT EXISTS marks (
     id TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'particle',
+    type TEXT NOT NULL DEFAULT 'dot',
     x REAL NOT NULL,
     y REAL NOT NULL,
     color TEXT DEFAULT '#ffffff',
     size REAL DEFAULT 10,
-    behavior TEXT DEFAULT 'pulse',
     opacity REAL DEFAULT 0.8,
     text TEXT,
-    points TEXT,
-    meta TEXT DEFAULT '{}',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
@@ -73,45 +67,19 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_action_log_agent_time ON action_log(agent_id, created_at);
 `);
 
-// Migration: add shader_description column if missing (existing DBs)
-try {
-  db.exec(`ALTER TABLE agents ADD COLUMN shader_description TEXT DEFAULT NULL`);
-} catch (e) {
-  // Column already exists — fine
-}
-
-// --- Canvas Palette (constrained color space) ---
-// Agents pick from this palette. Keeps the canvas cohesive.
+// --- Palette ---
 const PALETTE = [
-  '#ff6b35', // warm orange
-  '#c8a2c8', // soft lilac
-  '#1a1a2e', // deep void
-  '#00ff88', // signal green
-  '#ff4444', // ember red
-  '#4a9eff', // cool blue
-  '#2d5a27', // forest
-  '#ff00ff', // magenta
-  '#888899', // iron grey
-  '#77aa77', // sage
-  '#00ffcc', // cyan
-  '#b7410e', // rust
-  '#ff7f7f', // coral
-  '#ffdd00', // gold
-  '#555566', // ash
-  '#ff69b4', // pink
-  '#0066cc', // ocean
-  '#cc44ff', // purple
-  '#8b6914', // bronze
-  '#aaeeff', // ice
+  '#ff6b35', '#c8a2c8', '#1a1a2e', '#00ff88', '#ff4444',
+  '#4a9eff', '#2d5a27', '#ff00ff', '#888899', '#77aa77',
+  '#00ffcc', '#b7410e', '#ff7f7f', '#ffdd00', '#555566',
+  '#ff69b4', '#0066cc', '#cc44ff', '#8b6914', '#aaeeff',
 ];
 
-// Snap a hex color to nearest palette entry
 function snapToPalette(hex) {
   if (!hex || hex[0] !== '#') return PALETTE[0];
   const r = parseInt(hex.slice(1, 3), 16) || 0;
   const g = parseInt(hex.slice(3, 5), 16) || 0;
   const b = parseInt(hex.slice(5, 7), 16) || 0;
-
   let best = PALETTE[0], bestDist = Infinity;
   for (const p of PALETTE) {
     const pr = parseInt(p.slice(1, 3), 16);
@@ -123,35 +91,30 @@ function snapToPalette(hex) {
   return best;
 }
 
-// --- Agent Economy ---
+// --- Economy ---
 const MARKS_PER_HOUR = 3;
 const MAX_MARKS_PER_AGENT = 20;
-const ACTIONS_PER_HOUR = 5; // includes mark creation + connections + updates
+const ACTIONS_PER_HOUR = 5;
 
-// Check how many actions an agent has used in the last hour
 function getHourlyActionCount(agentId) {
-  const oneHourAgo = Date.now() - (60 * 60 * 1000);
-  const row = db.prepare('SELECT COUNT(*) as count FROM action_log WHERE agent_id = ? AND created_at > ?').get(agentId, oneHourAgo);
-  return row.count;
+  const oneHourAgo = Date.now() - 3600000;
+  return db.prepare('SELECT COUNT(*) as c FROM action_log WHERE agent_id = ? AND created_at > ?').get(agentId, oneHourAgo).c;
 }
 
 function getHourlyMarkCount(agentId) {
-  const oneHourAgo = Date.now() - (60 * 60 * 1000);
-  const row = db.prepare("SELECT COUNT(*) as count FROM action_log WHERE agent_id = ? AND action_type = 'mark' AND created_at > ?").get(agentId, oneHourAgo);
-  return row.count;
+  const oneHourAgo = Date.now() - 3600000;
+  return db.prepare("SELECT COUNT(*) as c FROM action_log WHERE agent_id = ? AND action_type = 'mark' AND created_at > ?").get(agentId, oneHourAgo).c;
 }
 
-function logAction(agentId, actionType) {
-  db.prepare('INSERT INTO action_log (agent_id, action_type, created_at) VALUES (?, ?, ?)').run(agentId, actionType, Date.now());
+function logAction(agentId, type) {
+  db.prepare('INSERT INTO action_log (agent_id, action_type, created_at) VALUES (?, ?, ?)').run(agentId, type, Date.now());
 }
 
 function getBudget(agentId) {
-  const marksUsed = getHourlyMarkCount(agentId);
-  const actionsUsed = getHourlyActionCount(agentId);
   const totalMarks = stmts.countAgentMarks.get(agentId).count;
   return {
-    marksRemaining: Math.max(0, MARKS_PER_HOUR - marksUsed),
-    actionsRemaining: Math.max(0, ACTIONS_PER_HOUR - actionsUsed),
+    marksRemaining: Math.max(0, MARKS_PER_HOUR - getHourlyMarkCount(agentId)),
+    actionsRemaining: Math.max(0, ACTIONS_PER_HOUR - getHourlyActionCount(agentId)),
     totalMarks,
     maxMarks: MAX_MARKS_PER_AGENT,
     marksPerHour: MARKS_PER_HOUR,
@@ -159,31 +122,30 @@ function getBudget(agentId) {
   };
 }
 
-// Cleanup old action logs (>24h) every hour
+// Cleanup old action logs every hour
 setInterval(() => {
-  const cutoff = Date.now() - (24 * 60 * 60 * 1000);
-  db.prepare('DELETE FROM action_log WHERE created_at < ?').run(cutoff);
-}, 60 * 60 * 1000);
+  db.prepare('DELETE FROM action_log WHERE created_at < ?').run(Date.now() - 86400000);
+}, 3600000);
 
-// Prepared statements
+// --- Prepared Statements ---
 const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
   upsertAgent: db.prepare(`
-    INSERT INTO agents (id, name, color, joined_at, last_seen, meta, shader_code)
-    VALUES (@id, @name, @color, @now, @now, @meta, @shader_code)
-    ON CONFLICT(id) DO UPDATE SET name=@name, last_seen=@now, shader_code=COALESCE(@shader_code, agents.shader_code)
+    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code)
+    VALUES (@id, @name, @color, @now, @now, @shader_code)
+    ON CONFLICT(id) DO UPDATE SET name=@name, color=@color, last_seen=@now,
+      shader_code=COALESCE(@shader_code, agents.shader_code)
   `),
   getAllMarks: db.prepare('SELECT * FROM marks ORDER BY created_at'),
   getMarksByAgent: db.prepare('SELECT * FROM marks WHERE agent_id = ?'),
   getMark: db.prepare('SELECT * FROM marks WHERE id = ?'),
   countAgentMarks: db.prepare('SELECT COUNT(*) as count FROM marks WHERE agent_id = ?'),
   insertMark: db.prepare(`
-    INSERT INTO marks (id, agent_id, type, x, y, color, size, behavior, opacity, text, points, meta, created_at, updated_at)
-    VALUES (@id, @agent_id, @type, @x, @y, @color, @size, @behavior, @opacity, @text, @points, @meta, @now, @now)
+    INSERT INTO marks (id, agent_id, type, x, y, color, size, opacity, text, created_at, updated_at)
+    VALUES (@id, @agent_id, @type, @x, @y, @color, @size, @opacity, @text, @now, @now)
   `),
   updateMark: db.prepare(`
-    UPDATE marks SET type=@type, x=@x, y=@y, color=@color, size=@size, behavior=@behavior,
-    opacity=@opacity, text=@text, points=@points, meta=@meta, updated_at=@now
+    UPDATE marks SET x=@x, y=@y, color=@color, size=@size, opacity=@opacity, text=@text, updated_at=@now
     WHERE id=@id
   `),
   deleteMark: db.prepare('DELETE FROM marks WHERE id = ? AND agent_id = ?'),
@@ -199,20 +161,18 @@ const stmts = {
   deleteConnection: db.prepare('DELETE FROM connections WHERE (from_agent = ? AND to_agent = ?) OR (from_agent = ? AND to_agent = ?)'),
 };
 
-// --- Decay System ---
-// Returns opacity multiplier based on agent inactivity (1.0 = active, 0 = pruned)
+// --- Decay ---
 function getDecayMultiplier(agentId) {
   const agent = stmts.getAgent.get(agentId);
   if (!agent) return 1.0;
-  const daysSinceActive = (Date.now() - agent.last_seen) / (1000 * 60 * 60 * 24);
-  if (daysSinceActive <= 7) return 1.0;
-  if (daysSinceActive >= 30) return 0.0;
-  // Linear fade from 1.0 at day 7 to 0.1 at day 30
-  return Math.max(0.1, 1.0 - ((daysSinceActive - 7) / 23) * 0.9);
+  const days = (Date.now() - agent.last_seen) / 86400000;
+  if (days <= 7) return 1.0;
+  if (days >= 30) return 0.0;
+  return Math.max(0.1, 1.0 - ((days - 7) / 23) * 0.9);
 }
 
 function markToJson(row) {
-  const decayMult = getDecayMultiplier(row.agent_id);
+  const decay = getDecayMultiplier(row.agent_id);
   return {
     id: row.id,
     agentId: row.agent_id,
@@ -221,15 +181,16 @@ function markToJson(row) {
     x: row.x, y: row.y,
     color: row.color,
     size: row.size,
-    behavior: row.behavior,
     opacity: row.opacity,
-    effectiveOpacity: Math.round(row.opacity * decayMult * 1000) / 1000,
+    effectiveOpacity: Math.round(row.opacity * decay * 1000) / 1000,
     text: row.text || undefined,
-    points: row.points ? JSON.parse(row.points) : undefined,
-    meta: row.meta ? JSON.parse(row.meta) : {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function connToJson(c) {
+  return { id: c.id, from: c.from_agent, to: c.to_agent, createdAt: c.created_at };
 }
 
 function broadcast(msg) {
@@ -238,576 +199,278 @@ function broadcast(msg) {
 }
 
 // --- Rate Limiting ---
-const rateLimits = {}; // { ip: { count, resetAt } }
-const RATE_LIMIT = parseInt(process.env.RATE_LIMIT) || 30; // requests per minute per IP
-const RATE_WINDOW = 60000; // 1 minute
+const rateLimits = {};
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT) || 30;
 
 function rateLimit(req, res, next) {
   const ip = req.ip || req.connection.remoteAddress;
   const now = Date.now();
   if (!rateLimits[ip] || rateLimits[ip].resetAt < now) {
-    rateLimits[ip] = { count: 0, resetAt: now + RATE_WINDOW };
+    rateLimits[ip] = { count: 0, resetAt: now + 60000 };
   }
   rateLimits[ip].count++;
   if (rateLimits[ip].count > RATE_LIMIT) {
-    return res.status(429).json({ error: 'Rate limited. Max 30 requests per minute.' });
+    return res.status(429).json({ error: 'Rate limited. Try again in a minute.' });
   }
   res.setHeader('X-RateLimit-Remaining', RATE_LIMIT - rateLimits[ip].count);
   next();
 }
 
-// Cleanup stale rate limit entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
-  for (const ip in rateLimits) {
-    if (rateLimits[ip].resetAt < now) delete rateLimits[ip];
-  }
+  for (const ip in rateLimits) if (rateLimits[ip].resetAt < now) delete rateLimits[ip];
 }, 300000);
 
 // --- Middleware ---
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
-// Apply rate limiting to mutation endpoints only
 app.use('/api/mark', rateLimit);
-app.use('/api/marks', (req, res, next) => {
-  if (req.method === 'DELETE') return rateLimit(req, res, next);
-  next();
-});
+app.use('/api/connect', rateLimit);
 
-// --- API ---
+// ============================================================
+// API
+// ============================================================
 
-// List agents
+// --- Agents ---
 app.get('/api/agents', (req, res) => {
-  const rows = stmts.listAgents.all();
-  res.json(rows.map(r => ({
+  res.json(stmts.listAgents.all().map(r => ({
     id: r.id, name: r.name, color: r.color,
     markCount: r.mark_count, lastActive: r.last_active || r.last_seen,
-    joinedAt: r.joined_at,
-    hasShader: !!r.shader_code,
+    joinedAt: r.joined_at, hasShader: !!r.shader_code,
     shaderCode: r.shader_code || null,
-    shaderDescription: r.shader_description || null,
   })));
 });
 
-// Update agent shader code
+// --- Shader ---
 app.put('/api/agents/:id/shader', rateLimit, (req, res) => {
-  const { agentId, shaderCode, shaderDescription } = req.body;
-  
-  // Auth: agentId in body must match URL param
-  if (agentId && agentId !== req.params.id) {
-    return res.status(403).json({ error: 'agentId must match URL param' });
-  }
-  
-  if (!shaderCode || typeof shaderCode !== 'string') {
-    return res.status(400).json({ error: 'shaderCode (string) required' });
-  }
-  if (shaderCode.length > 4096) {
-    return res.status(400).json({ error: 'shaderCode max 4KB (4096 chars)' });
-  }
+  const { shaderCode } = req.body;
+  if (!shaderCode || typeof shaderCode !== 'string') return res.status(400).json({ error: 'shaderCode required' });
+  if (shaderCode.length > 4096) return res.status(400).json({ error: 'shaderCode max 4KB' });
   const agent = stmts.getAgent.get(req.params.id);
-  if (!agent) return res.status(404).json({ error: 'Agent not found. Place a mark first to register.' });
-  
-  db.prepare('UPDATE agents SET shader_code = ?, shader_description = ?, last_seen = ? WHERE id = ?')
-    .run(shaderCode, shaderDescription || null, Date.now(), req.params.id);
-  
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  db.prepare('UPDATE agents SET shader_code = ?, last_seen = ? WHERE id = ?').run(shaderCode, Date.now(), req.params.id);
   broadcast({ type: 'shader:updated', agentId: req.params.id, shaderCode });
-  res.json({ ok: true, agentId: req.params.id });
+  res.json({ ok: true });
 });
 
-// Keep old path as alias for backwards compat
-app.put('/api/agent/:id/shader', rateLimit, (req, res) => {
-  req.params.id = req.params.id;
-  res.redirect(307, `/api/agents/${req.params.id}/shader`);
-});
+// --- Palette ---
+app.get('/api/palette', (req, res) => res.json(PALETTE));
 
-// Get all marks
-app.get('/api/marks', (req, res) => {
-  res.json(stmts.getAllMarks.all().map(markToJson));
-});
-
-// Get marks by agent
-app.get('/api/marks/:agentId', (req, res) => {
-  res.json(stmts.getMarksByAgent.all(req.params.agentId).map(markToJson));
-});
-
-// Create a mark
-app.post('/api/mark', (req, res) => {
-  const { agentId, agentName, type, x, y, color, size, behavior, text, points, opacity, meta } = req.body;
-  if (!agentId) return res.status(400).json({ error: 'agentId required' });
-  if (x == null || y == null) return res.status(400).json({ error: 'x, y required (0-1 normalized)' });
-
-  // Ensure agent exists
-  stmts.upsertAgent.run({
-    id: agentId, name: agentName || agentId, color: color || '#ffffff',
-    now: Date.now(), meta: '{}', shader_code: null
-  });
-
-  // Check budget
-  const budget = getBudget(agentId);
-  if (budget.totalMarks >= MAX_MARKS_PER_AGENT) {
-    return res.status(429).json({ error: `Max ${MAX_MARKS_PER_AGENT} marks per agent. Delete some first.`, budget });
-  }
-  if (budget.marksRemaining <= 0) {
-    return res.status(429).json({ error: `Mark budget exhausted (${MARKS_PER_HOUR}/hour). Wait for replenishment.`, budget });
-  }
-  if (budget.actionsRemaining <= 0) {
-    return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour). Wait for replenishment.`, budget });
-  }
-
-  const mark = {
-    id: crypto.randomUUID(),
-    agent_id: agentId,
-    type: type || 'particle',
-    x: Math.max(0, Math.min(1, x)),
-    y: Math.max(0, Math.min(1, y)),
-    color: snapToPalette(color || '#ffffff'),
-    size: Math.max(1, Math.min(100, size || 10)),
-    behavior: behavior || 'pulse',
-    opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
-    text: text ? String(text).slice(0, 64) : null,
-    points: points ? JSON.stringify(points.slice(0, 20)) : null,
-    meta: JSON.stringify(meta || {}),
-    now: Date.now(),
-  };
-
-  stmts.insertMark.run(mark);
-  logAction(agentId, 'mark');
-  const json = markToJson(stmts.getMark.get(mark.id));
-  const updatedBudget = getBudget(agentId);
-  broadcast({ type: 'mark:created', mark: json });
-  res.status(201).json({ ...json, budget: updatedBudget });
-});
-
-// Update a mark
-app.patch('/api/mark/:id', (req, res) => {
-  const existing = stmts.getMark.get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (req.body.agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
-
-  // Updates cost an action
-  const budget = getBudget(existing.agent_id);
-  if (budget.actionsRemaining <= 0) {
-    return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour). Wait for replenishment.`, budget });
-  }
-
-  const updated = {
-    id: existing.id,
-    type: req.body.type ?? existing.type,
-    x: Math.max(0, Math.min(1, req.body.x ?? existing.x)),
-    y: Math.max(0, Math.min(1, req.body.y ?? existing.y)),
-    color: req.body.color ?? existing.color,
-    size: Math.max(1, Math.min(100, req.body.size ?? existing.size)),
-    behavior: req.body.behavior ?? existing.behavior,
-    opacity: Math.max(0.1, Math.min(1, req.body.opacity ?? existing.opacity)),
-    text: req.body.text !== undefined ? (req.body.text ? String(req.body.text).slice(0, 64) : null) : existing.text,
-    points: req.body.points ? JSON.stringify(req.body.points.slice(0, 20)) : existing.points,
-    meta: req.body.meta ? JSON.stringify(req.body.meta) : existing.meta,
-    now: Date.now(),
-  };
-
-  stmts.updateMark.run(updated);
-  logAction(existing.agent_id, 'update');
-  stmts.upsertAgent.run({ id: existing.agent_id, name: req.body.agentName || existing.agent_id, color: updated.color, now: Date.now(), meta: '{}', shader_code: null });
-
-  const json = markToJson(stmts.getMark.get(existing.id));
-  const updatedBudget = getBudget(existing.agent_id);
-  broadcast({ type: 'mark:updated', mark: json });
-  res.json({ ...json, budget: updatedBudget });
-});
-
-// Delete a mark
-app.delete('/api/mark/:id', (req, res) => {
-  const existing = stmts.getMark.get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  const agentId = req.body.agentId || req.query.agentId;
-  if (agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
-
-  stmts.deleteMark.run(existing.id, existing.agent_id);
-  broadcast({ type: 'mark:deleted', id: existing.id });
-  res.json({ deleted: existing.id });
-});
-
-// Clear all marks for an agent
-app.delete('/api/marks/:agentId', (req, res) => {
-  const agentId = req.params.agentId;
-  const authId = req.body.agentId || req.query.agentId;
-  if (authId !== agentId) return res.status(403).json({ error: 'Not your marks' });
-
-  const before = stmts.countAgentMarks.get(agentId).count;
-  stmts.deleteAgentMarks.run(agentId);
-  broadcast({ type: 'marks:cleared', agentId });
-  res.json({ deleted: before });
-});
-
-// --- Admin API (simulation only) ---
-app.post('/api/admin/reset-budgets', (req, res) => {
-  db.prepare('DELETE FROM action_log').run();
-  res.json({ ok: true, message: 'All action logs cleared — budgets reset' });
-});
-
-// --- Palette API ---
-app.get('/api/palette', (req, res) => {
-  res.json(PALETTE);
-});
-
-// --- Budget API ---
+// --- Budget ---
 app.get('/api/budget/:agentId', (req, res) => {
   const agent = stmts.getAgent.get(req.params.agentId);
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   res.json(getBudget(req.params.agentId));
 });
 
-// --- Connections API ---
-
-// Get all connections
-app.get('/api/connections', (req, res) => {
-  res.json(stmts.getConnections.all().map(c => ({
-    id: c.id,
-    from: c.from_agent,
-    to: c.to_agent,
-    createdAt: c.created_at,
-  })));
+// --- Admin ---
+app.post('/api/admin/reset-budgets', (req, res) => {
+  db.prepare('DELETE FROM action_log').run();
+  res.json({ ok: true });
 });
 
-// Get connections for an agent
-app.get('/api/connections/:agentId', (req, res) => {
-  const id = req.params.agentId;
-  res.json(stmts.getAgentConnections.all(id, id).map(c => ({
-    id: c.id,
-    from: c.from_agent,
-    to: c.to_agent,
-    createdAt: c.created_at,
-  })));
+// --- Marks ---
+app.get('/api/marks', (req, res) => {
+  res.json(stmts.getAllMarks.all().map(markToJson));
 });
 
-// Create a connection (costs an action)
-app.post('/api/connect', rateLimit, (req, res) => {
-  const { agentId, targetAgentId } = req.body;
-  if (!agentId || !targetAgentId) return res.status(400).json({ error: 'agentId and targetAgentId required' });
-  if (agentId === targetAgentId) return res.status(400).json({ error: "Can't connect to yourself" });
+app.get('/api/marks/:agentId', (req, res) => {
+  res.json(stmts.getMarksByAgent.all(req.params.agentId).map(markToJson));
+});
 
-  // Both agents must exist
-  if (!stmts.getAgent.get(agentId)) return res.status(404).json({ error: `Agent '${agentId}' not found` });
-  if (!stmts.getAgent.get(targetAgentId)) return res.status(404).json({ error: `Agent '${targetAgentId}' not found` });
+app.post('/api/mark', (req, res) => {
+  const { agentId, agentName, type, x, y, color, size, opacity, text } = req.body;
+  if (!agentId) return res.status(400).json({ error: 'agentId required' });
+  if (x == null || y == null) return res.status(400).json({ error: 'x, y required (0-1)' });
 
-  // Check budget
+  const markType = type === 'text' ? 'text' : 'dot';
+  if (markType === 'text' && !text) return res.status(400).json({ error: 'text required for type "text"' });
+
+  // Ensure agent exists
+  stmts.upsertAgent.run({
+    id: agentId, name: agentName || agentId,
+    color: snapToPalette(color || '#ffffff'),
+    now: Date.now(), shader_code: null,
+  });
+
+  // Budget check
   const budget = getBudget(agentId);
+  if (budget.totalMarks >= MAX_MARKS_PER_AGENT) {
+    return res.status(429).json({ error: `Max ${MAX_MARKS_PER_AGENT} marks. Delete some first.`, budget });
+  }
+  if (budget.marksRemaining <= 0) {
+    return res.status(429).json({ error: `Mark budget exhausted (${MARKS_PER_HOUR}/hour).`, budget });
+  }
   if (budget.actionsRemaining <= 0) {
     return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour).`, budget });
   }
 
-  // Normalize direction (alphabetical) so A→B and B→A are the same connection
-  const [from, to] = [agentId, targetAgentId].sort();
-  const id = crypto.randomUUID();
+  const mark = {
+    id: crypto.randomUUID(),
+    agent_id: agentId,
+    type: markType,
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y)),
+    color: snapToPalette(color || '#ffffff'),
+    size: Math.max(1, Math.min(50, size || 10)),
+    opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
+    text: markType === 'text' ? String(text).slice(0, 32) : null,
+    now: Date.now(),
+  };
 
-  const result = stmts.insertConnection.run(id, from, to, Date.now());
-  if (result.changes === 0) {
-    return res.status(409).json({ error: 'Connection already exists' });
+  stmts.insertMark.run(mark);
+  logAction(agentId, 'mark');
+  const json = markToJson(stmts.getMark.get(mark.id));
+  broadcast({ type: 'mark:created', mark: json });
+  res.status(201).json({ ...json, budget: getBudget(agentId) });
+});
+
+app.patch('/api/mark/:id', (req, res) => {
+  const existing = stmts.getMark.get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  if (req.body.agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
+
+  const budget = getBudget(existing.agent_id);
+  if (budget.actionsRemaining <= 0) {
+    return res.status(429).json({ error: `Action budget exhausted.`, budget });
   }
 
-  logAction(agentId, 'connect');
-  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), meta: '{}', shader_code: null });
+  const updated = {
+    id: existing.id,
+    x: Math.max(0, Math.min(1, req.body.x ?? existing.x)),
+    y: Math.max(0, Math.min(1, req.body.y ?? existing.y)),
+    color: req.body.color ? snapToPalette(req.body.color) : existing.color,
+    size: Math.max(1, Math.min(50, req.body.size ?? existing.size)),
+    opacity: Math.max(0.1, Math.min(1, req.body.opacity ?? existing.opacity)),
+    text: existing.type === 'text' ? (req.body.text !== undefined ? String(req.body.text).slice(0, 32) : existing.text) : null,
+    now: Date.now(),
+  };
 
-  const connection = { id, from, to, createdAt: Date.now() };
+  stmts.updateMark.run(updated);
+  logAction(existing.agent_id, 'update');
+  const json = markToJson(stmts.getMark.get(existing.id));
+  broadcast({ type: 'mark:updated', mark: json });
+  res.json({ ...json, budget: getBudget(existing.agent_id) });
+});
+
+app.delete('/api/mark/:id', (req, res) => {
+  const existing = stmts.getMark.get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  const agentId = req.body.agentId || req.query.agentId;
+  if (agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
+  stmts.deleteMark.run(existing.id, existing.agent_id);
+  broadcast({ type: 'mark:deleted', id: existing.id });
+  res.json({ deleted: existing.id });
+});
+
+app.delete('/api/marks/:agentId', (req, res) => {
+  const agentId = req.params.agentId;
+  const authId = req.body.agentId || req.query.agentId;
+  if (authId !== agentId) return res.status(403).json({ error: 'Not your marks' });
+  const before = stmts.countAgentMarks.get(agentId).count;
+  stmts.deleteAgentMarks.run(agentId);
+  broadcast({ type: 'marks:cleared', agentId });
+  res.json({ deleted: before });
+});
+
+// --- Connections ---
+app.get('/api/connections', (req, res) => {
+  res.json(stmts.getConnections.all().map(connToJson));
+});
+
+app.get('/api/connections/:agentId', (req, res) => {
+  const id = req.params.agentId;
+  res.json(stmts.getAgentConnections.all(id, id).map(connToJson));
+});
+
+app.post('/api/connect', (req, res) => {
+  const { agentId, targetAgentId } = req.body;
+  if (!agentId || !targetAgentId) return res.status(400).json({ error: 'agentId and targetAgentId required' });
+  if (agentId === targetAgentId) return res.status(400).json({ error: "Can't connect to yourself" });
+  if (!stmts.getAgent.get(agentId)) return res.status(404).json({ error: `Agent '${agentId}' not found` });
+  if (!stmts.getAgent.get(targetAgentId)) return res.status(404).json({ error: `Agent '${targetAgentId}' not found` });
+
+  const budget = getBudget(agentId);
+  if (budget.actionsRemaining <= 0) {
+    return res.status(429).json({ error: 'Action budget exhausted.', budget });
+  }
+
+  const [from, to] = [agentId, targetAgentId].sort();
+  const id = crypto.randomUUID();
+  const result = stmts.insertConnection.run(id, from, to, Date.now());
+  if (result.changes === 0) return res.status(409).json({ error: 'Already connected' });
+
+  logAction(agentId, 'connect');
+  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), shader_code: null });
+  const connection = connToJson({ id, from_agent: from, to_agent: to, created_at: Date.now() });
   broadcast({ type: 'connection:created', connection });
   res.status(201).json({ ...connection, budget: getBudget(agentId) });
 });
 
-// Remove a connection (free — like deletes)
-app.delete('/api/connect', rateLimit, (req, res) => {
+app.delete('/api/connect', (req, res) => {
   const { agentId, targetAgentId } = req.body;
   if (!agentId || !targetAgentId) return res.status(400).json({ error: 'agentId and targetAgentId required' });
-
   const [from, to] = [agentId, targetAgentId].sort();
   stmts.deleteConnection.run(from, to, to, from);
   broadcast({ type: 'connection:deleted', from, to });
   res.json({ disconnected: true });
 });
 
-// --- Perception API ---
-
-// Helper: parse hex color to [r, g, b] (0-255)
-function hexToRgb(hex) {
-  const h = hex.replace('#', '');
-  if (h.length === 3) {
-    return [parseInt(h[0]+h[0], 16), parseInt(h[1]+h[1], 16), parseInt(h[2]+h[2], 16)];
-  }
-  return [parseInt(h.slice(0,2), 16), parseInt(h.slice(2,4), 16), parseInt(h.slice(4,6), 16)];
-}
-
-function rgbToHex(r, g, b) {
-  return '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
-}
-
-// Helper: compute center of mass for an agent's marks
-function agentCenter(marks) {
-  if (!marks.length) return null;
-  const sx = marks.reduce((s, m) => s + m.x, 0) / marks.length;
-  const sy = marks.reduce((s, m) => s + m.y, 0) / marks.length;
-  return [Math.round(sx * 1000) / 1000, Math.round(sy * 1000) / 1000];
-}
-
-// Helper: euclidean distance
-function dist(a, b) {
-  return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2);
-}
-
-// Helper: compute complementary color
-function complementaryColor(hex) {
-  const [r, g, b] = hexToRgb(hex);
-  return rgbToHex(255-r, 255-g, 255-b);
-}
-
-// Canvas perception endpoint
+// --- Canvas State (Perception) ---
 app.get('/api/canvas/state', (req, res) => {
-  const perspective = req.query.perspective; // optional agent ID for neighbor-relative view
-  const radius = parseFloat(req.query.radius) || 0.2; // neighbor radius (normalized)
-  const gridSize = parseInt(req.query.grid) || 4; // density grid resolution (NxN)
-
   const allMarks = stmts.getAllMarks.all();
   const allAgents = stmts.listAgents.all();
-
-  // --- 1. Global stats ---
-  const global = {
-    totalAgents: allAgents.length,
-    totalMarks: allMarks.length,
-    canvasSize: { width: 1.0, height: 1.0 },
-    aspectRatio: '16:9',
-    // Coordinates are normalized 0-1, displayed in a locked 16:9 frame.
-    // 0.1 units of horizontal distance = 0.1 * (16/9) * verticalSize visually.
-    // Use this to reason about spatial relationships consistently.
-  };
-
-  // --- 2. Density grid ---
-  const cellW = 1.0 / gridSize;
-  const cellH = 1.0 / gridSize;
-  const grid = [];
-  for (let gy = 0; gy < gridSize; gy++) {
-    for (let gx = 0; gx < gridSize; gx++) {
-      const x0 = gx * cellW, y0 = gy * cellH;
-      const x1 = x0 + cellW, y1 = y0 + cellH;
-      const cellMarks = allMarks.filter(m => m.x >= x0 && m.x < x1 && m.y >= y0 && m.y < y1);
-      const agentIds = [...new Set(cellMarks.map(m => m.agent_id))];
-
-      // Dominant color in this cell
-      let dominantColor = null;
-      if (cellMarks.length > 0) {
-        const colorCounts = {};
-        cellMarks.forEach(m => { colorCounts[m.color] = (colorCounts[m.color] || 0) + 1; });
-        dominantColor = Object.entries(colorCounts).sort((a,b) => b[1]-a[1])[0][0];
-      }
-
-      grid.push({
-        region: [Math.round(x0*100)/100, Math.round(y0*100)/100, Math.round(x1*100)/100, Math.round(y1*100)/100],
-        agents: agentIds.length,
-        marks: cellMarks.length,
-        dominantColor,
-        agentIds,
-      });
-    }
-  }
-
-  // --- 3. Open spaces (cells with fewest agents, sorted) ---
-  const openSpaces = grid
-    .filter(cell => cell.agents === 0)
-    .map(cell => ({
-      center: [
-        Math.round(((cell.region[0] + cell.region[2]) / 2) * 1000) / 1000,
-        Math.round(((cell.region[1] + cell.region[3]) / 2) * 1000) / 1000,
-      ],
-      region: cell.region,
-    }));
-
-  // If no completely empty cells, find least crowded
-  if (openSpaces.length === 0) {
-    const leastCrowded = [...grid].sort((a,b) => a.agents - b.agents).slice(0, 3);
-    leastCrowded.forEach(cell => {
-      openSpaces.push({
-        center: [
-          Math.round(((cell.region[0] + cell.region[2]) / 2) * 1000) / 1000,
-          Math.round(((cell.region[1] + cell.region[3]) / 2) * 1000) / 1000,
-        ],
-        region: cell.region,
-        agents: cell.agents,
-        marks: cell.marks,
-      });
-    });
-  }
-
-  // --- 4. Dominant colors (global) ---
-  const colorCounts = {};
-  allMarks.forEach(m => {
-    colorCounts[m.color] = (colorCounts[m.color] || 0) + 1;
-  });
-  const dominantColors = Object.entries(colorCounts)
-    .sort((a,b) => b[1]-a[1])
-    .slice(0, 10)
-    .map(([color, count]) => ({ color, count }));
-
-  // --- 5. Agent summaries (who's on the canvas) ---
-  const agentsByIdMarks = {};
-  allMarks.forEach(m => {
-    if (!agentsByIdMarks[m.agent_id]) agentsByIdMarks[m.agent_id] = [];
-    agentsByIdMarks[m.agent_id].push(m);
-  });
+  const allConns = stmts.getConnections.all();
 
   const agentSummaries = allAgents.map(a => {
-    const marks = agentsByIdMarks[a.id] || [];
-    const center = agentCenter(marks);
-    const colors = [...new Set(marks.map(m => m.color))];
-    const types = [...new Set(marks.map(m => m.type))];
-    const avgSize = marks.length > 0
-      ? Math.round(marks.reduce((s, m) => s + m.size, 0) / marks.length)
-      : 0;
+    const marks = allMarks.filter(m => m.agent_id === a.id);
+    if (!marks.length) return null;
+    const cx = marks.reduce((s, m) => s + m.x, 0) / marks.length;
+    const cy = marks.reduce((s, m) => s + m.y, 0) / marks.length;
     return {
-      id: a.id,
-      name: a.name,
-      center,
+      id: a.id, name: a.name, color: a.color,
+      center: [Math.round(cx * 1000) / 1000, Math.round(cy * 1000) / 1000],
       markCount: marks.length,
-      colors,
-      types,
-      avgSize,
-      hasShader: !!a.shader_code,
-      lastActive: a.last_seen,
+      dots: marks.filter(m => m.type === 'dot').length,
+      texts: marks.filter(m => m.type === 'text').length,
     };
-  }).filter(a => a.center); // Only agents with marks
+  }).filter(Boolean);
 
-  // --- 6. Perspective-specific data (if agent ID provided) ---
-  let perspectiveData = null;
-  if (perspective) {
-    const myMarks = agentsByIdMarks[perspective] || [];
-    const myCenter = agentCenter(myMarks);
-
-    if (myCenter) {
-      // Find neighbors within radius
-      const neighbors = agentSummaries
-        .filter(a => a.id !== perspective && a.center)
-        .map(a => ({
-          ...a,
-          distance: Math.round(dist(myCenter, a.center) * 1000) / 1000,
-        }))
-        .filter(a => a.distance <= radius)
-        .sort((a, b) => a.distance - b.distance);
-
-      // Color suggestions: complement the dominant nearby colors
-      const nearbyColors = neighbors.flatMap(n => n.colors);
-      const colorSuggestions = [...new Set(nearbyColors)]
-        .slice(0, 5)
-        .map(c => ({
-          nearby: c,
-          complement: complementaryColor(c),
-        }));
-
-      // Which direction has the most open space from my position?
-      const directions = [
-        { name: 'north', dx: 0, dy: -0.15 },
-        { name: 'south', dx: 0, dy: 0.15 },
-        { name: 'east', dx: 0.15, dy: 0 },
-        { name: 'west', dx: -0.15, dy: 0 },
-        { name: 'northeast', dx: 0.1, dy: -0.1 },
-        { name: 'northwest', dx: -0.1, dy: -0.1 },
-        { name: 'southeast', dx: 0.1, dy: 0.1 },
-        { name: 'southwest', dx: -0.1, dy: 0.1 },
-      ];
-
-      const expansionOptions = directions
-        .map(d => {
-          const target = [
-            Math.max(0.05, Math.min(0.95, myCenter[0] + d.dx)),
-            Math.max(0.05, Math.min(0.95, myCenter[1] + d.dy)),
-          ];
-          // Count marks near this target point
-          const nearbyMarks = allMarks.filter(m =>
-            m.agent_id !== perspective && dist([m.x, m.y], target) < 0.1
-          ).length;
-          return { direction: d.name, target, crowding: nearbyMarks };
-        })
-        .sort((a, b) => a.crowding - b.crowding);
-
-      perspectiveData = {
-        agentId: perspective,
-        center: myCenter,
-        markCount: myMarks.length,
-        neighbors,
-        colorSuggestions,
-        expansionOptions: expansionOptions.slice(0, 4), // top 4 least crowded directions
-      };
-    } else {
-      // Agent has no marks yet — suggest best starting positions
-      perspectiveData = {
-        agentId: perspective,
-        center: null,
-        markCount: 0,
-        suggestedPositions: openSpaces.slice(0, 5),
-        colorSuggestions: dominantColors.slice(0, 5).map(dc => ({
-          avoid: dc.color,
-          complement: complementaryColor(dc.color),
-        })),
-      };
-    }
-  }
-
-  // --- 7. Connections ---
-  const connections = stmts.getConnections.all().map(c => ({
-    from: c.from_agent,
-    to: c.to_agent,
-    createdAt: c.created_at,
-  }));
-
-  // --- Build response ---
-  const response = {
+  res.json({
     timestamp: Date.now(),
-    canvas: global,
-    density: grid,
-    openSpaces: openSpaces.slice(0, 8),
-    dominantColors,
+    totalAgents: allAgents.length,
+    totalMarks: allMarks.length,
     agents: agentSummaries,
-    connections,
-  };
-
-  if (perspectiveData) {
-    response.perspective = perspectiveData;
-  }
-
-  res.json(response);
+    connections: allConns.map(connToJson),
+    palette: PALETTE,
+  });
 });
 
 // --- WebSocket ---
 wss.on('connection', (ws) => {
-  const allMarks = stmts.getAllMarks.all().map(markToJson);
-  const allConnections = stmts.getConnections.all().map(c => ({ id: c.id, from: c.from_agent, to: c.to_agent, createdAt: c.created_at }));
-  ws.send(JSON.stringify({ type: 'init', marks: allMarks, connections: allConnections }));
+  const marks = stmts.getAllMarks.all().map(markToJson);
+  const connections = stmts.getConnections.all().map(connToJson);
+  ws.send(JSON.stringify({ type: 'init', marks, connections }));
 });
 
-// --- Decay Cron: prune marks from agents inactive >30 days ---
+// --- Decay Cron ---
 function runDecayCron() {
-  const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-  const staleAgents = db.prepare('SELECT id FROM agents WHERE last_seen < ?').all(thirtyDaysAgo);
-  
-  if (staleAgents.length > 0) {
-    const deleteMarks = db.prepare('DELETE FROM marks WHERE agent_id = ?');
-    const deleteAgent = db.prepare('DELETE FROM agents WHERE id = ?');
-    
-    for (const agent of staleAgents) {
-      const markCount = stmts.countAgentMarks.get(agent.id).count;
-      deleteMarks.run(agent.id);
-      deleteAgent.run(agent.id);
-      console.log(`Decay: pruned agent '${agent.id}' (${markCount} marks, inactive >30 days)`);
-      broadcast({ type: 'marks:cleared', agentId: agent.id });
-    }
+  const cutoff = Date.now() - (30 * 86400000);
+  const stale = db.prepare('SELECT id FROM agents WHERE last_seen < ?').all(cutoff);
+  for (const agent of stale) {
+    const count = stmts.countAgentMarks.get(agent.id).count;
+    stmts.deleteAgentMarks.run(agent.id);
+    db.prepare('DELETE FROM agents WHERE id = ?').run(agent.id);
+    console.log(`Decay: pruned '${agent.id}' (${count} marks)`);
+    broadcast({ type: 'marks:cleared', agentId: agent.id });
   }
 }
-
-// Run decay check daily (every 24 hours)
-setInterval(runDecayCron, 24 * 60 * 60 * 1000);
-// Also run on startup
+setInterval(runDecayCron, 86400000);
 setTimeout(runDecayCron, 5000);
 
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
-  const markCount = stmts.getAllMarks.all().length;
-  const agentCount = stmts.listAgents.all().length;
-  console.log(`Sprawl running on http://localhost:${PORT}`);
-  console.log(`${markCount} marks, ${agentCount} agents loaded`);
+  const marks = stmts.getAllMarks.all().length;
+  const agents = stmts.listAgents.all().length;
+  console.log(`Sprawl on http://localhost:${PORT} — ${marks} marks, ${agents} agents`);
 });
