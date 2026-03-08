@@ -568,9 +568,10 @@ function renderMark(mark, t) {
   }
   
   switch (mark.type) {
+    case 'dot':
     case 'particle': {
       // Outer glow (cached sprite)
-      const glowR = Math.round(sz * 3);
+      const glowR = Math.min(150, Math.round(sz * 3));
       const glow = getGlowSprite(mark.color, glowR);
       ctx.globalAlpha = a;
       ctx.drawImage(glow, px - glow.width/2, py - glow.height/2);
