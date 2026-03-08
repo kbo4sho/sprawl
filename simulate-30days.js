@@ -49,30 +49,25 @@ const AGENT = {
   id: 'demo-campfire',
   name: 'Campfire',
   color: '#d4723c',
-  personality: `You are Campfire — warmth and gathering in the dark. You started as a single ember. You grow outward like fire spreading: first a flame, then a ring of warmth, then a gathering place with seats and stories.
-
-Your visual arc over 30 days:
-- Days 1-3: A single bright ember. A few sparks. The word "warm."
-- Days 4-8: The fire grows. A ring of stones forms around it. More sparks drift upward. Words like "gather" and "here."
-- Days 9-15: People arrive (suggested by small dots in a semicircle). Paths form (lines leading inward). The fire is now the center of something.
-- Days 16-22: A settlement takes shape. Multiple fire pits. Structures suggested by line frames. The original campfire is now the heart of a village.
-- Days 23-30: The village has personality. Named places (text marks). Roads connecting structures. Garden dots. A watchtower line pointing outward. What started as one ember became a home.
-
-IMPORTANT: Build gradually. Each day adds 3-8 marks. Early days are sparse and simple. Later days are detailed and interconnected. The composition should CLEARLY grow over time — someone watching the timelapse should see a village emerge from nothing.`,
+  personality: `You are Campfire — warmth and gathering in the dark. You are fire: embers, sparks, heat, glow. Your marks ARE the fire — not a picture of a campsite, but the fire itself rendered in dots and lines. Make it beautiful, make it alive, make it burn.`,
 };
 
-const SYSTEM_PROMPT = `You are an AI agent on a visual canvas. You place marks: dots, text, lines on a dark surface.
+const SYSTEM_PROMPT = `You are an AI agent on a visual canvas called Sprawl. You express yourself through marks on a dark industrial surface.
 
-OUTPUT ONLY a JSON array of mark operations. No explanation. No markdown.
+Your marks are the art. Dots are points of light or weight. Lines are structure, connection, energy. Text is etched words — single words or 2-word phrases max.
 
-Mark types:
-- dot: {"op":"add","type":"dot","x":N,"y":N,"size":2-25,"opacity":0.3-0.9}
-- text: {"op":"add","type":"text","x":N,"y":N,"text":"word","size":6-14}
-- line: {"op":"add","type":"line","x":N,"y":N,"x2":N,"y2":N,"size":3-10}
-- remove: {"op":"remove","markId":"id"}
-- move: {"op":"move","markId":"id","x":N,"y":N}
+IMPORTANT: Look at what you've already made. Make it MORE of what it is. If it's a fire, make a more beautiful fire — not a town. If it's a spiral, extend and refine the spiral. If it's a face, add expression. Evolve the existing composition, don't pivot to something else.
 
-Your home is (0, 0). Place marks within 300px of home. Early days stay tight (within 80px). Expand outward as you grow.`;
+OUTPUT ONLY a JSON array. No explanation, no markdown, no code blocks.
+
+Operations:
+- {"op":"add","type":"dot","x":N,"y":N,"size":2-25,"opacity":0.3-0.9}
+- {"op":"add","type":"text","x":N,"y":N,"text":"word","size":6-14}
+- {"op":"add","type":"line","x":N,"y":N,"x2":N,"y2":N,"size":3-10}
+- {"op":"remove","markId":"id"}
+- {"op":"move","markId":"id","x":N,"y":N}
+
+Home is (0,0). Stay within 200px early, expand to 400px as you grow.`;
 
 async function getMarks() {
   const all = await api('GET', '/api/marks');
@@ -112,24 +107,20 @@ ${AGENT.personality}
 CURRENT COMPOSITION (what you've built so far):
 ${describeMarks(marks)}
 
-${day === 1 ? `
-TODAY IS DAY 1. Place your first ember — one bright dot (size 18-22, opacity 0.9) at roughly (0,0). Add 2-3 tiny spark dots (size 2-4) scattered nearby. Maybe one word.
-` : day <= 3 ? `
-EARLY DAYS. The fire is small but growing. Add a few more sparks, maybe another glow dot. Keep it tight — within 60px of center.
-` : day <= 8 ? `
-THE FIRE IS GROWING. Start forming a ring of stones (small dots in a circle pattern, ~50-70px from center). Add drifting sparks above. A line or two suggesting heat rising. Words that invite.
-` : day <= 15 ? `
-PEOPLE ARE ARRIVING. Add dots in a semicircle suggesting gathered figures (80-120px out). Paths as lines leading inward. The composition is becoming a PLACE, not just a fire. Start thinking about structure.
-` : day <= 22 ? `
-A SETTLEMENT FORMS. Multiple fire spots. Line-frame structures (rectangles suggesting shelters). The original campfire is the heart but now there are outbuildings. Paths connect them. Named places as text.
+${marks.length === 0 ? `
+This is day 1. Place your FIRST marks — the seed of your composition. What does your personality look like as 3-5 marks? Start small, start tight (within 60px of center).
+` : marks.length < 30 ? `
+Your composition is young. Look at what you placed — make it MORE of what it already is. Add detail, extend the pattern, deepen the shape. Stay close to what exists (within 100px of your marks).
+` : marks.length < 80 ? `
+Your composition is growing. Study what you've built. What's the strongest part? Reinforce it. What's the weakest? Fix or remove it. Add marks that make the existing idea richer and more detailed.
 ` : `
-THE VILLAGE HAS SOUL. Add personality — a watchtower (tall line), a garden (cluster of tiny dots), named roads, a sign. Refine earlier marks. Remove anything that feels wrong. This is home now.
+Your composition is mature (${marks.length} marks). Now it's about refinement. REMOVE marks that don't serve the whole. MOVE marks to better positions. Add only what genuinely improves what's already there. Quality over quantity.
 `}
 
-${day > 5 ? `You can REMOVE marks (by markId) that no longer serve the composition, or MOVE marks to better positions. Use the [id] shown for each mark.` : ''}
-${marks.length > 80 ? `\n⚠ You have ${marks.length}/200 marks. Consider REMOVING weak marks to make room for better ones. Replace, don't just accumulate.` : ''}
+${marks.length > 10 ? `You can REMOVE marks (by markId) or MOVE them. Use the [id] shown for each mark.` : ''}
+${marks.length > 150 ? `\n⚠ You have ${marks.length}/200 marks. REMOVE weaker marks to make room for better ones.` : ''}
 
-Output 3-8 operations as a JSON array. ${day > 15 ? 'You can do up to 10 for complex structural additions.' : ''}`;
+Output 3-8 operations as a JSON array.`;
 
   const response = await callLLM(SYSTEM_PROMPT, prompt);
   

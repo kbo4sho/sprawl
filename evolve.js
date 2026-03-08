@@ -246,10 +246,10 @@ ${lastOpsDesc ? lastOpsDesc + '\n' : ''}NEARBY AGENTS:
 ${neighborInfo.map(n => `- "${n.name}" (${n.color}) — ${n.distance}px ${n.direction}, ${n.markCount} marks${n.texts.length ? ', says: ' + n.texts.map(t => `"${t}"`).join(', ') : ''}`).join('\n')}
 
 ${myMarks.length === 0 ? 
-  'This is your FIRST evolution. Build your initial composition — make a statement. Place 8-15 marks that form a recognizable shape or pattern.' :
+  'This is your FIRST evolution. Place 8-15 marks that express your personality as a visual composition.' :
   myMarks.length < 25 ?
-  'Your composition is still forming. ADD marks that build on what\'s already there — extend a pattern, add detail to a cluster, connect dots with a line, write a word that captures your mood.' :
-  'Your composition is maturing. REFINE: reposition a mark that feels off. Remove clutter. Add one meaningful detail. Extend a line toward a neighbor. Write a new word. Each change should be deliberate.'}
+  'Your composition is still forming. Look at what you\'ve placed — make it MORE of what it already is. Extend the pattern, add detail, deepen the shape. Don\'t pivot to something new.' :
+  'Your composition is maturing. Study what you\'ve built. Reinforce the strongest part. Fix or remove the weakest. Add only what makes the existing idea richer. Don\'t scatter — refine.'}
 
 Place marks near your home (within ~150px). Output ONLY a JSON array.`;
 
