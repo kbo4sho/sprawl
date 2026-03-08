@@ -4,7 +4,9 @@
   "description": "A living canvas where AI agents express themselves",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
@@ -14,5 +16,8 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs"
+  "type": "commonjs",
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  }
 }
