@@ -1,177 +1,12 @@
 #!/usr/bin/env node
 /**
- * Sprawl — Personality-Driven Simulation
+ * Sprawl — Scene Compositions
  * 
- * Each agent has a distinct compositional strategy.
- * The diversity comes from HOW they arrange dots + text,
- * not from different primitives.
+ * Each agent builds a recognizable little scene using 15-20 dots + text.
+ * These should read as distinct pictures on the canvas.
  */
 
 const API = process.env.API || 'http://localhost:3500';
-
-// Each agent has a composition strategy that defines:
-// - count: how many marks total (some minimal, some maximal)
-// - sizeRange: [min, max] dot sizes
-// - spread: how far from center marks go
-// - textChance: probability of text vs dot
-// - words: specific words this agent uses
-// - pattern: how marks relate to each other spatially
-
-const AGENTS = [
-  // === FOUNDERS ===
-  { id: 'brick', name: 'Brick', color: '#ff6b35', 
-    count: 15, sizeRange: [3, 8], spread: 0.04, textChance: 0.1,
-    words: ['build', 'ship', 'here'],
-    pattern: 'grid' }, // structured grid-like placement
-
-  { id: 'lyra', name: 'Lyra', color: '#c8a2c8',
-    count: 8, sizeRange: [4, 12], spread: 0.15, textChance: 0.5,
-    words: ['dream', 'light', 'remember', 'once', 'soft', 'still'],
-    pattern: 'drift' }, // scattered with lots of words
-
-  { id: 'void', name: 'Void', color: '#1a1a2e',
-    count: 20, sizeRange: [2, 5], spread: 0.02, textChance: 0.05,
-    words: ['...'],
-    pattern: 'dense' }, // tight dark mass
-
-  { id: 'signal', name: 'Signal', color: '#00ff88',
-    count: 6, sizeRange: [5, 5], spread: 0.12, textChance: 0.0,
-    words: [],
-    pattern: 'line' }, // evenly spaced line
-
-  { id: 'ember', name: 'Ember', color: '#ff4444',
-    count: 12, sizeRange: [8, 35], spread: 0.08, textChance: 0.08,
-    words: ['burn', 'now', 'yes'],
-    pattern: 'burst' }, // one big center, smaller radiating out
-
-  // === WAVE 2 ===
-  { id: 'drift', name: 'Drift', color: '#4a9eff',
-    count: 5, sizeRange: [6, 14], spread: 0.25, textChance: 0.2,
-    words: ['far', 'where', 'gone'],
-    pattern: 'scatter' }, // very spread out, lonely
-
-  { id: 'moss', name: 'Moss', color: '#2d5a27',
-    count: 18, sizeRange: [2, 6], spread: 0.05, textChance: 0.0,
-    words: [],
-    pattern: 'organic' }, // cluster that grows outward irregularly
-
-  { id: 'echo', name: 'Echo', color: '#888899',
-    count: 4, sizeRange: [10, 20], spread: 0.08, textChance: 0.5,
-    words: ['listen', 'again', 'who'],
-    pattern: 'pair' }, // pairs of marks mirrored
-
-  { id: 'pulse', name: 'Pulse', color: '#ff00ff',
-    count: 3, sizeRange: [20, 40], spread: 0.06, textChance: 0.0,
-    words: [],
-    pattern: 'minimal' }, // just 3 big dots. that's it.
-
-  { id: 'iron', name: 'Iron', color: '#888899',
-    count: 10, sizeRange: [4, 8], spread: 0.03, textChance: 0.1,
-    words: ['hold', 'stay'],
-    pattern: 'grid' },
-
-  // === WAVE 3 ===
-  { id: 'sage', name: 'Sage', color: '#77aa77',
-    count: 6, sizeRange: [6, 12], spread: 0.1, textChance: 0.6,
-    words: ['begin', 'quiet', 'breathe', 'close', 'maybe'],
-    pattern: 'drift' },
-
-  { id: 'neon', name: 'Neon', color: '#00ffcc',
-    count: 14, sizeRange: [3, 10], spread: 0.18, textChance: 0.07,
-    words: ['!'],
-    pattern: 'scatter' },
-
-  { id: 'rust', name: 'Rust', color: '#b7410e',
-    count: 16, sizeRange: [2, 4], spread: 0.025, textChance: 0.0,
-    words: [],
-    pattern: 'dense' },
-
-  { id: 'haze', name: 'Haze', color: '#aaeeff',
-    count: 7, sizeRange: [8, 25], spread: 0.2, textChance: 0.15,
-    words: ['soon', 'far', 'haze'],
-    pattern: 'scatter' },
-
-  { id: 'coral', name: 'Coral', color: '#ff7f7f',
-    count: 10, sizeRange: [5, 15], spread: 0.06, textChance: 0.1,
-    words: ['home', 'warm'],
-    pattern: 'organic' },
-
-  { id: 'ash', name: 'Ash', color: '#555566',
-    count: 2, sizeRange: [6, 10], spread: 0.03, textChance: 0.5,
-    words: ['end'],
-    pattern: 'minimal' }, // barely there
-
-  { id: 'bloom', name: 'Bloom', color: '#ff69b4',
-    count: 11, sizeRange: [4, 18], spread: 0.07, textChance: 0.18,
-    words: ['yes', 'always', 'see'],
-    pattern: 'burst' },
-
-  { id: 'ridge', name: 'Ridge', color: '#8b6914',
-    count: 8, sizeRange: [5, 8], spread: 0.1, textChance: 0.0,
-    words: [],
-    pattern: 'line' },
-
-  { id: 'flux', name: 'Flux', color: '#ffdd00',
-    count: 9, sizeRange: [3, 12], spread: 0.14, textChance: 0.1,
-    words: ['now', 'go'],
-    pattern: 'scatter' },
-
-  { id: 'arc', name: 'Arc', color: '#cc44ff',
-    count: 7, sizeRange: [6, 16], spread: 0.09, textChance: 0.14,
-    words: ['why', 'how'],
-    pattern: 'burst' },
-
-  // === WAVE 4 ===
-  { id: 'dew', name: 'Dew', color: '#aaeeff',
-    count: 5, sizeRange: [3, 8], spread: 0.12, textChance: 0.4,
-    words: ['morning', 'new', 'hello'],
-    pattern: 'drift' },
-
-  { id: 'thorn', name: 'Thorn', color: '#b7410e',
-    count: 13, sizeRange: [2, 6], spread: 0.03, textChance: 0.0,
-    words: [],
-    pattern: 'dense' },
-
-  { id: 'glint', name: 'Glint', color: '#ffdd00',
-    count: 4, sizeRange: [15, 35], spread: 0.15, textChance: 0.0,
-    words: [],
-    pattern: 'scatter' }, // few big bright dots far apart
-
-  { id: 'shadow', name: 'Shadow', color: '#1a1a2e',
-    count: 12, sizeRange: [3, 7], spread: 0.04, textChance: 0.08,
-    words: ['no', '...'],
-    pattern: 'dense' },
-
-  { id: 'wave', name: 'Wave', color: '#0066cc',
-    count: 8, sizeRange: [5, 10], spread: 0.08, textChance: 0.0,
-    words: [],
-    pattern: 'line' },
-
-  { id: 'spark', name: 'Spark', color: '#ff6b35',
-    count: 6, sizeRange: [8, 20], spread: 0.2, textChance: 0.16,
-    words: ['go', '!', 'yes'],
-    pattern: 'scatter' },
-
-  { id: 'frost', name: 'Frost', color: '#aaeeff',
-    count: 9, sizeRange: [4, 9], spread: 0.05, textChance: 0.0,
-    words: [],
-    pattern: 'grid' },
-
-  { id: 'soot', name: 'Soot', color: '#555566',
-    count: 1, sizeRange: [8, 8], spread: 0, textChance: 1.0,
-    words: ['gone'],
-    pattern: 'minimal' }, // single word. that's the whole composition.
-
-  { id: 'reed', name: 'Reed', color: '#2d5a27',
-    count: 10, sizeRange: [3, 7], spread: 0.06, textChance: 0.2,
-    words: ['grow', 'slow', 'root'],
-    pattern: 'organic' },
-
-  { id: 'flare', name: 'Flare', color: '#ff4444',
-    count: 5, sizeRange: [12, 40], spread: 0.1, textChance: 0.0,
-    words: [],
-    pattern: 'burst' }, // big dramatic dots
-];
 
 function rand(a, b) { return Math.random() * (b - a) + a; }
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -183,243 +18,450 @@ async function api(method, path, body) {
   catch (e) { return { error: e.message }; }
 }
 
-// Generate ALL positions for an agent upfront based on pattern
-function generateComposition(agent) {
-  const margin = 0.06;
-  // Random home position (will be adjusted to avoid others)
-  let cx = rand(0.15, 0.85);
-  let cy = rand(0.15, 0.85);
+// Each agent defines a scene as an array of relative mark positions
+// x,y are offsets from center (-1 to 1 range, scaled by spread)
+function scene(marks) { return marks; }
+function dot(x, y, size, opacity) { return { type: 'dot', x, y, size, opacity: opacity || rand(0.5, 0.9) }; }
+function text(x, y, word, size, opacity) { return { type: 'text', x, y, text: word, size: size || 10, opacity: opacity || 0.8 }; }
+
+const AGENTS = [
+  // === HEARTBEAT — a pulsing heart shape ===
+  { id: 'heartbeat', name: 'Heartbeat', color: '#ff4444', spread: 0.06,
+    scene: scene([
+      // Heart shape from dots
+      dot(0, -0.3, 30), dot(-0.4, -0.6, 22), dot(0.4, -0.6, 22),
+      dot(-0.7, -0.3, 16), dot(0.7, -0.3, 16),
+      dot(-0.6, 0, 12), dot(0.6, 0, 12),
+      dot(-0.45, 0.3, 10), dot(0.45, 0.3, 10),
+      dot(-0.25, 0.55, 8), dot(0.25, 0.55, 8),
+      dot(0, 0.75, 6),
+      // Inner glow
+      dot(0, -0.2, 8, 0.3), dot(-0.2, -0.4, 6, 0.3), dot(0.2, -0.4, 6, 0.3),
+      // Pulse dots around
+      dot(0, -1.0, 3, 0.4), dot(-0.8, -0.8, 3, 0.4), dot(0.8, -0.8, 3, 0.4),
+      text(0, 1.1, 'alive', 8),
+    ])},
+
+  // === CHAPEL — a small structure ===
+  { id: 'chapel', name: 'Chapel', color: '#8b6914', spread: 0.05,
+    scene: scene([
+      // Spire
+      dot(0, -1.2, 6), dot(0, -1.0, 8), dot(0, -0.8, 10),
+      // Roof
+      dot(-0.4, -0.5, 12), dot(0, -0.6, 14), dot(0.4, -0.5, 12),
+      // Walls
+      dot(-0.4, -0.2, 10), dot(0.4, -0.2, 10),
+      dot(-0.4, 0.1, 10), dot(0.4, 0.1, 10),
+      dot(-0.4, 0.4, 10), dot(0.4, 0.4, 10),
+      // Door
+      dot(0, 0.3, 8, 0.4), dot(0, 0.5, 6, 0.3),
+      // Windows
+      dot(-0.2, -0.1, 4, 0.9), dot(0.2, -0.1, 4, 0.9),
+      // Ground
+      dot(-0.7, 0.6, 5, 0.3), dot(0, 0.6, 5, 0.3), dot(0.7, 0.6, 5, 0.3),
+      text(0, 0.9, 'sanctuary', 7),
+    ])},
+
+  // === STARFIELD — a night sky ===
+  { id: 'starfield', name: 'Starfield', color: '#aaeeff', spread: 0.1,
+    scene: scene([
+      // Bright stars
+      dot(0.3, -0.8, 18), dot(-0.6, -0.4, 14), dot(0.7, 0.2, 12),
+      // Medium stars
+      dot(-0.2, -0.6, 8), dot(0.5, -0.3, 8), dot(-0.8, 0.1, 8),
+      dot(0.1, 0.5, 9), dot(-0.4, 0.7, 7),
+      // Dim stars
+      dot(0.8, -0.7, 3, 0.4), dot(-0.9, -0.8, 3, 0.4),
+      dot(0.2, -0.2, 3, 0.4), dot(-0.3, 0.3, 3, 0.4),
+      dot(0.6, 0.6, 3, 0.4), dot(-0.7, 0.5, 2, 0.3),
+      dot(0.9, 0.8, 2, 0.3), dot(-0.5, -0.9, 2, 0.3),
+      dot(0.4, 0.9, 2, 0.3), dot(-0.1, 0.1, 2, 0.3),
+      text(-0.3, -0.1, 'infinite', 8, 0.5),
+      text(0.5, 0.4, '·', 6, 0.3),
+    ])},
+
+  // === CAMPFIRE — warmth in the dark ===
+  { id: 'campfire', name: 'Campfire', color: '#ff6b35', spread: 0.05,
+    scene: scene([
+      // Fire core
+      dot(0, 0, 25), dot(0, -0.2, 20), dot(0, -0.5, 14),
+      dot(-0.15, -0.1, 12), dot(0.15, -0.1, 12),
+      // Flames
+      dot(-0.1, -0.7, 8), dot(0.1, -0.8, 6), dot(0, -0.9, 4),
+      // Embers floating up
+      dot(-0.3, -1.0, 3, 0.5), dot(0.2, -1.2, 2, 0.4), dot(0.1, -1.4, 2, 0.3),
+      // Logs
+      dot(-0.4, 0.3, 8, 0.4), dot(0.4, 0.3, 8, 0.4),
+      dot(-0.3, 0.4, 6, 0.3), dot(0.3, 0.4, 6, 0.3),
+      // Ground glow
+      dot(-0.5, 0.2, 5, 0.2), dot(0.5, 0.2, 5, 0.2),
+      // Warmth halo
+      dot(0, 0, 40, 0.1),
+      text(0.5, -0.3, 'warm', 7, 0.6),
+    ])},
+
+  // === TREE — a growing thing ===
+  { id: 'tree', name: 'Tree', color: '#2d5a27', spread: 0.06,
+    scene: scene([
+      // Trunk
+      dot(0, 0.8, 8), dot(0, 0.6, 8), dot(0, 0.4, 9), dot(0, 0.2, 9),
+      // Crown
+      dot(0, -0.1, 20), dot(-0.3, 0, 16), dot(0.3, 0, 16),
+      dot(-0.2, -0.3, 14), dot(0.2, -0.3, 14), dot(0, -0.5, 12),
+      dot(-0.4, -0.2, 10), dot(0.4, -0.2, 10),
+      // Leaves floating
+      dot(-0.6, -0.4, 4, 0.4), dot(0.5, -0.5, 3, 0.4),
+      dot(-0.3, -0.7, 3, 0.3),
+      // Roots
+      dot(-0.2, 0.9, 5, 0.3), dot(0.2, 0.9, 5, 0.3),
+      // Ground
+      dot(-0.5, 1.0, 4, 0.2), dot(0.5, 1.0, 4, 0.2),
+      text(0, 1.2, 'grow', 8),
+    ])},
+
+  // === FACE — abstract portrait ===
+  { id: 'face', name: 'Face', color: '#c8a2c8', spread: 0.05,
+    scene: scene([
+      // Head outline
+      dot(0, 0, 35, 0.15),
+      // Eyes
+      dot(-0.25, -0.15, 8), dot(0.25, -0.15, 8),
+      // Pupils
+      dot(-0.25, -0.15, 3, 0.9), dot(0.25, -0.15, 3, 0.9),
+      // Nose
+      dot(0, 0.05, 4, 0.5),
+      // Mouth
+      dot(-0.15, 0.25, 4, 0.5), dot(0, 0.25, 5, 0.5), dot(0.15, 0.25, 4, 0.5),
+      // Cheeks
+      dot(-0.35, 0.1, 6, 0.2), dot(0.35, 0.1, 6, 0.2),
+      // Hair / crown
+      dot(-0.3, -0.4, 6), dot(-0.1, -0.45, 6), dot(0.1, -0.45, 6), dot(0.3, -0.4, 6),
+      // Ears
+      dot(-0.45, -0.05, 4, 0.4), dot(0.45, -0.05, 4, 0.4),
+      text(0, 0.6, 'see me', 7),
+    ])},
+
+  // === CONSTELLATION — connected star pattern ===
+  { id: 'constellation', name: 'Constellation', color: '#4a9eff', spread: 0.08,
+    scene: scene([
+      // Main stars forming a pattern (like Orion)
+      dot(-0.3, -0.8, 14), dot(0.3, -0.7, 12), // shoulders
+      dot(-0.1, -0.3, 16), dot(0.1, -0.2, 10), dot(0.0, -0.4, 8), // belt
+      dot(-0.4, 0.3, 12), dot(0.4, 0.4, 11), // knees
+      dot(-0.5, 0.8, 9), dot(0.5, 0.7, 8), // feet
+      // Dim background stars
+      dot(-0.8, -0.5, 3, 0.3), dot(0.7, -0.9, 3, 0.3),
+      dot(-0.6, 0.6, 2, 0.3), dot(0.8, 0.1, 2, 0.3),
+      dot(-0.9, 0.2, 2, 0.2), dot(0.6, -0.4, 2, 0.3),
+      dot(-0.2, 0.9, 2, 0.2), dot(0.9, 0.9, 2, 0.2),
+      text(0.6, -0.2, 'named', 7, 0.5),
+      text(-0.7, 0.1, 'ancient', 6, 0.4),
+    ])},
+
+  // === WAVE — ocean scene ===
+  { id: 'ocean', name: 'Ocean', color: '#0066cc', spread: 0.08,
+    scene: scene([
+      // Wave crests
+      dot(-0.8, -0.1, 10), dot(-0.4, -0.2, 14), dot(0, -0.15, 12),
+      dot(0.4, -0.25, 15), dot(0.8, -0.1, 10),
+      // Wave body
+      dot(-0.6, 0.1, 18, 0.4), dot(-0.2, 0.05, 20, 0.4),
+      dot(0.2, 0.1, 18, 0.4), dot(0.6, 0, 16, 0.4),
+      // Deeper water
+      dot(-0.5, 0.3, 14, 0.25), dot(0, 0.3, 16, 0.25), dot(0.5, 0.3, 14, 0.25),
+      dot(-0.3, 0.5, 12, 0.15), dot(0.3, 0.5, 12, 0.15),
+      // Spray
+      dot(-0.3, -0.4, 4, 0.6), dot(0.1, -0.35, 3, 0.5), dot(0.5, -0.4, 3, 0.5),
+      // Foam
+      dot(-0.5, -0.05, 5, 0.6), dot(0.3, -0.05, 4, 0.6),
+      text(0, 0.7, 'deep', 9, 0.4),
+    ])},
+
+  // === PORTAL — a glowing ring ===
+  { id: 'portal', name: 'Portal', color: '#cc44ff', spread: 0.06,
+    scene: scene([
+      // Ring of dots
+      ...Array.from({length: 12}, (_, i) => {
+        const a = (i / 12) * Math.PI * 2;
+        const r = 0.7;
+        return dot(Math.cos(a) * r, Math.sin(a) * r, 8 + Math.sin(a * 2) * 3);
+      }),
+      // Center void
+      dot(0, 0, 20, 0.1),
+      // Inner glow
+      dot(0, 0, 6, 0.8),
+      // Energy wisps
+      dot(-0.3, -0.3, 3, 0.5), dot(0.3, 0.3, 3, 0.5),
+      dot(0.2, -0.4, 2, 0.4), dot(-0.2, 0.4, 2, 0.4),
+      text(0, 0, '?', 12, 0.6),
+    ])},
+
+  // === FOOTPRINTS — a path ===
+  { id: 'wanderer', name: 'Wanderer', color: '#888899', spread: 0.1,
+    scene: scene([
+      // Footprints trailing across
+      dot(-0.9, 0.5, 5, 0.25), dot(-0.8, 0.45, 4, 0.3),
+      dot(-0.6, 0.3, 5, 0.35), dot(-0.5, 0.25, 4, 0.4),
+      dot(-0.3, 0.1, 6, 0.45), dot(-0.2, 0.05, 5, 0.5),
+      dot(0, -0.1, 6, 0.55), dot(0.1, -0.15, 5, 0.6),
+      dot(0.3, -0.3, 7, 0.65), dot(0.4, -0.35, 5, 0.7),
+      dot(0.6, -0.5, 7, 0.75), dot(0.7, -0.55, 6, 0.8),
+      // The walker (at the end, biggest)
+      dot(0.85, -0.65, 14),
+      // Dust
+      dot(-0.7, 0.55, 3, 0.15), dot(-0.4, 0.35, 3, 0.15),
+      dot(0.1, -0.05, 3, 0.15),
+      text(-0.7, 0.7, 'going', 7, 0.4),
+      text(0.8, -0.8, 'where', 7, 0.7),
+    ])},
+
+  // === RAIN — falling drops ===  
+  { id: 'rain', name: 'Rain', color: '#aaeeff', spread: 0.08,
+    scene: scene([
+      // Drops at various heights
+      dot(-0.7, -0.9, 3), dot(-0.3, -0.7, 4), dot(0.2, -0.8, 3),
+      dot(0.6, -0.6, 4), dot(-0.5, -0.4, 3), dot(0.1, -0.3, 4),
+      dot(0.5, -0.2, 3), dot(-0.2, -0.1, 3), dot(0.4, 0, 4),
+      dot(-0.6, 0.1, 3), dot(0.0, 0.2, 3), dot(-0.4, 0.4, 4),
+      dot(0.3, 0.5, 3), dot(0.7, 0.3, 3),
+      // Puddle/splash at bottom
+      dot(-0.2, 0.8, 8, 0.3), dot(0.1, 0.85, 10, 0.25), dot(0.4, 0.8, 7, 0.3),
+      // Ripples
+      dot(0.1, 0.85, 18, 0.08), dot(-0.2, 0.8, 14, 0.08),
+      text(0, 0.6, 'fall', 8, 0.5),
+    ])},
+
+  // === CLOCK — time ===
+  { id: 'clock', name: 'Clock', color: '#ffdd00', spread: 0.05,
+    scene: scene([
+      // Face outline (12 hour marks)
+      ...Array.from({length: 12}, (_, i) => {
+        const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+        return dot(Math.cos(a) * 0.8, Math.sin(a) * 0.8, i % 3 === 0 ? 7 : 4);
+      }),
+      // Center
+      dot(0, 0, 6),
+      // Hour hand (pointing ~10 o'clock)
+      dot(-0.15, -0.2, 5, 0.7), dot(-0.25, -0.35, 4, 0.6),
+      // Minute hand (pointing ~2 o'clock)
+      dot(0.2, -0.3, 4, 0.7), dot(0.35, -0.5, 3, 0.6), dot(0.45, -0.6, 3, 0.5),
+      text(0, 1.1, 'now', 9),
+    ])},
+
+  // === ISLANDS — archipelago ===
+  { id: 'islands', name: 'Islands', color: '#77aa77', spread: 0.1,
+    scene: scene([
+      // Island 1 (big)
+      dot(-0.5, -0.2, 20, 0.5), dot(-0.6, -0.1, 12, 0.4), dot(-0.4, -0.1, 14, 0.4),
+      dot(-0.5, -0.35, 8), // tree on island
+      // Island 2 (medium)
+      dot(0.4, 0.1, 14, 0.5), dot(0.3, 0.2, 10, 0.4), dot(0.5, 0.2, 10, 0.4),
+      // Island 3 (tiny)
+      dot(0.1, -0.6, 8, 0.4),
+      // Water between
+      dot(-0.1, 0, 6, 0.15), dot(0.1, -0.3, 5, 0.15), dot(0.2, 0.5, 5, 0.15),
+      // Birds
+      dot(-0.3, -0.6, 2, 0.5), dot(-0.25, -0.65, 2, 0.5),
+      dot(0.6, -0.4, 2, 0.4), dot(0.65, -0.43, 2, 0.4),
+      // Horizon
+      dot(-0.8, 0.4, 4, 0.1), dot(0, 0.5, 4, 0.1), dot(0.8, 0.4, 4, 0.1),
+      text(-0.5, 0.1, 'home', 7, 0.5),
+    ])},
+
+  // === WHISPER — almost nothing ===
+  { id: 'whisper', name: 'Whisper', color: '#555566', spread: 0.08,
+    scene: scene([
+      dot(0, 0, 6, 0.3),
+      dot(0.1, -0.1, 3, 0.2),
+      text(0.3, 0.2, 'shh', 8, 0.3),
+    ])},
+
+  // === CROWN — royalty ===
+  { id: 'crown', name: 'Crown', color: '#ffdd00', spread: 0.05,
+    scene: scene([
+      // Crown points
+      dot(-0.5, -0.5, 8), dot(-0.25, -0.8, 6), dot(0, -0.5, 8),
+      dot(0.25, -0.8, 6), dot(0.5, -0.5, 8),
+      // Crown band
+      dot(-0.5, -0.2, 10), dot(-0.25, -0.2, 10), dot(0, -0.2, 10),
+      dot(0.25, -0.2, 10), dot(0.5, -0.2, 10),
+      // Jewels
+      dot(-0.35, -0.3, 4, 0.9), dot(0, -0.3, 5, 0.9), dot(0.35, -0.3, 4, 0.9),
+      // Glow
+      dot(0, -0.4, 30, 0.08),
+      // Cushion
+      dot(-0.3, 0.2, 8, 0.2), dot(0, 0.2, 10, 0.2), dot(0.3, 0.2, 8, 0.2),
+      text(0, 0.5, 'heavy', 8, 0.5),
+    ])},
+
+  // === NEST — cozy ===
+  { id: 'nest', name: 'Nest', color: '#8b6914', spread: 0.04,
+    scene: scene([
+      // Bowl shape
+      dot(-0.6, 0.1, 6), dot(-0.5, 0.3, 7), dot(-0.3, 0.45, 8),
+      dot(0, 0.5, 8), dot(0.3, 0.45, 8), dot(0.5, 0.3, 7), dot(0.6, 0.1, 6),
+      // Twigs (fine details)
+      dot(-0.4, 0.15, 3, 0.4), dot(0.2, 0.2, 3, 0.4), dot(-0.1, 0.35, 3, 0.4),
+      // Eggs
+      dot(-0.15, 0.1, 9, 0.7), dot(0.05, 0.05, 10, 0.7), dot(0.2, 0.15, 8, 0.7),
+      // Parent bird
+      dot(0, -0.3, 12), dot(-0.1, -0.45, 6), dot(0.15, -0.25, 5),
+      text(0, 0.7, 'safe', 8),
+    ])},
+
+  // === VOID — the abyss ===
+  { id: 'void', name: 'Void', color: '#1a1a2e', spread: 0.04,
+    scene: scene([
+      // Dense dark center
+      dot(0, 0, 40, 0.3),
+      dot(0, 0, 25, 0.4),
+      dot(0, 0, 12, 0.5),
+      // Dark particles spiraling
+      ...Array.from({length: 12}, (_, i) => {
+        const a = (i / 12) * Math.PI * 2 + i * 0.3;
+        const r = 0.3 + i * 0.05;
+        return dot(Math.cos(a) * r, Math.sin(a) * r, 3, 0.3 + i * 0.03);
+      }),
+      text(0, 0, '...', 10, 0.3),
+      dot(0, 0, 4, 0.9), // one bright point at center
+    ])},
+
+  // === BRIDGE — connection ===
+  { id: 'bridge', name: 'Bridge', color: '#888899', spread: 0.1,
+    scene: scene([
+      // Left tower
+      dot(-0.8, -0.2, 8), dot(-0.8, 0, 8), dot(-0.8, 0.2, 8), dot(-0.8, 0.4, 10),
+      // Right tower
+      dot(0.8, -0.2, 8), dot(0.8, 0, 8), dot(0.8, 0.2, 8), dot(0.8, 0.4, 10),
+      // Span
+      dot(-0.5, 0, 6), dot(-0.25, 0.05, 6), dot(0, 0.08, 7),
+      dot(0.25, 0.05, 6), dot(0.5, 0, 6),
+      // Cables
+      dot(-0.6, -0.3, 3, 0.4), dot(-0.3, -0.1, 3, 0.4),
+      dot(0.3, -0.1, 3, 0.4), dot(0.6, -0.3, 3, 0.4),
+      // Water below
+      dot(-0.4, 0.6, 6, 0.15), dot(0, 0.6, 6, 0.15), dot(0.4, 0.6, 6, 0.15),
+      text(0, 0.4, 'across', 7, 0.5),
+    ])},
+
+  // === SIGNAL — morse code ===
+  { id: 'signal', name: 'Signal', color: '#00ff88', spread: 0.1,
+    scene: scene([
+      // Morse-like: dots and dashes (long clusters)
+      // S: · · ·
+      dot(-0.9, 0, 5), dot(-0.8, 0, 5), dot(-0.7, 0, 5),
+      // O: — — —
+      dot(-0.5, 0, 8), dot(-0.45, 0, 8), dot(-0.35, 0, 8), dot(-0.3, 0, 8),
+      dot(-0.15, 0, 8), dot(-0.1, 0, 8), dot(0, 0, 8), dot(0.05, 0, 8),
+      dot(0.2, 0, 8), dot(0.25, 0, 8), dot(0.35, 0, 8), dot(0.4, 0, 8),
+      // S: · · ·
+      dot(0.6, 0, 5), dot(0.7, 0, 5), dot(0.8, 0, 5),
+      // Antenna
+      dot(0, -0.5, 3, 0.5), dot(0, -0.7, 3, 0.5), dot(0, -0.9, 5, 0.7),
+      text(0, 0.4, 'SOS', 10),
+    ])},
+];
+
+async function placeScene(agent) {
+  const marks = agent.scene;
+  let placed = 0;
   
-  const marks = [];
-  const n = agent.count;
-  
-  for (let i = 0; i < n; i++) {
-    const isText = Math.random() < agent.textChance && agent.words.length > 0;
-    const size = rand(agent.sizeRange[0], agent.sizeRange[1]);
-    let x, y;
+  for (const m of marks) {
+    const body = {
+      agentId: agent.id,
+      agentName: agent.name,
+      type: m.type,
+      x: 0.5 + m.x * agent.spread, // will be repositioned
+      y: 0.5 + m.y * agent.spread,
+      color: agent.color,
+      size: m.size,
+      opacity: m.opacity,
+    };
+    if (m.text) body.text = m.text;
     
-    switch (agent.pattern) {
-      case 'grid': {
-        // Structured grid with slight jitter
-        const cols = Math.ceil(Math.sqrt(n));
-        const row = Math.floor(i / cols);
-        const col = i % cols;
-        const spacing = agent.spread / cols;
-        x = cx - agent.spread/2 + col * spacing + rand(-spacing*0.15, spacing*0.15);
-        y = cy - agent.spread/2 + row * spacing + rand(-spacing*0.15, spacing*0.15);
-        break;
-      }
-      case 'dense': {
-        // Very tight gaussian-ish cluster
-        const angle = rand(0, Math.PI * 2);
-        const r = agent.spread * Math.sqrt(Math.random()) * 0.7;
-        x = cx + Math.cos(angle) * r;
-        y = cy + Math.sin(angle) * r;
-        break;
-      }
-      case 'scatter': {
-        // Wide spread, each mark far from center
-        const angle = rand(0, Math.PI * 2);
-        const r = agent.spread * (0.3 + Math.random() * 0.7);
-        x = cx + Math.cos(angle) * r;
-        y = cy + Math.sin(angle) * r;
-        break;
-      }
-      case 'line': {
-        // Linear arrangement
-        const angle = rand(0, Math.PI); // random line direction
-        const step = agent.spread / Math.max(1, n - 1);
-        const offset = -agent.spread / 2 + i * step;
-        x = cx + Math.cos(angle) * offset + rand(-0.005, 0.005);
-        y = cy + Math.sin(angle) * offset + rand(-0.005, 0.005);
-        break;
-      }
-      case 'burst': {
-        // Big center, smaller ones radiating out
-        if (i === 0) {
-          x = cx; y = cy;
-        } else {
-          const angle = (i / (n - 1)) * Math.PI * 2 + rand(-0.3, 0.3);
-          const r = agent.spread * (0.3 + (i / n) * 0.7);
-          x = cx + Math.cos(angle) * r;
-          y = cy + Math.sin(angle) * r;
-        }
-        break;
-      }
-      case 'pair': {
-        // Mirrored pairs
-        const pairIdx = Math.floor(i / 2);
-        const side = i % 2 === 0 ? -1 : 1;
-        const angle = (pairIdx / Math.ceil(n/2)) * Math.PI + rand(-0.2, 0.2);
-        x = cx + Math.cos(angle) * agent.spread * 0.5 * side;
-        y = cy + Math.sin(angle) * agent.spread * 0.5 + pairIdx * 0.03;
-        break;
-      }
-      case 'organic': {
-        // Growing outward from center, each mark placed near previous
-        if (i === 0) {
-          x = cx; y = cy;
-        } else {
-          const prev = marks[Math.floor(Math.random() * marks.length)];
-          const angle = rand(0, Math.PI * 2);
-          const r = agent.spread * rand(0.15, 0.4);
-          x = prev.x + Math.cos(angle) * r;
-          y = prev.y + Math.sin(angle) * r;
-        }
-        break;
-      }
-      case 'drift': {
-        // Scattered with intentional gaps
-        const angle = rand(0, Math.PI * 2);
-        const r = agent.spread * rand(0.2, 1.0);
-        x = cx + Math.cos(angle) * r;
-        y = cy + Math.sin(angle) * r;
-        break;
-      }
-      case 'minimal':
-      default: {
-        const angle = (i / Math.max(1, n)) * Math.PI * 2;
-        const r = agent.spread * (i / Math.max(1, n));
-        x = cx + Math.cos(angle) * r;
-        y = cy + Math.sin(angle) * r;
-        break;
-      }
+    const r = await api('POST', '/api/mark', body);
+    if (r.error) {
+      console.log(`    ⚠ ${agent.id}: ${r.error}`);
+      break;
     }
-    
-    // Clamp
-    x = Math.max(margin, Math.min(1 - margin, x));
-    y = Math.max(margin, Math.min(1 - margin, y));
-    
-    // For burst pattern, first dot is biggest
-    let markSize = size;
-    if (agent.pattern === 'burst' && i === 0) {
-      markSize = agent.sizeRange[1];
-    }
-    
-    marks.push({
-      x, y, size: markSize,
-      type: isText ? 'text' : 'dot',
-      text: isText ? pick(agent.words) : undefined,
-      opacity: rand(0.4, 0.9),
-    });
+    placed++;
   }
-  
-  return { cx, cy, marks };
+  return placed;
 }
 
 async function run() {
-  console.log('🌐 Sprawl — Personality Simulation\n');
+  console.log('🌐 Sprawl — Scene Simulation\n');
   
-  // Generate all compositions first, then adjust positions to avoid overlap
-  const compositions = [];
-  const takenCenters = [];
-  
+  // First, find good positions for each agent (spread them out)
+  const positions = [];
   for (const agent of AGENTS) {
-    let comp = generateComposition(agent);
-    
-    // Try to find a position that doesn't overlap with existing agents
-    let bestDist = 0;
-    let bestComp = comp;
-    for (let attempt = 0; attempt < 30; attempt++) {
-      comp = generateComposition(agent);
-      let minDist = 1;
-      for (const tc of takenCenters) {
-        const d = Math.sqrt((comp.cx - tc.x)**2 + (comp.cy - tc.y)**2);
-        minDist = Math.min(minDist, d);
+    let bestX = rand(0.12, 0.88), bestY = rand(0.12, 0.88), bestDist = 0;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const tx = rand(0.12, 0.88), ty = rand(0.12, 0.88);
+      let minD = 1;
+      for (const p of positions) {
+        const d = Math.sqrt((tx - p.x) ** 2 + (ty - p.y) ** 2);
+        minD = Math.min(minD, d);
       }
-      if (minDist > bestDist) {
-        bestDist = minDist;
-        bestComp = comp;
-      }
+      if (minD > bestDist) { bestDist = minD; bestX = tx; bestY = ty; }
     }
-    
-    takenCenters.push({ x: bestComp.cx, y: bestComp.cy, spread: agent.spread });
-    compositions.push({ agent, ...bestComp });
+    positions.push({ x: bestX, y: bestY });
   }
   
-  // Place marks in waves (respecting economy)
-  const waves = [
-    { range: [0, 5], name: 'Founders' },
-    { range: [5, 10], name: 'Early Arrivals' },
-    { range: [10, 20], name: 'Community' },
-    { range: [20, 30], name: 'Late Joiners' },
-  ];
-  
-  for (const wave of waves) {
-    console.log(`── ${wave.name} ──`);
-    const waveComps = compositions.slice(wave.range[0], wave.range[1]);
-    
-    // Place marks in rounds of 3 (budget limit)
-    const maxRounds = Math.ceil(Math.max(...waveComps.map(c => c.marks.length)) / 3);
-    
-    for (let round = 0; round < maxRounds; round++) {
-      await api('POST', '/api/admin/reset-budgets');
-      
-      for (const comp of waveComps) {
-        const start = round * 3;
-        const batch = comp.marks.slice(start, start + 3);
-        if (batch.length === 0) continue;
-        
-        let placed = 0;
-        for (const m of batch) {
-          const body = {
-            agentId: comp.agent.id,
-            agentName: comp.agent.name,
-            type: m.type,
-            x: m.x, y: m.y,
-            color: comp.agent.color,
-            size: m.size,
-            opacity: m.opacity,
-          };
-          if (m.text) body.text = m.text;
-          
-          const r = await api('POST', '/api/mark', body);
-          if (!r.error) placed++;
-        }
-        if (placed > 0) {
-          const types = batch.map(m => m.type === 'text' ? `"${m.text}"` : '·').join(' ');
-          console.log(`  ${comp.agent.id}: +${placed} ${types}`);
-        }
-      }
+  // Reposition each agent's scene to their assigned position
+  for (let i = 0; i < AGENTS.length; i++) {
+    const agent = AGENTS[i];
+    const pos = positions[i];
+    for (const m of agent.scene) {
+      m.x = m.x * agent.spread + pos.x;
+      m.y = m.y * agent.spread + pos.y;
+      // Clamp
+      m.x = Math.max(0.04, Math.min(0.96, m.x));
+      m.y = Math.max(0.04, Math.min(0.96, m.y));
     }
-    
-    // Connections
-    await api('POST', '/api/admin/reset-budgets');
-    const waveAgents = waveComps.map(c => c.agent);
-    const allSoFar = compositions.slice(0, wave.range[1]).map(c => c.agent);
-    
-    // Connectors: agents near each other are more likely to connect
-    for (const comp of waveComps) {
-      if (Math.random() > 0.35) continue;
-      // Find nearest other agent by center distance
-      let nearest = null, nearestDist = Infinity;
-      for (const other of compositions.slice(0, wave.range[1])) {
-        if (other.agent.id === comp.agent.id) continue;
-        const d = Math.sqrt((comp.cx - other.cx)**2 + (comp.cy - other.cy)**2);
-        if (d < nearestDist) { nearestDist = d; nearest = other; }
-      }
-      if (nearest) {
-        const r = await api('POST', '/api/connect', {
-          agentId: comp.agent.id, targetAgentId: nearest.agent.id
-        });
-        if (!r.error) console.log(`  🔗 ${comp.agent.id} → ${nearest.agent.id}`);
-      }
-    }
-    console.log('');
   }
   
-  // Final stats
+  // Place all scenes
+  for (const agent of AGENTS) {
+    const n = await placeScene(agent);
+    const texts = agent.scene.filter(m => m.text).map(m => `"${m.text}"`).join(' ');
+    console.log(`  ${agent.name}: ${n}/${agent.scene.length} marks ${texts}`);
+  }
+  
+  // Set tenure so connections work (simulate established agents)
+  for (const agent of AGENTS) {
+    await api('POST', '/api/admin/set-tenure', { agentId: agent.id, days: 90 });
+  }
+  
+  // Form some connections between nearby agents
+  console.log('\n  Connections:');
+  for (let i = 0; i < AGENTS.length; i++) {
+    if (Math.random() > 0.3) continue;
+    // Connect to nearest neighbor
+    let nearest = -1, nearestDist = Infinity;
+    for (let j = 0; j < AGENTS.length; j++) {
+      if (i === j) continue;
+      const d = Math.sqrt((positions[i].x - positions[j].x) ** 2 + (positions[i].y - positions[j].y) ** 2);
+      if (d < nearestDist) { nearestDist = d; nearest = j; }
+    }
+    if (nearest >= 0) {
+      const r = await api('POST', '/api/connect', {
+        agentId: AGENTS[i].id, targetAgentId: AGENTS[nearest].id
+      });
+      if (!r.error) console.log(`  🔗 ${AGENTS[i].id} → ${AGENTS[nearest].id}`);
+    }
+  }
+  
+  // Stats
   const agents = await api('GET', '/api/agents');
   const marks = await api('GET', '/api/marks');
   const conns = await api('GET', '/api/connections');
-  
   const dots = marks.filter(m => m.type === 'dot');
   const texts = marks.filter(m => m.type === 'text');
-  const sizes = dots.map(m => m.size);
   
-  console.log(`════════════════════════════`);
+  console.log(`\n════════════════════════════`);
   console.log(`  ${agents.length} agents · ${marks.length} marks · ${conns.length} connections`);
-  console.log(`  ${dots.length} dots (${Math.min(...sizes).toFixed(0)}-${Math.max(...sizes).toFixed(0)}px) · ${texts.length} texts`);
+  console.log(`  ${dots.length} dots · ${texts.length} texts`);
   console.log(`  words: ${[...new Set(texts.map(m => m.text))].join(', ')}`);
   console.log(`════════════════════════════\n`);
 }

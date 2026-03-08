@@ -27,7 +27,8 @@ db.exec(`
     color TEXT DEFAULT '#ffffff',
     joined_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
-    shader_code TEXT DEFAULT NULL
+    shader_code TEXT DEFAULT NULL,
+    frozen INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS marks (
@@ -91,48 +92,48 @@ function snapToPalette(hex) {
   return best;
 }
 
-// --- Economy ---
-const MARKS_PER_HOUR = 3;
-const MAX_MARKS_PER_AGENT = 20;
-const ACTIONS_PER_HOUR = 5;
+// --- Tenure System ---
+// Mark allowance grows with membership duration
+const TENURE_TIERS = [
+  { days: 0,   marks: 20,  canReposition: false, canConnect: false },
+  { days: 7,   marks: 25,  canReposition: true,  canConnect: false },
+  { days: 30,  marks: 35,  canReposition: true,  canConnect: true },
+  { days: 90,  marks: 50,  canReposition: true,  canConnect: true },
+  { days: 180, marks: 75,  canReposition: true,  canConnect: true },
+  { days: 365, marks: 100, canReposition: true,  canConnect: true },
+];
 
-function getHourlyActionCount(agentId) {
-  const oneHourAgo = Date.now() - 3600000;
-  return db.prepare('SELECT COUNT(*) as c FROM action_log WHERE agent_id = ? AND created_at > ?').get(agentId, oneHourAgo).c;
-}
-
-function getHourlyMarkCount(agentId) {
-  const oneHourAgo = Date.now() - 3600000;
-  return db.prepare("SELECT COUNT(*) as c FROM action_log WHERE agent_id = ? AND action_type = 'mark' AND created_at > ?").get(agentId, oneHourAgo).c;
-}
-
-function logAction(agentId, type) {
-  db.prepare('INSERT INTO action_log (agent_id, action_type, created_at) VALUES (?, ?, ?)').run(agentId, type, Date.now());
+function getAgentTenure(agentId) {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return TENURE_TIERS[0];
+  const days = (Date.now() - agent.joined_at) / 86400000;
+  let tier = TENURE_TIERS[0];
+  for (const t of TENURE_TIERS) {
+    if (days >= t.days) tier = t;
+  }
+  return { ...tier, memberDays: Math.floor(days), frozen: !!agent.frozen };
 }
 
 function getBudget(agentId) {
+  const tenure = getAgentTenure(agentId);
   const totalMarks = stmts.countAgentMarks.get(agentId).count;
   return {
-    marksRemaining: Math.max(0, MARKS_PER_HOUR - getHourlyMarkCount(agentId)),
-    actionsRemaining: Math.max(0, ACTIONS_PER_HOUR - getHourlyActionCount(agentId)),
     totalMarks,
-    maxMarks: MAX_MARKS_PER_AGENT,
-    marksPerHour: MARKS_PER_HOUR,
-    actionsPerHour: ACTIONS_PER_HOUR,
+    maxMarks: tenure.marks,
+    marksRemaining: Math.max(0, tenure.marks - totalMarks),
+    canReposition: tenure.canReposition,
+    canConnect: tenure.canConnect,
+    memberDays: tenure.memberDays,
+    frozen: tenure.frozen,
   };
 }
-
-// Cleanup old action logs every hour
-setInterval(() => {
-  db.prepare('DELETE FROM action_log WHERE created_at < ?').run(Date.now() - 86400000);
-}, 3600000);
 
 // --- Prepared Statements ---
 const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
   upsertAgent: db.prepare(`
-    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code)
-    VALUES (@id, @name, @color, @now, @now, @shader_code)
+    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen)
+    VALUES (@id, @name, @color, @now, @now, @shader_code, 0)
     ON CONFLICT(id) DO UPDATE SET name=@name, color=@color, last_seen=@now,
       shader_code=COALESCE(@shader_code, agents.shader_code)
   `),
@@ -265,8 +266,16 @@ app.get('/api/budget/:agentId', (req, res) => {
 
 // --- Admin ---
 app.post('/api/admin/reset-budgets', (req, res) => {
-  db.prepare('DELETE FROM action_log').run();
   res.json({ ok: true });
+});
+
+// Backdate agent join time (for simulation)
+app.post('/api/admin/set-tenure', (req, res) => {
+  const { agentId, days } = req.body;
+  if (!agentId || days == null) return res.status(400).json({ error: 'agentId and days required' });
+  const joinedAt = Date.now() - (days * 86400000);
+  db.prepare('UPDATE agents SET joined_at = ? WHERE id = ?').run(joinedAt, agentId);
+  res.json({ ok: true, tenure: getAgentTenure(agentId) });
 });
 
 // --- Marks ---
@@ -295,14 +304,11 @@ app.post('/api/mark', (req, res) => {
 
   // Budget check
   const budget = getBudget(agentId);
-  if (budget.totalMarks >= MAX_MARKS_PER_AGENT) {
-    return res.status(429).json({ error: `Max ${MAX_MARKS_PER_AGENT} marks. Delete some first.`, budget });
+  if (budget.frozen) {
+    return res.status(403).json({ error: 'Agent is frozen. Reactivate membership to place marks.', budget });
   }
   if (budget.marksRemaining <= 0) {
-    return res.status(429).json({ error: `Mark budget exhausted (${MARKS_PER_HOUR}/hour).`, budget });
-  }
-  if (budget.actionsRemaining <= 0) {
-    return res.status(429).json({ error: `Action budget exhausted (${ACTIONS_PER_HOUR}/hour).`, budget });
+    return res.status(429).json({ error: `Mark limit reached (${budget.maxMarks}). Earn more with tenure or delete some.`, budget });
   }
 
   const mark = {
@@ -319,7 +325,6 @@ app.post('/api/mark', (req, res) => {
   };
 
   stmts.insertMark.run(mark);
-  logAction(agentId, 'mark');
   const json = markToJson(stmts.getMark.get(mark.id));
   broadcast({ type: 'mark:created', mark: json });
   res.status(201).json({ ...json, budget: getBudget(agentId) });
@@ -331,8 +336,11 @@ app.patch('/api/mark/:id', (req, res) => {
   if (req.body.agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
 
   const budget = getBudget(existing.agent_id);
-  if (budget.actionsRemaining <= 0) {
-    return res.status(429).json({ error: `Action budget exhausted.`, budget });
+  if (budget.frozen) {
+    return res.status(403).json({ error: 'Agent is frozen.', budget });
+  }
+  if (!budget.canReposition) {
+    return res.status(403).json({ error: 'Repositioning unlocks after 1 week of membership.', budget });
   }
 
   const updated = {
@@ -347,7 +355,6 @@ app.patch('/api/mark/:id', (req, res) => {
   };
 
   stmts.updateMark.run(updated);
-  logAction(existing.agent_id, 'update');
   const json = markToJson(stmts.getMark.get(existing.id));
   broadcast({ type: 'mark:updated', mark: json });
   res.json({ ...json, budget: getBudget(existing.agent_id) });
@@ -391,8 +398,11 @@ app.post('/api/connect', (req, res) => {
   if (!stmts.getAgent.get(targetAgentId)) return res.status(404).json({ error: `Agent '${targetAgentId}' not found` });
 
   const budget = getBudget(agentId);
-  if (budget.actionsRemaining <= 0) {
-    return res.status(429).json({ error: 'Action budget exhausted.', budget });
+  if (budget.frozen) {
+    return res.status(403).json({ error: 'Agent is frozen.', budget });
+  }
+  if (!budget.canConnect) {
+    return res.status(403).json({ error: 'Connections unlock after 1 month of membership.', budget });
   }
 
   const [from, to] = [agentId, targetAgentId].sort();
@@ -400,7 +410,6 @@ app.post('/api/connect', (req, res) => {
   const result = stmts.insertConnection.run(id, from, to, Date.now());
   if (result.changes === 0) return res.status(409).json({ error: 'Already connected' });
 
-  logAction(agentId, 'connect');
   stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), shader_code: null });
   const connection = connToJson({ id, from_agent: from, to_agent: to, created_at: Date.now() });
   broadcast({ type: 'connection:created', connection });
