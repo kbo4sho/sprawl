@@ -141,10 +141,6 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 let W, H, DPR;
 
-// --- Trail buffer (offscreen canvas for afterglow) ---
-const trailCanvas = document.createElement('canvas');
-const tCtx = trailCanvas.getContext('2d');
-
 function resize() {
   DPR = window.devicePixelRatio || 1;
   W = window.innerWidth;
@@ -152,9 +148,6 @@ function resize() {
   canvas.width = W * DPR;
   canvas.height = H * DPR;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  trailCanvas.width = canvas.width;
-  trailCanvas.height = canvas.height;
-  tCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -213,56 +206,28 @@ function rebuildIndex() {
   for (const m of marks) marksById[m.id] = m;
 }
 
-// --- Glow Sprite Cache ---
-// Pre-render glow circles at various sizes to avoid per-frame createRadialGradient
-const glowCache = {};
-function getGlowSprite(color, radius) {
-  const key = `${color}_${Math.round(radius)}`;
-  if (glowCache[key]) return glowCache[key];
-  
-  const size = Math.ceil(radius * 2) + 2;
-  const c = document.createElement('canvas');
-  c.width = size; c.height = size;
-  const cx = c.getContext('2d');
+// --- Draw helpers (no offscreen canvases — Safari compat) ---
+function drawGlow(px, py, radius, color, alpha) {
   const [r, g, b] = hexToRgb(color);
-  const grad = cx.createRadialGradient(size/2, size/2, 0, size/2, size/2, radius);
-  grad.addColorStop(0, `rgba(${r},${g},${b},0.6)`);
-  grad.addColorStop(0.2, `rgba(${r},${g},${b},0.3)`);
-  grad.addColorStop(0.5, `rgba(${r},${g},${b},0.08)`);
+  const grad = ctx.createRadialGradient(px, py, 0, px, py, radius);
+  grad.addColorStop(0, `rgba(${r},${g},${b},${0.6 * alpha})`);
+  grad.addColorStop(0.3, `rgba(${r},${g},${b},${0.2 * alpha})`);
   grad.addColorStop(1, 'transparent');
-  cx.fillStyle = grad;
-  cx.beginPath();
-  cx.arc(size/2, size/2, radius, 0, Math.PI * 2);
-  cx.fill();
-  
-  glowCache[key] = c;
-  // Evict old entries if cache grows too large
-  const keys = Object.keys(glowCache);
-  if (keys.length > 500) {
-    for (let i = 0; i < 100; i++) delete glowCache[keys[i]];
-  }
-  return c;
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-function getCoreSprite(color, radius) {
-  const key = `core_${color}_${Math.round(radius)}`;
-  if (glowCache[key]) return glowCache[key];
-  
-  const size = Math.ceil(radius * 2) + 2;
-  const c = document.createElement('canvas');
-  c.width = size; c.height = size;
-  const cx = c.getContext('2d');
+function drawCore(px, py, radius, color, alpha) {
   const [r, g, b] = hexToRgb(color);
-  const grad = cx.createRadialGradient(size/2, size/2, 0, size/2, size/2, radius);
-  grad.addColorStop(0, `rgba(${Math.min(255,r+120)},${Math.min(255,g+120)},${Math.min(255,b+120)},1)`);
-  grad.addColorStop(1, `rgba(${r},${g},${b},0.8)`);
-  cx.fillStyle = grad;
-  cx.beginPath();
-  cx.arc(size/2, size/2, radius, 0, Math.PI * 2);
-  cx.fill();
-  
-  glowCache[key] = c;
-  return c;
+  const grad = ctx.createRadialGradient(px, py, 0, px, py, radius);
+  grad.addColorStop(0, `rgba(${Math.min(255,r+120)},${Math.min(255,g+120)},${Math.min(255,b+120)},${alpha})`);
+  grad.addColorStop(1, `rgba(${r},${g},${b},${0.8 * alpha})`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // --- FPS Counter ---
@@ -570,179 +535,22 @@ function renderMark(mark, t) {
   switch (mark.type) {
     case 'dot':
     case 'particle': {
-      // Outer glow (cached sprite)
-      const glowR = Math.min(150, Math.round(sz * 3));
-      const glow = getGlowSprite(mark.color, glowR);
-      ctx.globalAlpha = a;
-      ctx.drawImage(glow, px - glow.width/2, py - glow.height/2);
-      
-      // Core (cached sprite)
-      const coreR = Math.round(sz * 0.5);
-      if (coreR >= 1) {
-        const core = getCoreSprite(mark.color, coreR);
-        ctx.drawImage(core, px - core.width/2, py - core.height/2);
-      }
-      ctx.globalAlpha = 1;
-      break;
-    }
-    
-    case 'orbit': {
-      // Central anchor (cached)
-      const anchorR = Math.round(sz * 0.6);
-      const anchor = getGlowSprite(mark.color, anchorR);
-      ctx.globalAlpha = a * 0.4;
-      ctx.drawImage(anchor, px - anchor.width/2, py - anchor.height/2);
-      ctx.globalAlpha = 1;
-      
-      // Orbit ring
-      ctx.strokeStyle = rgba(mark.color, a * 0.06);
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.arc(px, py, sz * 1.8, 0, Math.PI * 2);
-      ctx.stroke();
-      
-      // Satellites (cached sprites)
-      const count = 3 + (hashStr(mark.id) % 3);
-      const satR = Math.round(sz * 0.4);
-      const satSprite = getGlowSprite(mark.color, satR);
-      for (let i = 0; i < count; i++) {
-        const angle = (t * 0.6 + p.phase) + (i / count) * Math.PI * 2;
-        const wobble = Math.sin(t * 2 + i * 1.7) * sz * 0.15;
-        const radius = sz * 1.8 + wobble;
-        const sx = px + Math.cos(angle) * radius;
-        const sy = py + Math.sin(angle) * radius;
-        ctx.globalAlpha = a * 0.9;
-        ctx.drawImage(satSprite, sx - satSprite.width/2, sy - satSprite.height/2);
-      }
-      ctx.globalAlpha = 1;
-      break;
-    }
-    
-    case 'cluster': {
-      // Adaptive count based on total marks
-      const baseCount = 10 + (hashStr(mark.id) % 8);
-      const count = marks.length > 300 ? Math.min(baseCount, 6) : baseCount;
-      for (let i = 0; i < count; i++) {
-        const iSeed = hashStr(mark.id + i);
-        const angle = (i / count) * Math.PI * 2 + Math.sin(t * 0.4 + iSeed * 0.1) * 0.5;
-        const dist = sz * (0.3 + seededRandom(iSeed) * 1.2 + Math.sin(t * 0.3 + iSeed) * 0.2);
-        const ccx = px + Math.cos(angle) * dist;
-        const ccy = py + Math.sin(angle) * dist;
-        const cs = Math.round(sz * (0.1 + seededRandom(iSeed + 1) * 0.15) * 2);
-        
-        const sprite = getGlowSprite(mark.color, cs);
-        ctx.globalAlpha = a;
-        ctx.drawImage(sprite, ccx - sprite.width/2, ccy - sprite.height/2);
-      }
-      ctx.globalAlpha = 1;
-      break;
-    }
-    
-    case 'wave': {
-      // Double-pass glow: fat dim pass + thin bright pass (no shadowBlur)
-      const wLen = sz * 5;
-      const freq = 0.06 + Math.sin(t * 0.3) * 0.01;
-      // Glow pass
-      ctx.strokeStyle = rgba(mark.color, a * 0.12);
-      ctx.lineWidth = sz * 0.5;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let i = -wLen; i <= wLen; i += 3) {
-        const wy = py + Math.sin((i + t * 30 + p.phase * 10) * freq) * sz * 0.7;
-        if (i === -wLen) ctx.moveTo(px + i, wy);
-        else ctx.lineTo(px + i, wy);
-      }
-      ctx.stroke();
-      // Core pass
-      ctx.strokeStyle = rgba(mark.color, a * 0.5);
-      ctx.lineWidth = sz * 0.12;
-      ctx.beginPath();
-      for (let i = -wLen; i <= wLen; i += 2) {
-        const wy = py + Math.sin((i + t * 30 + p.phase * 10) * freq) * sz * 0.7;
-        if (i === -wLen) ctx.moveTo(px + i, wy);
-        else ctx.lineTo(px + i, wy);
-      }
-      ctx.stroke();
+      drawGlow(px, py, Math.min(150, sz * 2.5), mark.color, a);
+      if (sz >= 2) drawCore(px, py, sz * 0.5, mark.color, a);
       break;
     }
     
     case 'text': {
       if (!mark.text) break;
       const fontSize = sz * (mark.text.length > 10 ? 0.8 : 1);
-      ctx.font = `${fontSize}px 'Syne', sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      // Glow pass (larger, dim text)
       ctx.fillStyle = rgba(mark.color, a * 0.15);
       ctx.font = `${fontSize * 1.05}px 'Syne', sans-serif`;
       ctx.fillText(mark.text, px, py);
-      // Core pass
       ctx.fillStyle = rgba(mark.color, a * 0.9);
       ctx.font = `${fontSize}px 'Syne', sans-serif`;
       ctx.fillText(mark.text, px, py);
-      break;
-    }
-    
-    case 'line': {
-      if (!mark.points || mark.points.length < 2) break;
-      const ox = p.px - mark.x * W;
-      const oy = p.py - mark.y * H;
-      // Glow pass
-      ctx.strokeStyle = rgba(mark.color, a * 0.12);
-      ctx.lineWidth = Math.max(3, sz * 0.4);
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      mark.points.forEach((pt, i) => {
-        const lx = pt.x * W + ox, ly = pt.y * H + oy;
-        if (i === 0) ctx.moveTo(lx, ly);
-        else ctx.lineTo(lx, ly);
-      });
-      ctx.stroke();
-      // Core pass
-      ctx.strokeStyle = rgba(mark.color, a * 0.6);
-      ctx.lineWidth = Math.max(1, sz * 0.12);
-      ctx.beginPath();
-      mark.points.forEach((pt, i) => {
-        const lx = pt.x * W + ox, ly = pt.y * H + oy;
-        if (i === 0) ctx.moveTo(lx, ly);
-        else ctx.lineTo(lx, ly);
-      });
-      ctx.stroke();
-      break;
-    }
-    
-    case 'shape': {
-      const sides = mark.meta?.sides || 6;
-      const rotation = t * 0.15 + p.phase;
-      // Glow: slightly larger, dim
-      ctx.strokeStyle = rgba(mark.color, a * 0.1);
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      for (let i = 0; i <= sides; i++) {
-        const angle = (i / sides) * Math.PI * 2 + rotation;
-        const sx = px + Math.cos(angle) * (sz * 1.05);
-        const sy = py + Math.sin(angle) * (sz * 1.05);
-        if (i === 0) ctx.moveTo(sx, sy);
-        else ctx.lineTo(sx, sy);
-      }
-      ctx.closePath();
-      ctx.stroke();
-      // Core
-      ctx.fillStyle = rgba(mark.color, a * 0.08);
-      ctx.strokeStyle = rgba(mark.color, a * 0.35);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let i = 0; i <= sides; i++) {
-        const angle = (i / sides) * Math.PI * 2 + rotation;
-        const sx = px + Math.cos(angle) * sz;
-        const sy = py + Math.sin(angle) * sz;
-        if (i === 0) ctx.moveTo(sx, sy);
-        else ctx.lineTo(sx, sy);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
       break;
     }
   }
