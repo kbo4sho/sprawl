@@ -41,8 +41,32 @@
     font-size: 9px; color: #ffffff08; letter-spacing: 3px; margin-top: 2px;
   }
   
-  #controls {
+  #minimap {
+    position: fixed; bottom: 24px; left: 24px; z-index: 10;
+    width: 150px; height: 150px;
+    background: #08081090; border: 1px solid #ffffff08;
+    border-radius: 3px; backdrop-filter: blur(12px);
+    cursor: pointer;
+  }
+  
+  #zoom-controls {
     position: fixed; bottom: 24px; right: 24px; z-index: 10;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  #zoom-controls button {
+    background: #08081090; border: 1px solid #ffffff08;
+    color: #ffffff30; font-family: 'Space Mono', monospace;
+    font-size: 16px; font-weight: bold;
+    width: 40px; height: 40px; border-radius: 3px; cursor: pointer;
+    backdrop-filter: blur(12px); transition: all 0.3s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #zoom-controls button:hover {
+    color: #ffffff60; border-color: #ffffff18;
+  }
+  
+  #controls {
+    position: fixed; bottom: 80px; right: 24px; z-index: 10;
     display: flex; gap: 8px;
   }
   #controls button {
@@ -108,12 +132,26 @@
     font-size: 11px; margin-bottom: 2px;
   }
   #tooltip .mark-info { color: #ffffff30; font-size: 8px; text-transform: uppercase; letter-spacing: 2px; }
+  
+  #agent-label {
+    position: fixed; z-index: 15; pointer-events: none;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+    opacity: 0; transition: opacity 0.4s;
+    text-shadow: 0 0 8px currentColor, 0 1px 2px rgba(0,0,0,0.8);
+  }
+  #agent-label.show { opacity: 1; }
 </style>
 </head>
 <body>
 <div id="hud">
   <h1>Sprawl</h1>
   <div class="stats" id="stats"></div>
+</div>
+<canvas id="minimap"></canvas>
+<div id="zoom-controls">
+  <button id="btn-zoom-in">+</button>
+  <button id="btn-zoom-out">−</button>
 </div>
 <div id="controls">
   <button id="btn-about">?</button>
@@ -134,6 +172,7 @@
   <div class="agent-name" id="tt-name"></div>
   <div class="mark-info" id="tt-info"></div>
 </div>
+<div id="agent-label"></div>
 <canvas id="c"></canvas>
 
 <script>
@@ -141,10 +180,9 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 let W, H, DPR;
 
-// Canvas uses a square coordinate space mapped to the shorter dimension
-// so compositions don't stretch on tall/wide screens
-let SCALE = 1; // pixels per normalized unit
-let OX = 0, OY = 0; // offset to center
+// Camera state
+let camera = { x: 0, y: 0, zoom: 1 };
+let targetCamera = { x: 0, y: 0, zoom: 1 };
 
 function resize() {
   DPR = window.devicePixelRatio || 1;
@@ -153,23 +191,146 @@ function resize() {
   canvas.width = W * DPR;
   canvas.height = H * DPR;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  // Square mapping — use shorter dimension
-  SCALE = Math.min(W, H);
-  OX = (W - SCALE) / 2;
-  OY = (H - SCALE) / 2;
 }
 
-// Convert normalized 0-1 coords to screen pixels (square aspect)
-function toScreen(nx, ny) {
-  return { x: OX + nx * SCALE, y: OY + ny * SCALE };
+// Convert world coords to screen pixels
+function worldToScreen(wx, wy) {
+  return {
+    x: (wx - camera.x) * camera.zoom + W / 2,
+    y: (wy - camera.y) * camera.zoom + H / 2
+  };
 }
-window.addEventListener('resize', resize);
+
+// Convert screen pixels to world coords
+function screenToWorld(sx, sy) {
+  return {
+    x: (sx - W / 2) / camera.zoom + camera.x,
+    y: (sy - H / 2) / camera.zoom + camera.y
+  };
+}
+
+window.addEventListener('resize', () => { resize(); substrateCanvas = null; });
 resize();
+
+// --- Pan & Zoom Controls ---
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+let lastTouchDist = 0;
+
+let panMoved = false;
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0) {
+    isPanning = true;
+    panMoved = false;
+    panStart = { x: e.clientX, y: e.clientY };
+    canvas.style.cursor = 'grabbing';
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (isPanning) {
+    const dx = e.clientX - panStart.x;
+    const dy = e.clientY - panStart.y;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) panMoved = true;
+    targetCamera.x -= dx / camera.zoom;
+    targetCamera.y -= dy / camera.zoom;
+    panStart = { x: e.clientX, y: e.clientY };
+  }
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (!panMoved && e.button === 0) {
+    // Click without drag — check if we hit a mark
+    const clickWorld = screenToWorld(e.clientX, e.clientY);
+    let hitAgent = null;
+    for (const mark of marks) {
+      const dx = mark.x - clickWorld.x;
+      const dy = mark.y - clickWorld.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const hitRadius = (mark.size || 10) * 1.5;
+      if (dist < hitRadius) { hitAgent = mark.agentId; break; }
+    }
+    if (hitAgent && hitAgent === selectedAgent) {
+      selectedAgent = null;
+      focusTarget = 0;
+    } else if (hitAgent) {
+      selectedAgent = hitAgent;
+      focusTarget = 1;
+    } else {
+      selectedAgent = null;
+      focusTarget = 0;
+    }
+  }
+  isPanning = false;
+  canvas.style.cursor = 'crosshair';
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+  const newZoom = Math.max(0.05, Math.min(5.0, targetCamera.zoom * zoomFactor));
+  
+  // Zoom toward mouse position
+  const worldPos = screenToWorld(e.clientX, e.clientY);
+  targetCamera.zoom = newZoom;
+  const newWorldPos = screenToWorld(e.clientX, e.clientY);
+  targetCamera.x += worldPos.x - newWorldPos.x;
+  targetCamera.y += worldPos.y - newWorldPos.y;
+}, { passive: false });
+
+// Touch support
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 1) {
+    isPanning = true;
+    panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastTouchDist = Math.sqrt(dx * dx + dy * dy);
+  }
+});
+
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  if (e.touches.length === 1 && isPanning) {
+    const dx = e.touches[0].clientX - panStart.x;
+    const dy = e.touches[0].clientY - panStart.y;
+    targetCamera.x -= dx / camera.zoom;
+    targetCamera.y -= dy / camera.zoom;
+    panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (lastTouchDist > 0) {
+      const zoomFactor = dist / lastTouchDist;
+      targetCamera.zoom = Math.max(0.05, Math.min(5.0, targetCamera.zoom * zoomFactor));
+    }
+    lastTouchDist = dist;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', () => {
+  isPanning = false;
+  lastTouchDist = 0;
+});
+
+// Double-click to zoom in
+canvas.addEventListener('dblclick', (e) => {
+  const worldPos = screenToWorld(e.clientX, e.clientY);
+  targetCamera.zoom = Math.min(5.0, targetCamera.zoom * 2);
+  targetCamera.x = worldPos.x;
+  targetCamera.y = worldPos.y;
+});
 
 // --- State ---
 let marks = [];
+let allAgents = []; // For minimap
 let connections = []; // { from, to }
 let mouseX = -1, mouseY = -1;
+let selectedAgent = null; // agentId or null
+let focusTransition = 0; // 0 = no selection active, 1 = fully focused
+let focusTarget = 0; // what we're lerping toward
 const tooltip = document.getElementById('tooltip');
 const ttName = document.getElementById('tt-name');
 const ttInfo = document.getElementById('tt-info');
@@ -177,41 +338,6 @@ const statsEl = document.getElementById('stats');
 
 // Physics state per mark (keyed by id)
 const physics = {};
-
-// --- Spatial Hash Grid (for O(N) neighbor lookups) ---
-const GRID_CELL = 200; // pixels per cell
-let gridCols = 0, gridRows = 0;
-const grid = {}; // { "col,row": [markId, ...] }
-
-function rebuildGrid() {
-  gridCols = Math.ceil(W / GRID_CELL) || 1;
-  gridRows = Math.ceil(H / GRID_CELL) || 1;
-  for (const k in grid) delete grid[k];
-  for (const mark of marks) {
-    const p = physics[mark.id];
-    if (!p) continue;
-    const col = Math.floor(p.px / GRID_CELL);
-    const row = Math.floor(p.py / GRID_CELL);
-    const key = `${col},${row}`;
-    if (!grid[key]) grid[key] = [];
-    grid[key].push(mark.id);
-  }
-}
-
-function getNeighbors(px, py, radius) {
-  const results = [];
-  const minCol = Math.floor((px - radius) / GRID_CELL);
-  const maxCol = Math.floor((px + radius) / GRID_CELL);
-  const minRow = Math.floor((py - radius) / GRID_CELL);
-  const maxRow = Math.floor((py + radius) / GRID_CELL);
-  for (let c = minCol; c <= maxCol; c++) {
-    for (let r = minRow; r <= maxRow; r++) {
-      const ids = grid[`${c},${r}`];
-      if (ids) results.push(...ids);
-    }
-  }
-  return results;
-}
 
 // --- Mark Index (fast lookup by id) ---
 let marksById = {};
@@ -247,16 +373,11 @@ function initPhysics(mark) {
   if (physics[mark.id]) return;
   const seed = hashStr(mark.id);
   physics[mark.id] = {
-    px: OX + mark.x * SCALE,
-    py: OY + mark.y * SCALE,
-    vx: (seededRandom(seed) - 0.5) * 0.3,
-    vy: (seededRandom(seed + 1) - 0.5) * 0.3,
-    ax: 0, ay: 0,
-    wanderAngle: seededRandom(seed + 2) * Math.PI * 2,
     phase: seededRandom(seed + 3) * Math.PI * 2,
-    trail: [],
     spawnTime: performance.now(),
     scale: 0, // for spawn animation
+    // Hover repel displacement
+    dx: 0, dy: 0,
   };
 }
 
@@ -271,6 +392,23 @@ function seededRandom(n) {
   return x - Math.floor(x);
 }
 
+// --- Fetch agents for minimap ---
+async function fetchAgents() {
+  try {
+    const res = await fetch('/api/agents');
+    allAgents = await res.json();
+    // Center camera on content on first load
+    if (allAgents.length > 0 && camera.x === 0 && camera.y === 0) {
+      const avgX = allAgents.reduce((s, a) => s + a.homeX, 0) / allAgents.length;
+      const avgY = allAgents.reduce((s, a) => s + a.homeY, 0) / allAgents.length;
+      camera.x = targetCamera.x = avgX;
+      camera.y = targetCamera.y = avgY;
+    }
+  } catch (e) {
+    console.error('Failed to fetch agents:', e);
+  }
+}
+
 // --- WebSocket ---
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -283,6 +421,7 @@ function connect() {
       marks.forEach(initPhysics);
       rebuildIndex();
       updateStats();
+      fetchAgents(); // Load agents for minimap
     } else if (msg.type === 'mark:created') {
       marks.push(msg.mark);
       initPhysics(msg.mark);
@@ -293,10 +432,6 @@ function connect() {
       if (idx >= 0) {
         marks[idx] = msg.mark;
         marksById[msg.mark.id] = msg.mark;
-        if (physics[msg.mark.id]) {
-          physics[msg.mark.id].targetX = OX + msg.mark.x * SCALE;
-          physics[msg.mark.id].targetY = OY + msg.mark.y * SCALE;
-        }
       }
     } else if (msg.type === 'mark:deleted') {
       marks = marks.filter(m => m.id !== msg.id);
@@ -342,20 +477,34 @@ function hexToRgb(hex) {
 function rgba(hex, a) { const [r,g,b] = hexToRgb(hex); return `rgba(${r},${g},${b},${a})`; }
 
 // --- Physics Update ---
+const ELECTRIFY_RADIUS = 60; // world units — cursor influence range
+const NUDGE_STRENGTH = 3; // tiny displacement
+const SPRING_BACK = 0.12;
+
 function updatePhysics(mark, dt, t) {
   const p = physics[mark.id];
   if (!p) return;
-  
-  // Static position — marks stay where agents placed them
-  p.px = OX + mark.x * SCALE;
-  p.py = OY + mark.y * SCALE;
   
   // Spawn animation
   const age = (performance.now() - p.spawnTime) / 1000;
   p.scale = Math.min(1, age / 0.8);
   
-  // Gentle opacity breathing (doesn't move the mark)
+  // Gentle opacity breathing
   p.breath = 0.92 + 0.08 * Math.sin(t * 0.8 + p.phase);
+  
+  // Electrify — cursor charges nearby marks (glow only, no movement)
+  p.charge = 0;
+  if (mouseX >= 0 && mouseY >= 0) {
+    const mouseWorld = screenToWorld(mouseX, mouseY);
+    const ddx = mark.x - mouseWorld.x;
+    const ddy = mark.y - mouseWorld.y;
+    const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+    if (dist < ELECTRIFY_RADIUS && dist > 0.1) {
+      const proximity = 1 - dist / ELECTRIFY_RADIUS;
+      p.charge = proximity * proximity;
+    }
+  }
+  p.dx = 0; p.dy = 0;
 }
 
 // --- Render ---
@@ -363,38 +512,93 @@ function renderMark(mark, t) {
   const p = physics[mark.id];
   if (!p) return null;
   
-  const px = p.px;
-  const py = p.py;
-  const s = mark.size * p.scale;
-  const [r, g, b] = hexToRgb(mark.color);
-  const a = mark.opacity * p.scale * (p.breath || 1);
+  // Convert world coords to screen (with hover displacement + glitch)
+  let glitchDx = 0, glitchDy = 0, glitchColor = false;
+  if (glitchMark && glitchMark.markId === mark.id) {
+    glitchDx = glitchMark.dx;
+    glitchDy = glitchMark.dy;
+    glitchColor = glitchMark.hueShift;
+  }
+  const screen = worldToScreen(mark.x + (p.dx || 0) + glitchDx, mark.y + (p.dy || 0) + glitchDy);
+  const px = screen.x;
+  const py = screen.y;
+  
+  // LOD: skip text marks at low zoom
+  if (mark.type === 'text' && camera.zoom < 0.3) return null;
+  
+  const charge = p.charge || 0;
+  const s = mark.size * p.scale * camera.zoom * (1 + charge * 0.3);
+  let [r, g, b] = hexToRgb(mark.color);
+  if (glitchColor) { const tmp = r; r = b; b = g; g = tmp; } // channel swap
+  const baseA = Math.min(1, (mark.opacity + 0.3)) * p.scale * (p.breath || 1);
+  // Selection focus: smooth fade between normal and focused state
+  let focusMul = 1;
+  if (focusTransition > 0.01) {
+    const isSelected = mark.agentId === selectedAgent;
+    const targetMul = isSelected ? 1.3 : 0.15;
+    focusMul = 1 + (targetMul - 1) * focusTransition;
+  }
+  const a = Math.min(1, (baseA + charge * 0.4) * focusMul);
   const sz = s;
+  
+  // LOD: shrink halos at low zoom
+  const haloScale = camera.zoom < 0.5 ? 0.5 : 1.0;
   
   ctx.save();
   
   switch (mark.type) {
     case 'dot':
     case 'particle': {
-      drawDot(px, py, sz, mark.color, a);
+      // Indent shadow (embedded in substrate)
+      ctx.fillStyle = `rgba(0,0,0,${a * 0.1})`;
+      ctx.beginPath();
+      ctx.arc(px + 0.5, py + 0.5, sz * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      // Main body (no separate halo — clean edge)
+      ctx.fillStyle = `rgba(${r},${g},${b},${a * 0.6})`;
+      ctx.beginPath();
+      ctx.arc(px, py, sz, 0, Math.PI * 2);
+      ctx.fill();
+      // Bright core
+      ctx.fillStyle = `rgba(${Math.min(255,r+100)},${Math.min(255,g+100)},${Math.min(255,b+100)},${a})`;
+      ctx.beginPath();
+      ctx.arc(px, py, sz * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      // Electrify ring when charged
+      if (charge > 0.05) {
+        ctx.strokeStyle = `rgba(${Math.min(255,r+150)},${Math.min(255,g+150)},${Math.min(255,b+150)},${charge * 0.6})`;
+        ctx.lineWidth = 1 + charge;
+        ctx.beginPath();
+        ctx.arc(px, py, sz * (1.2 + charge * 0.5), 0, Math.PI * 2);
+        ctx.stroke();
+      }
       break;
     }
     
     case 'line': {
-      // Line mark: meta has x2,y2 (second endpoint in normalized coords)
+      // Circuit-trace style lines
       if (mark.meta) {
         try {
           const m = typeof mark.meta === 'string' ? JSON.parse(mark.meta) : mark.meta;
           if (m.x2 != null && m.y2 != null) {
-            const end = toScreen(m.x2, m.y2);
-            // Glow
-            ctx.strokeStyle = rgba(mark.color, a * 0.15);
-            ctx.lineWidth = sz * 0.4;
+            const end = worldToScreen(m.x2, m.y2);
+            // Shadow (etched into surface)
+            ctx.strokeStyle = `rgba(0,0,0,${a * 0.2})`;
+            ctx.lineWidth = Math.max(2, sz * 0.2) + 1;
             ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(px + 0.5, py + 0.5); ctx.lineTo(end.x + 0.5, end.y + 0.5); ctx.stroke();
+            // Trace glow
+            ctx.strokeStyle = rgba(mark.color, a * 0.12);
+            ctx.lineWidth = Math.max(3, sz * 0.3);
             ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(end.x, end.y); ctx.stroke();
-            // Core
-            ctx.strokeStyle = rgba(mark.color, a * 0.6);
-            ctx.lineWidth = Math.max(1, sz * 0.12);
+            // Core trace
+            ctx.strokeStyle = rgba(mark.color, a * 0.7);
+            ctx.lineWidth = Math.max(1, sz * 0.1);
             ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(end.x, end.y); ctx.stroke();
+            // Junction nodes at endpoints
+            ctx.fillStyle = rgba(mark.color, a * 0.5);
+            ctx.beginPath(); ctx.arc(px, py, Math.max(1.5, sz * 0.08), 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(end.x, end.y, Math.max(1.5, sz * 0.08), 0, Math.PI * 2); ctx.fill();
           }
         } catch(e) {}
       }
@@ -404,14 +608,38 @@ function renderMark(mark, t) {
     case 'text': {
       if (!mark.text) break;
       const fontSize = sz * (mark.text.length > 10 ? 0.8 : 1);
+      // Rotation from meta
+      let rotation = 0;
+      if (mark.meta) {
+        try {
+          const m = typeof mark.meta === 'string' ? JSON.parse(mark.meta) : mark.meta;
+          if (m.rotation != null) rotation = m.rotation * Math.PI / 180;
+        } catch(e) {}
+      }
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = rgba(mark.color, a * 0.15);
-      ctx.font = `${fontSize * 1.05}px 'Syne', sans-serif`;
-      ctx.fillText(mark.text, px, py);
-      ctx.fillStyle = rgba(mark.color, a * 0.9);
-      ctx.font = `${fontSize}px 'Syne', sans-serif`;
-      ctx.fillText(mark.text, px, py);
+      const textAlpha = Math.min(1, a * 0.85 + charge * 0.5);
+      if (rotation) {
+        ctx.translate(px, py);
+        ctx.rotate(rotation);
+        // Shadow (stamped into surface)
+        ctx.fillStyle = `rgba(0,0,0,${a * 0.15})`;
+        ctx.font = `${fontSize}px 'Space Mono', monospace`;
+        ctx.fillText(mark.text, 0.5, 0.5);
+        // Main text
+        ctx.fillStyle = rgba(mark.color, textAlpha);
+        ctx.font = `${fontSize}px 'Space Mono', monospace`;
+        ctx.fillText(mark.text, 0, 0);
+      } else {
+        // Shadow
+        ctx.fillStyle = `rgba(0,0,0,${a * 0.15})`;
+        ctx.font = `${fontSize}px 'Space Mono', monospace`;
+        ctx.fillText(mark.text, px + 0.5, py + 0.5);
+        // Main text
+        ctx.fillStyle = rgba(mark.color, textAlpha);
+        ctx.font = `${fontSize}px 'Space Mono', monospace`;
+        ctx.fillText(mark.text, px, py);
+      }
       break;
     }
   }
@@ -425,30 +653,24 @@ function renderMark(mark, t) {
 
 // --- Agent Connection Threads ---
 function drawAgentConnections(hitAreas, t) {
-  if (!connections.length) return;
+  if (!connections.length || !allAgents.length) return;
   
-  // Build agent centers from hit areas
-  const agentCenters = {};
+  // Build agent home positions (use home coords for connections)
+  const agentHomes = {};
   const agentColors = {};
-  for (const h of hitAreas) {
-    if (!agentCenters[h.mark.agentId]) {
-      agentCenters[h.mark.agentId] = { x: 0, y: 0, n: 0 };
-      agentColors[h.mark.agentId] = h.mark.color;
-    }
-    agentCenters[h.mark.agentId].x += h.x;
-    agentCenters[h.mark.agentId].y += h.y;
-    agentCenters[h.mark.agentId].n++;
-  }
-  for (const id in agentCenters) {
-    const c = agentCenters[id];
-    c.x /= c.n;
-    c.y /= c.n;
+  for (const agent of allAgents) {
+    agentHomes[agent.id] = { x: agent.homeX, y: agent.homeY };
+    agentColors[agent.id] = agent.color;
   }
 
   for (const conn of connections) {
-    const a = agentCenters[conn.from];
-    const b = agentCenters[conn.to];
-    if (!a || !b) continue;
+    const aWorld = agentHomes[conn.from];
+    const bWorld = agentHomes[conn.to];
+    if (!aWorld || !bWorld) continue;
+    
+    // Convert to screen coords
+    const a = worldToScreen(aWorld.x, aWorld.y);
+    const b = worldToScreen(bWorld.x, bWorld.y);
 
     const dx = b.x - a.x, dy = b.y - a.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
@@ -497,9 +719,178 @@ function drawAgentConnections(hitAreas, t) {
   }
 }
 
+// --- Substrate texture (generated once, redrawn on resize) ---
+let substrateCanvas = null;
+let substrateCtx = null;
+
+function generateSubstrate() {
+  substrateCanvas = document.createElement('canvas');
+  substrateCanvas.width = W;
+  substrateCanvas.height = H;
+  substrateCtx = substrateCanvas.getContext('2d');
+  
+  // Base: dark steel — slightly lighter so texture reads
+  substrateCtx.fillStyle = '#111418';
+  substrateCtx.fillRect(0, 0, W, H);
+  
+  // Layer 1: Fine grain noise (pixel-level texture)
+  const imageData = substrateCtx.getImageData(0, 0, W, H);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const noise = (Math.random() - 0.5) * 22;
+    data[i]     = Math.max(0, Math.min(255, data[i] + noise));     // R
+    data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + noise)); // G
+    data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + noise + 2)); // B slightly cool
+  }
+  substrateCtx.putImageData(imageData, 0, 0);
+  
+  // Layer 2: Larger patina blotches (oxidation stains)
+  const blotchCount = Math.floor((W * H) / 5000);
+  for (let i = 0; i < blotchCount; i++) {
+    const bx = Math.random() * W;
+    const by = Math.random() * H;
+    const br = 30 + Math.random() * 80;
+    const warmth = Math.random();
+    // Mix between cool steel and warm rust
+    const r = warmth > 0.6 ? 35 + Math.random() * 15 : 16 + Math.random() * 8;
+    const g = warmth > 0.6 ? 22 + Math.random() * 8 : 16 + Math.random() * 6;
+    const b = warmth > 0.6 ? 12 + Math.random() * 6 : 20 + Math.random() * 8;
+    const grad = substrateCtx.createRadialGradient(bx, by, 0, bx, by, br);
+    grad.addColorStop(0, `rgba(${r},${g},${b},0.25)`);
+    grad.addColorStop(1, 'transparent');
+    substrateCtx.fillStyle = grad;
+    substrateCtx.fillRect(bx - br, by - br, br * 2, br * 2);
+  }
+  
+  // Layer 3: Micro-pitting (tiny dark spots)
+  const pitCount = Math.floor((W * H) / 1500);
+  for (let i = 0; i < pitCount; i++) {
+    const px = Math.random() * W;
+    const py = Math.random() * H;
+    const pr = 0.5 + Math.random() * 2;
+    substrateCtx.fillStyle = `rgba(0,0,0,${0.15 + Math.random() * 0.3})`;
+    substrateCtx.beginPath();
+    substrateCtx.arc(px, py, pr, 0, Math.PI * 2);
+    substrateCtx.fill();
+  }
+  
+  // Layer 4: Scratches (surface wear — more visible)
+  const scratchCount = Math.floor(W / 18);
+  for (let i = 0; i < scratchCount; i++) {
+    const sx = Math.random() * W;
+    const sy = Math.random() * H;
+    const angle = Math.random() * Math.PI;
+    const len = 40 + Math.random() * 150;
+    substrateCtx.strokeStyle = `rgba(255,255,255,${0.02 + Math.random() * 0.04})`;
+    substrateCtx.lineWidth = 0.5 + Math.random() * 0.8;
+    substrateCtx.beginPath();
+    substrateCtx.moveTo(sx, sy);
+    substrateCtx.lineTo(sx + Math.cos(angle) * len, sy + Math.sin(angle) * len);
+    substrateCtx.stroke();
+  }
+  
+  // Layer 5: Vignette (darker edges)
+  const vignette = substrateCtx.createRadialGradient(W/2, H/2, Math.min(W,H) * 0.25, W/2, H/2, Math.max(W,H) * 0.65);
+  vignette.addColorStop(0, 'transparent');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.4)');
+  substrateCtx.fillStyle = vignette;
+  substrateCtx.fillRect(0, 0, W, H);
+}
+
 function drawBackground() {
-  ctx.fillStyle = '#030306';
-  ctx.fillRect(0, 0, W, H);
+  if (!substrateCanvas || substrateCanvas.width !== W || substrateCanvas.height !== H) {
+    generateSubstrate();
+  }
+  ctx.drawImage(substrateCanvas, 0, 0);
+}
+
+// --- Scanlines ---
+function drawScanlines(t) {
+  // Faint horizontal lines, slow scroll
+  const offset = (t * 8) % 4; // slow crawl
+  ctx.strokeStyle = 'rgba(0,0,0,0.025)';
+  ctx.lineWidth = 1;
+  for (let y = offset; y < H; y += 4) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  }
+  // One bright scanline that sweeps slowly
+  const sweepY = ((t * 15) % (H + 200)) - 100;
+  const sweepGrad = ctx.createLinearGradient(0, sweepY - 30, 0, sweepY + 30);
+  sweepGrad.addColorStop(0, 'transparent');
+  sweepGrad.addColorStop(0.5, 'rgba(255,255,255,0.012)');
+  sweepGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = sweepGrad;
+  ctx.fillRect(0, sweepY - 30, W, 60);
+}
+
+// --- Ambient Particles ---
+const PARTICLE_COUNT = 25;
+const particles = [];
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  particles.push({
+    x: Math.random() * 2000 - 1000, // world coords
+    y: Math.random() * 2000 - 1000,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.15 + 0.1, // slight downward drift
+    size: 0.5 + Math.random() * 1.5,
+    alpha: 0.1 + Math.random() * 0.2,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+function drawParticles(t) {
+  for (const p of particles) {
+    // Drift
+    p.x += p.vx;
+    p.y += p.vy;
+    // Wrap around viewport bounds (in world space)
+    const margin = 200;
+    const viewMinX = camera.x - W / 2 / camera.zoom - margin;
+    const viewMaxX = camera.x + W / 2 / camera.zoom + margin;
+    const viewMinY = camera.y - H / 2 / camera.zoom - margin;
+    const viewMaxY = camera.y + H / 2 / camera.zoom + margin;
+    if (p.x < viewMinX) p.x = viewMaxX;
+    if (p.x > viewMaxX) p.x = viewMinX;
+    if (p.y < viewMinY) p.y = viewMaxY;
+    if (p.y > viewMaxY) p.y = viewMinY;
+    
+    const screen = worldToScreen(p.x, p.y);
+    const flickerA = p.alpha * (0.7 + 0.3 * Math.sin(t * 1.5 + p.phase));
+    const sz = p.size * camera.zoom;
+    if (sz < 0.3) continue; // too small to see
+    ctx.fillStyle = `rgba(200,210,220,${flickerA})`;
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, sz, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// --- Glitch Flicker ---
+let glitchMark = null; // { markId, startTime, dx, dy, colorShift }
+const GLITCH_INTERVAL = 30 + Math.random() * 30; // 30-60 seconds
+let nextGlitch = performance.now() + GLITCH_INTERVAL * 1000;
+
+function updateGlitch(t, now) {
+  // Trigger new glitch
+  if (!glitchMark && now > nextGlitch && marks.length > 0) {
+    const m = marks[Math.floor(Math.random() * marks.length)];
+    glitchMark = {
+      markId: m.id,
+      startTime: now,
+      duration: 80 + Math.random() * 120, // 80-200ms
+      dx: (Math.random() - 0.5) * 20,
+      dy: (Math.random() - 0.5) * 20,
+      hueShift: Math.random() > 0.5,
+    };
+    nextGlitch = now + (30 + Math.random() * 30) * 1000;
+  }
+  // Expire glitch
+  if (glitchMark && now > glitchMark.startTime + glitchMark.duration) {
+    glitchMark = null;
+  }
 }
 
 function drawEmptyState(t) {
@@ -530,7 +921,8 @@ function checkHover(hitAreas) {
   if (closest) {
     ttName.textContent = closest.mark.agentName;
     ttName.style.color = closest.mark.color;
-    ttInfo.textContent = closest.mark.type;
+    const selected = selectedAgent === closest.mark.agentId;
+    ttInfo.textContent = closest.mark.type + (selected ? ' · selected' : '');
     tooltip.style.left = (mouseX + 16) + 'px';
     tooltip.style.top = (mouseY - 16) + 'px';
     tooltip.classList.add('show');
@@ -538,6 +930,143 @@ function checkHover(hitAreas) {
     tooltip.classList.remove('show');
   }
 }
+
+// --- Agent Label (shown when agent is selected) ---
+const agentLabelEl = document.getElementById('agent-label');
+
+function updateAgentLabel(hitAreas) {
+  if (!selectedAgent || focusTransition < 0.3) {
+    agentLabelEl.classList.remove('show');
+    return;
+  }
+  
+  // Find the selected agent's marks to compute center + bounds
+  const agentMarks = hitAreas.filter(h => h.mark.agentId === selectedAgent);
+  if (agentMarks.length === 0) {
+    agentLabelEl.classList.remove('show');
+    return;
+  }
+  
+  // Screen-space bounding box of agent's marks
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let agentName = '', agentColor = '';
+  for (const h of agentMarks) {
+    minX = Math.min(minX, h.x);
+    maxX = Math.max(maxX, h.x);
+    minY = Math.min(minY, h.y);
+    maxY = Math.max(maxY, h.y);
+    agentName = h.mark.agentName;
+    agentColor = h.mark.color;
+  }
+  
+  // Position label below the cluster
+  const cx = (minX + maxX) / 2;
+  const bottom = maxY + 20;
+  
+  agentLabelEl.textContent = agentName;
+  agentLabelEl.style.color = agentColor;
+  agentLabelEl.style.left = cx + 'px';
+  agentLabelEl.style.top = bottom + 'px';
+  agentLabelEl.style.transform = 'translateX(-50%)';
+  agentLabelEl.classList.add('show');
+}
+
+// --- Minimap ---
+const minimapEl = document.getElementById('minimap');
+const minimapCtx = minimapEl.getContext('2d');
+minimapEl.width = 150;
+minimapEl.height = 150;
+
+function drawMinimap() {
+  if (allAgents.length === 0) return;
+  
+  minimapCtx.clearRect(0, 0, 150, 150);
+  minimapCtx.fillStyle = 'rgba(8,8,16,0.9)';
+  minimapCtx.fillRect(0, 0, 150, 150);
+  
+  // Bounds from agent homes only (stable, not affected by camera)
+  const xs = allAgents.map(a => a.homeX);
+  const ys = allAgents.map(a => a.homeY);
+  const pad = 100;
+  const agentMinX = Math.min(...xs) - pad;
+  const agentMaxX = Math.max(...xs) + pad;
+  const agentMinY = Math.min(...ys) - pad;
+  const agentMaxY = Math.max(...ys) + pad;
+  
+  // Square aspect ratio
+  const agentCX = (agentMinX + agentMaxX) / 2;
+  const agentCY = (agentMinY + agentMaxY) / 2;
+  const rangeMax = Math.max(agentMaxX - agentMinX, agentMaxY - agentMinY) || 1000;
+  const rangeX = rangeMax;
+  const rangeY = rangeMax;
+  const mmMinX = agentCX - rangeMax / 2;
+  const mmMinY = agentCY - rangeMax / 2;
+  
+  // Draw agent home positions
+  for (const agent of allAgents) {
+    const x = ((agent.homeX - mmMinX) / rangeX) * 130 + 10;
+    const y = ((agent.homeY - mmMinY) / rangeY) * 130 + 10;
+    const isSelected = selectedAgent === agent.id;
+    const baseAlpha = isSelected ? 1 : 0.2;
+    minimapCtx.globalAlpha = 1 + (baseAlpha - 1) * focusTransition;
+    minimapCtx.fillStyle = agent.color || '#ffffff';
+    minimapCtx.beginPath();
+    minimapCtx.arc(x, y, isSelected ? 5 : 3, 0, Math.PI * 2);
+    minimapCtx.fill();
+    if (isSelected) {
+      minimapCtx.strokeStyle = '#ffffff';
+      minimapCtx.lineWidth = 1;
+      minimapCtx.stroke();
+    }
+  }
+  minimapCtx.globalAlpha = 1;
+  
+  // Draw current viewport
+  const viewMinVX = camera.x - W / 2 / camera.zoom;
+  const viewMaxVX = camera.x + W / 2 / camera.zoom;
+  const viewMinVY = camera.y - H / 2 / camera.zoom;
+  const viewMaxVY = camera.y + H / 2 / camera.zoom;
+  
+  const vx1 = ((viewMinVX - mmMinX) / rangeX) * 130 + 10;
+  const vy1 = ((viewMinVY - mmMinY) / rangeY) * 130 + 10;
+  const vx2 = ((viewMaxVX - mmMinX) / rangeX) * 130 + 10;
+  const vy2 = ((viewMaxVY - mmMinY) / rangeY) * 130 + 10;
+  
+  minimapCtx.strokeStyle = 'rgba(255,255,255,0.4)';
+  minimapCtx.lineWidth = 1;
+  minimapCtx.strokeRect(vx1, vy1, vx2 - vx1, vy2 - vy1);
+  
+  // Store bounds for click handler
+  lastMmMinX = mmMinX;
+  lastMmMinY = mmMinY;
+  lastMmRangeX = rangeX;
+  lastMmRangeY = rangeY;
+}
+
+// Store last minimap bounds for click handler
+let lastMmMinX = 0, lastMmMinY = 0, lastMmRangeX = 1000, lastMmRangeY = 1000;
+
+minimapEl.addEventListener('click', (e) => {
+  if (allAgents.length === 0) return;
+  const rect = minimapEl.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  
+  const worldX = ((mx - 10) / 130) * lastMmRangeX + lastMmMinX;
+  const worldY = ((my - 10) / 130) * lastMmRangeY + lastMmMinY;
+  
+  targetCamera.x = worldX;
+  targetCamera.y = worldY;
+});
+
+// --- Zoom controls ---
+document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  targetCamera.zoom = Math.min(5.0, targetCamera.zoom * 1.5);
+});
+
+document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  targetCamera.zoom = Math.max(0.05, targetCamera.zoom / 1.5);
+});
 
 // --- Main Loop ---
 let lastTime = 0;
@@ -554,10 +1083,24 @@ function render(now) {
     fpsTime = now;
   }
   
-  // Update marks
+  // Smooth focus transition
+  focusTransition += (focusTarget - focusTransition) * 0.08;
   
-  // Update physics
+  // Smooth camera lerp
+  const lerpSpeed = 0.1;
+  camera.x += (targetCamera.x - camera.x) * lerpSpeed;
+  camera.y += (targetCamera.y - camera.y) * lerpSpeed;
+  camera.zoom += (targetCamera.zoom - camera.zoom) * lerpSpeed;
+  
+  // Update physics + glitch
   for (const mark of marks) updatePhysics(mark, dt, t);
+  updateGlitch(t, now);
+  
+  // Calculate visible world bounds for culling
+  const viewMinX = camera.x - W / 2 / camera.zoom - 100;
+  const viewMaxX = camera.x + W / 2 / camera.zoom + 100;
+  const viewMinY = camera.y - H / 2 / camera.zoom - 100;
+  const viewMaxY = camera.y + H / 2 / camera.zoom + 100;
   
   // Draw
   drawBackground();
@@ -565,16 +1108,19 @@ function render(now) {
   const hitAreas = [];
   const sorted = [...marks].sort((a, b) => a.opacity - b.opacity);
   for (const mark of sorted) {
-    // Offscreen culling — skip marks far outside viewport
-    const p = physics[mark.id];
-    if (p && (p.px < -100 || p.px > W + 100 || p.py < -100 || p.py > H + 100)) continue;
+    // Viewport culling
+    if (mark.x < viewMinX || mark.x > viewMaxX || mark.y < viewMinY || mark.y > viewMaxY) continue;
     const hit = renderMark(mark, t);
     if (hit) hitAreas.push(hit);
   }
   
   drawAgentConnections(hitAreas, t);
+  drawParticles(t);
+  drawScanlines(t);
   checkHover(hitAreas);
+  updateAgentLabel(hitAreas);
   drawEmptyState(t);
+  drawMinimap();
   
   requestAnimationFrame(render);
 }

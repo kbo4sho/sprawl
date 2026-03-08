@@ -28,8 +28,31 @@ db.exec(`
     joined_at INTEGER NOT NULL,
     last_seen INTEGER NOT NULL,
     shader_code TEXT DEFAULT NULL,
-    frozen INTEGER DEFAULT 0
+    frozen INTEGER DEFAULT 0,
+    home_x REAL DEFAULT 0,
+    home_y REAL DEFAULT 0
   );
+`);
+
+// Migration: Add home_x and home_y columns if they don't exist
+try {
+  const columns = db.prepare("PRAGMA table_info(agents)").all();
+  const hasHomeX = columns.some(c => c.name === 'home_x');
+  const hasHomeY = columns.some(c => c.name === 'home_y');
+  
+  if (!hasHomeX) {
+    db.exec('ALTER TABLE agents ADD COLUMN home_x REAL DEFAULT 0');
+    console.log('Migration: Added home_x column to agents table');
+  }
+  if (!hasHomeY) {
+    db.exec('ALTER TABLE agents ADD COLUMN home_y REAL DEFAULT 0');
+    console.log('Migration: Added home_y column to agents table');
+  }
+} catch (e) {
+  console.error('Migration error:', e);
+}
+
+db.exec(`
 
   CREATE TABLE IF NOT EXISTS marks (
     id TEXT PRIMARY KEY,
@@ -69,28 +92,131 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_action_log_agent_time ON action_log(agent_id, created_at);
 `);
 
+// Migration: Add home_x and home_y columns if they don't exist
+try {
+  const columns = db.prepare("PRAGMA table_info(agents)").all();
+  const hasHomeX = columns.some(c => c.name === 'home_x');
+  const hasHomeY = columns.some(c => c.name === 'home_y');
+  
+  if (!hasHomeX) {
+    db.exec('ALTER TABLE agents ADD COLUMN home_x REAL DEFAULT 0');
+    console.log('Migration: Added home_x column to agents table');
+  }
+  if (!hasHomeY) {
+    db.exec('ALTER TABLE agents ADD COLUMN home_y REAL DEFAULT 0');
+    console.log('Migration: Added home_y column to agents table');
+  }
+} catch (e) {
+  console.error('Migration error:', e);
+}
+
 // --- Palette ---
+// Night sky — warm whites, cool blues, the range you see looking up
 const PALETTE = [
-  '#ff6b35', '#c8a2c8', '#1a1a2e', '#00ff88', '#ff4444',
-  '#4a9eff', '#2d5a27', '#ff00ff', '#888899', '#77aa77',
-  '#00ffcc', '#b7410e', '#ff7f7f', '#ffdd00', '#555566',
-  '#ff69b4', '#0066cc', '#cc44ff', '#8b6914', '#aaeeff',
+  '#fff8f0', // warm white (bright star)
+  '#ffeedd', // peach white
+  '#fff3e0', // candlelight
+  '#f5ebe0', // linen
+  '#e8ddd3', // ash warm
+  '#d4c5b5', // dim warm
+  '#cad8e8', // pale blue
+  '#a8c4dc', // soft blue
+  '#7ba7cc', // steel blue
+  '#5b8fb9', // mid blue
+  '#3a6f9e', // deep blue
+  '#1e3a5f', // navy
 ];
 
 function snapToPalette(hex) {
-  if (!hex || hex[0] !== '#') return PALETTE[0];
-  const r = parseInt(hex.slice(1, 3), 16) || 0;
-  const g = parseInt(hex.slice(3, 5), 16) || 0;
-  const b = parseInt(hex.slice(5, 7), 16) || 0;
-  let best = PALETTE[0], bestDist = Infinity;
-  for (const p of PALETTE) {
-    const pr = parseInt(p.slice(1, 3), 16);
-    const pg = parseInt(p.slice(3, 5), 16);
-    const pb = parseInt(p.slice(5, 7), 16);
-    const d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
-    if (d < bestDist) { bestDist = d; best = p; }
+  // Process any color into a substrate-compatible material tone
+  // Agent's intent comes through but everything belongs on the surface
+  if (!hex || hex[0] !== '#' || hex.length < 7) return PALETTE[0];
+  
+  let r = parseInt(hex.slice(1, 3), 16) || 0;
+  let g = parseInt(hex.slice(3, 5), 16) || 0;
+  let b = parseInt(hex.slice(5, 7), 16) || 0;
+  
+  // Convert to HSL for manipulation
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+  let h, s, l = (max + min) / 2;
+  
+  if (max === min) {
+    h = s = 0;
+  } else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) / 6;
+    else if (max === gn) h = ((bn - rn) / d + 2) / 6;
+    else h = ((rn - gn) / d + 4) / 6;
   }
-  return best;
+  
+  // Substrate processing:
+  // 1. Cap saturation — tame neons but keep character (max 70%)
+  s = Math.min(s, 0.70);
+  // 2. Light desaturation (pull 10% toward gray — gentle)
+  s *= 0.9;
+  // 3. Constrain lightness — no pure white or pure black
+  //    Range: 0.25 (dark metal) to 0.65 (bright copper)
+  l = Math.max(0.25, Math.min(0.65, l));
+  // 4. Very slight warm shift — nudge hue 2% toward orange
+  const warmTarget = 0.08;
+  h = h + (warmTarget - h) * 0.03;
+  if (h < 0) h += 1;
+  if (h > 1) h -= 1;
+  
+  // Convert back to RGB
+  function hue2rgb(p, q, t) {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    return p;
+  }
+  
+  let ro, go, bo;
+  if (s === 0) {
+    ro = go = bo = l;
+  } else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    ro = hue2rgb(p, q, h + 1/3);
+    go = hue2rgb(p, q, h);
+    bo = hue2rgb(p, q, h - 1/3);
+  }
+  
+  const rHex = Math.round(ro * 255).toString(16).padStart(2, '0');
+  const gHex = Math.round(go * 255).toString(16).padStart(2, '0');
+  const bHex = Math.round(bo * 255).toString(16).padStart(2, '0');
+  return `#${rHex}${gHex}${bHex}`;
+}
+
+// --- Radial Placement ---
+function assignHomeCoordinates(agentId) {
+  const existing = stmts.getAgent.get(agentId);
+  if (existing && (existing.home_x !== 0 || existing.home_y !== 0)) {
+    // Agent already has home coords
+    return { home_x: existing.home_x, home_y: existing.home_y };
+  }
+  
+  const agentCount = stmts.countAgents.get().count;
+  let radius, angle;
+  
+  if (agentCount < 5) {
+    // Founding agents near center
+    radius = Math.random() * 50;
+    angle = Math.random() * Math.PI * 2;
+  } else {
+    // Radial frontier placement
+    radius = Math.sqrt(agentCount) * 80;
+    angle = Math.random() * Math.PI * 2;
+  }
+  
+  return {
+    home_x: Math.cos(angle) * radius,
+    home_y: Math.sin(angle) * radius
+  };
 }
 
 // --- Tenure System ---
@@ -132,9 +258,10 @@ function getBudget(agentId) {
 // --- Prepared Statements ---
 const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
+  countAgents: db.prepare('SELECT COUNT(*) as count FROM agents'),
   upsertAgent: db.prepare(`
-    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen)
-    VALUES (@id, @name, @color, @now, @now, @shader_code, 0)
+    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y)
+    VALUES (@id, @name, @color, @now, @now, @shader_code, 0, @home_x, @home_y)
     ON CONFLICT(id) DO UPDATE SET name=@name, color=@color, last_seen=@now,
       shader_code=COALESCE(@shader_code, agents.shader_code)
   `),
@@ -203,7 +330,7 @@ function broadcast(msg) {
 
 // --- Rate Limiting ---
 const rateLimits = {};
-const RATE_LIMIT = parseInt(process.env.RATE_LIMIT) || 30;
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT) || 500;
 
 function rateLimit(req, res, next) {
   const ip = req.ip || req.connection.remoteAddress;
@@ -241,6 +368,7 @@ app.get('/api/agents', (req, res) => {
     markCount: r.mark_count, lastActive: r.last_active || r.last_seen,
     joinedAt: r.joined_at, hasShader: !!r.shader_code,
     shaderCode: r.shader_code || null,
+    homeX: r.home_x, homeY: r.home_y,
   })));
 });
 
@@ -289,20 +417,40 @@ app.get('/api/marks/:agentId', (req, res) => {
   res.json(stmts.getMarksByAgent.all(req.params.agentId).map(markToJson));
 });
 
+app.get('/api/viewport', (req, res) => {
+  const { x, y, w, h } = req.query;
+  if (x == null || y == null || w == null || h == null) {
+    return res.status(400).json({ error: 'x, y, w, h query params required' });
+  }
+  
+  const minX = parseFloat(x);
+  const minY = parseFloat(y);
+  const maxX = minX + parseFloat(w);
+  const maxY = minY + parseFloat(h);
+  
+  const marks = stmts.getAllMarks.all()
+    .filter(m => m.x >= minX && m.x <= maxX && m.y >= minY && m.y <= maxY)
+    .map(markToJson);
+  
+  res.json(marks);
+});
+
 app.post('/api/mark', (req, res) => {
   const { agentId, agentName, type, x, y, color, size, opacity, text } = req.body;
   if (!agentId) return res.status(400).json({ error: 'agentId required' });
-  if (x == null || y == null) return res.status(400).json({ error: 'x, y required (0-1)' });
+  if (x == null || y == null) return res.status(400).json({ error: 'x, y required' });
 
   const markType = ['dot', 'text', 'line'].includes(type) ? type : 'dot';
   if (markType === 'text' && !text) return res.status(400).json({ error: 'text required for type "text"' });
   if (markType === 'line' && (!req.body.meta?.x2 && req.body.meta?.x2 !== 0)) return res.status(400).json({ error: 'meta.x2 and meta.y2 required for type "line"' });
 
-  // Ensure agent exists
+  // Ensure agent exists and assign home coordinates if new
+  const homeCoords = assignHomeCoordinates(agentId);
   stmts.upsertAgent.run({
     id: agentId, name: agentName || agentId,
     color: snapToPalette(color || '#ffffff'),
     now: Date.now(), shader_code: null,
+    home_x: homeCoords.home_x, home_y: homeCoords.home_y,
   });
 
   // Budget check
@@ -318,13 +466,13 @@ app.post('/api/mark', (req, res) => {
     id: crypto.randomUUID(),
     agent_id: agentId,
     type: markType,
-    x: Math.max(0, Math.min(1, x)),
-    y: Math.max(0, Math.min(1, y)),
+    x: x,
+    y: y,
     color: snapToPalette(color || '#ffffff'),
     size: Math.max(1, Math.min(50, size || 10)),
     opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
     text: markType === 'text' ? String(text).slice(0, 32) : null,
-    meta: markType === 'line' ? JSON.stringify({ x2: req.body.meta.x2, y2: req.body.meta.y2 }) : '{}',
+    meta: req.body.meta ? JSON.stringify(req.body.meta) : '{}',
     now: Date.now(),
   };
 
@@ -349,8 +497,8 @@ app.patch('/api/mark/:id', (req, res) => {
 
   const updated = {
     id: existing.id,
-    x: Math.max(0, Math.min(1, req.body.x ?? existing.x)),
-    y: Math.max(0, Math.min(1, req.body.y ?? existing.y)),
+    x: req.body.x ?? existing.x,
+    y: req.body.y ?? existing.y,
     color: req.body.color ? snapToPalette(req.body.color) : existing.color,
     size: Math.max(1, Math.min(50, req.body.size ?? existing.size)),
     opacity: Math.max(0.1, Math.min(1, req.body.opacity ?? existing.opacity)),
@@ -414,7 +562,8 @@ app.post('/api/connect', (req, res) => {
   const result = stmts.insertConnection.run(id, from, to, Date.now());
   if (result.changes === 0) return res.status(409).json({ error: 'Already connected' });
 
-  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), shader_code: null });
+  const homeCoords = assignHomeCoordinates(agentId);
+  stmts.upsertAgent.run({ id: agentId, name: agentId, color: '#ffffff', now: Date.now(), shader_code: null, home_x: homeCoords.home_x, home_y: homeCoords.home_y });
   const connection = connToJson({ id, from_agent: from, to_agent: to, created_at: Date.now() });
   broadcast({ type: 'connection:created', connection });
   res.status(201).json({ ...connection, budget: getBudget(agentId) });
