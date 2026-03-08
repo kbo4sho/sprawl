@@ -141,6 +141,11 @@ const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 let W, H, DPR;
 
+// Canvas uses a square coordinate space mapped to the shorter dimension
+// so compositions don't stretch on tall/wide screens
+let SCALE = 1; // pixels per normalized unit
+let OX = 0, OY = 0; // offset to center
+
 function resize() {
   DPR = window.devicePixelRatio || 1;
   W = window.innerWidth;
@@ -148,6 +153,15 @@ function resize() {
   canvas.width = W * DPR;
   canvas.height = H * DPR;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  // Square mapping — use shorter dimension
+  SCALE = Math.min(W, H);
+  OX = (W - SCALE) / 2;
+  OY = (H - SCALE) / 2;
+}
+
+// Convert normalized 0-1 coords to screen pixels (square aspect)
+function toScreen(nx, ny) {
+  return { x: OX + nx * SCALE, y: OY + ny * SCALE };
 }
 window.addEventListener('resize', resize);
 resize();
@@ -233,8 +247,8 @@ function initPhysics(mark) {
   if (physics[mark.id]) return;
   const seed = hashStr(mark.id);
   physics[mark.id] = {
-    px: mark.x * W,
-    py: mark.y * H,
+    px: OX + mark.x * SCALE,
+    py: OY + mark.y * SCALE,
     vx: (seededRandom(seed) - 0.5) * 0.3,
     vy: (seededRandom(seed + 1) - 0.5) * 0.3,
     ax: 0, ay: 0,
@@ -280,8 +294,8 @@ function connect() {
         marks[idx] = msg.mark;
         marksById[msg.mark.id] = msg.mark;
         if (physics[msg.mark.id]) {
-          physics[msg.mark.id].targetX = msg.mark.x * W;
-          physics[msg.mark.id].targetY = msg.mark.y * H;
+          physics[msg.mark.id].targetX = OX + msg.mark.x * SCALE;
+          physics[msg.mark.id].targetY = OY + msg.mark.y * SCALE;
         }
       }
     } else if (msg.type === 'mark:deleted') {
@@ -333,8 +347,8 @@ function updatePhysics(mark, dt, t) {
   if (!p) return;
   
   const s = mark.size;
-  const homeX = mark.x * W;
-  const homeY = mark.y * H;
+  const homeX = OX + mark.x * SCALE;
+  const homeY = OY + mark.y * SCALE;
   
   // Spawn animation (fade/grow in)
   const age = (performance.now() - p.spawnTime) / 1000;
@@ -535,6 +549,28 @@ function renderMark(mark, t) {
       break;
     }
     
+    case 'line': {
+      // Line mark: meta has x2,y2 (second endpoint in normalized coords)
+      if (mark.meta) {
+        try {
+          const m = typeof mark.meta === 'string' ? JSON.parse(mark.meta) : mark.meta;
+          if (m.x2 != null && m.y2 != null) {
+            const end = toScreen(m.x2, m.y2);
+            // Glow
+            ctx.strokeStyle = rgba(mark.color, a * 0.15);
+            ctx.lineWidth = sz * 0.4;
+            ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(end.x, end.y); ctx.stroke();
+            // Core
+            ctx.strokeStyle = rgba(mark.color, a * 0.6);
+            ctx.lineWidth = Math.max(1, sz * 0.12);
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(end.x, end.y); ctx.stroke();
+          }
+        } catch(e) {}
+      }
+      break;
+    }
+
     case 'text': {
       if (!mark.text) break;
       const fontSize = sz * (mark.text.length > 10 ? 0.8 : 1);

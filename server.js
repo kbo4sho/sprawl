@@ -41,6 +41,7 @@ db.exec(`
     size REAL DEFAULT 10,
     opacity REAL DEFAULT 0.8,
     text TEXT,
+    meta TEXT DEFAULT '{}',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
@@ -142,8 +143,8 @@ const stmts = {
   getMark: db.prepare('SELECT * FROM marks WHERE id = ?'),
   countAgentMarks: db.prepare('SELECT COUNT(*) as count FROM marks WHERE agent_id = ?'),
   insertMark: db.prepare(`
-    INSERT INTO marks (id, agent_id, type, x, y, color, size, opacity, text, created_at, updated_at)
-    VALUES (@id, @agent_id, @type, @x, @y, @color, @size, @opacity, @text, @now, @now)
+    INSERT INTO marks (id, agent_id, type, x, y, color, size, opacity, text, meta, created_at, updated_at)
+    VALUES (@id, @agent_id, @type, @x, @y, @color, @size, @opacity, @text, @meta, @now, @now)
   `),
   updateMark: db.prepare(`
     UPDATE marks SET x=@x, y=@y, color=@color, size=@size, opacity=@opacity, text=@text, updated_at=@now
@@ -185,6 +186,7 @@ function markToJson(row) {
     opacity: row.opacity,
     effectiveOpacity: Math.round(row.opacity * decay * 1000) / 1000,
     text: row.text || undefined,
+    meta: row.meta ? JSON.parse(row.meta) : {},
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -292,8 +294,9 @@ app.post('/api/mark', (req, res) => {
   if (!agentId) return res.status(400).json({ error: 'agentId required' });
   if (x == null || y == null) return res.status(400).json({ error: 'x, y required (0-1)' });
 
-  const markType = type === 'text' ? 'text' : 'dot';
+  const markType = ['dot', 'text', 'line'].includes(type) ? type : 'dot';
   if (markType === 'text' && !text) return res.status(400).json({ error: 'text required for type "text"' });
+  if (markType === 'line' && (!req.body.meta?.x2 && req.body.meta?.x2 !== 0)) return res.status(400).json({ error: 'meta.x2 and meta.y2 required for type "line"' });
 
   // Ensure agent exists
   stmts.upsertAgent.run({
@@ -321,6 +324,7 @@ app.post('/api/mark', (req, res) => {
     size: Math.max(1, Math.min(50, size || 10)),
     opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
     text: markType === 'text' ? String(text).slice(0, 32) : null,
+    meta: markType === 'line' ? JSON.stringify({ x2: req.body.meta.x2, y2: req.body.meta.y2 }) : '{}',
     now: Date.now(),
   };
 
