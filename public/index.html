@@ -346,149 +346,16 @@ function updatePhysics(mark, dt, t) {
   const p = physics[mark.id];
   if (!p) return;
   
-  const s = mark.size;
-  const homeX = OX + mark.x * SCALE;
-  const homeY = OY + mark.y * SCALE;
+  // Static position — marks stay where agents placed them
+  p.px = OX + mark.x * SCALE;
+  p.py = OY + mark.y * SCALE;
   
-  // Spawn animation (fade/grow in)
+  // Spawn animation
   const age = (performance.now() - p.spawnTime) / 1000;
-  p.scale = Math.min(1, age / 0.8); // 0.8s spawn
+  p.scale = Math.min(1, age / 0.8);
   
-  // Reset acceleration
-  p.ax = 0; p.ay = 0;
-  
-  // --- Behavior forces ---
-  switch (mark.behavior) {
-    case 'drift': {
-      // Organic wander: slowly rotating direction
-      p.wanderAngle += (Math.sin(t * 0.7 + p.phase) * 0.02);
-      p.ax += Math.cos(p.wanderAngle) * 0.08;
-      p.ay += Math.sin(p.wanderAngle) * 0.06;
-      break;
-    }
-    case 'orbit': {
-      // Orbit around home position
-      const orbitR = s * 2;
-      const angle = t * 0.5 + p.phase;
-      const targetX = homeX + Math.cos(angle) * orbitR;
-      const targetY = homeY + Math.sin(angle) * orbitR;
-      p.ax += (targetX - p.px) * 0.02;
-      p.ay += (targetY - p.py) * 0.02;
-      break;
-    }
-    case 'pulse': {
-      // Subtle jitter around home
-      p.ax += (Math.sin(t * 3 + p.phase) * 0.03);
-      p.ay += (Math.cos(t * 2.7 + p.phase * 1.3) * 0.03);
-      break;
-    }
-    case 'breathe': {
-      // Very slow expand/contract drift
-      const breathAngle = t * 0.2 + p.phase;
-      p.ax += Math.cos(breathAngle) * 0.01;
-      p.ay += Math.sin(breathAngle) * 0.01;
-      break;
-    }
-    case 'shimmer': {
-      // Quick micro-movements
-      p.ax += (Math.sin(t * 8 + p.phase) * 0.05);
-      p.ay += (Math.cos(t * 7.3 + p.phase) * 0.04);
-      break;
-    }
-    case 'still': {
-      // Strong pull to home
-      p.ax += (homeX - p.px) * 0.05;
-      p.ay += (homeY - p.py) * 0.05;
-      break;
-    }
-  }
-  
-  // Home spring (always pull back gently, except orbit)
-  if (mark.behavior !== 'orbit') {
-    const dx = homeX - p.px;
-    const dy = homeY - p.py;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const maxDrift = s * 4;
-    if (dist > maxDrift) {
-      const strength = (dist - maxDrift) * 0.003;
-      p.ax += (dx / dist) * strength;
-      p.ay += (dy / dist) * strength;
-    }
-  }
-  
-  // Mouse repulsion (marks drift away from cursor)
-  if (mouseX > 0) {
-    const mdx = p.px - mouseX;
-    const mdy = p.py - mouseY;
-    const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
-    if (mDist < 120 && mDist > 0) {
-      const repel = (1 - mDist / 120) * 0.5;
-      p.ax += (mdx / mDist) * repel;
-      p.ay += (mdy / mDist) * repel;
-    }
-  }
-  
-  // Inter-mark forces via spatial hash (O(N) instead of O(N²))
-  const neighborIds = getNeighbors(p.px, p.py, 200);
-  for (const nId of neighborIds) {
-    if (nId === mark.id) continue;
-    const op = physics[nId];
-    if (!op) continue;
-    const dx = op.px - p.px;
-    const dy = op.py - p.py;
-    const distSq = dx * dx + dy * dy;
-    if (distSq < 1 || distSq > 40000) continue; // 200²
-    const dist = Math.sqrt(distSq);
-    
-    // Find neighbor mark (cache lookup)
-    const other = marksById[nId];
-    if (!other) continue;
-    
-    if (other.agentId === mark.agentId) {
-      if (dist > 80) {
-        p.ax += (dx / dist) * 0.003;
-        p.ay += (dy / dist) * 0.003;
-      } else if (dist < 30) {
-        p.ax -= (dx / dist) * 0.01;
-        p.ay -= (dy / dist) * 0.01;
-      }
-    } else {
-      if (dist < 50) {
-        p.ax -= (dx / dist) * 0.005;
-        p.ay -= (dy / dist) * 0.005;
-      }
-    }
-  }
-  
-  // Integrate
-  p.vx += p.ax * dt;
-  p.vy += p.ay * dt;
-  
-  // Friction
-  p.vx *= 0.96;
-  p.vy *= 0.96;
-  
-  // Clamp velocity
-  const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
-  const maxSpeed = mark.behavior === 'still' ? 0.5 : 2.0;
-  if (speed > maxSpeed) {
-    p.vx = (p.vx / speed) * maxSpeed;
-    p.vy = (p.vy / speed) * maxSpeed;
-  }
-  
-  p.px += p.vx;
-  p.py += p.vy;
-  
-  // Soft bounds
-  const margin = 20;
-  if (p.px < margin) p.vx += 0.1;
-  if (p.px > W - margin) p.vx -= 0.1;
-  if (p.py < margin) p.vy += 0.1;
-  if (p.py > H - margin) p.vy -= 0.1;
-  
-  // Trail
-  p.trail.push({ x: p.px, y: p.py, t: performance.now() });
-  if (p.trail.length > 40) p.trail.shift();
+  // Gentle opacity breathing (doesn't move the mark)
+  p.breath = 0.92 + 0.08 * Math.sin(t * 0.8 + p.phase);
 }
 
 // --- Render ---
@@ -500,47 +367,10 @@ function renderMark(mark, t) {
   const py = p.py;
   const s = mark.size * p.scale;
   const [r, g, b] = hexToRgb(mark.color);
-  const alpha = mark.opacity * p.scale;
-  
-  // Behavior visual modifiers
-  let pulseScale = 1;
-  let alphaM = 1;
-  
-  switch (mark.behavior) {
-    case 'pulse':
-      pulseScale = 1 + 0.15 * Math.sin(t * 2.5 + p.phase);
-      alphaM = 0.75 + 0.25 * Math.sin(t * 2.5 + p.phase);
-      break;
-    case 'breathe':
-      pulseScale = 1 + 0.3 * Math.sin(t * 0.6 + p.phase);
-      break;
-    case 'shimmer':
-      alphaM = 0.3 + 0.7 * Math.abs(Math.sin(t * 5 + p.phase));
-      break;
-  }
-  
-  const sz = s * pulseScale;
-  const a = alpha * alphaM;
+  const a = mark.opacity * p.scale * (p.breath || 1);
+  const sz = s;
   
   ctx.save();
-  
-  // Draw trail (for drift/orbit marks)
-  if ((mark.behavior === 'drift' || mark.behavior === 'orbit') && p.trail.length > 2) {
-    const now = performance.now();
-    ctx.beginPath();
-    for (let i = 0; i < p.trail.length; i++) {
-      const tp = p.trail[i];
-      const trailAge = (now - tp.t) / 2000; // 2s trail
-      if (trailAge > 1) continue;
-      const ta = (1 - trailAge) * a * 0.15;
-      if (i === 0) ctx.moveTo(tp.x, tp.y);
-      else ctx.lineTo(tp.x, tp.y);
-    }
-    ctx.strokeStyle = rgba(mark.color, a * 0.1);
-    ctx.lineWidth = sz * 0.15;
-    ctx.lineCap = 'round';
-    ctx.stroke();
-  }
   
   switch (mark.type) {
     case 'dot':
@@ -591,55 +421,7 @@ function renderMark(mark, t) {
 }
 
 // --- Connections (spatial hash optimized) ---
-function drawConnections(hitAreas, t) {
-  // Build a quick lookup: markId → hitArea
-  const hitById = {};
-  for (const h of hitAreas) hitById[h.mark.id] = h;
-  
-  // Same-agent connections (use spatial hash, only check nearby)
-  const drawnPairs = new Set();
-  for (const h of hitAreas) {
-    const neighborIds = getNeighbors(h.x, h.y, 350);
-    for (const nId of neighborIds) {
-      if (nId === h.mark.id) continue;
-      const pairKey = h.mark.id < nId ? `${h.mark.id}|${nId}` : `${nId}|${h.mark.id}`;
-      if (drawnPairs.has(pairKey)) continue;
-      drawnPairs.add(pairKey);
-      
-      const other = hitById[nId];
-      if (!other) continue;
-      
-      const dx = h.x - other.x;
-      const dy = h.y - other.y;
-      const distSq = dx * dx + dy * dy;
-      
-      if (h.mark.agentId === other.mark.agentId && distSq < 122500) { // 350²
-        const dist = Math.sqrt(distSq);
-        const a = (1 - dist / 350) * 0.04;
-        ctx.strokeStyle = rgba(h.mark.color, a);
-        ctx.lineWidth = 0.5;
-        ctx.beginPath();
-        ctx.moveTo(h.x, h.y);
-        const midX = (h.x + other.x) / 2 + Math.sin(t + h.x * 0.01) * 10;
-        const midY = (h.y + other.y) / 2 + Math.cos(t + other.y * 0.01) * 10;
-        ctx.quadraticCurveTo(midX, midY, other.x, other.y);
-        ctx.stroke();
-      } else if (h.mark.agentId !== other.mark.agentId && distSq < 3600) { // 60²
-        const dist = Math.sqrt(distSq);
-        const midX = (h.x + other.x) / 2;
-        const midY = (h.y + other.y) / 2;
-        const a = (1 - dist / 60) * 0.06;
-        const grad = ctx.createRadialGradient(midX, midY, 0, midX, midY, 25);
-        grad.addColorStop(0, `rgba(255,255,255,${a})`);
-        grad.addColorStop(1, 'transparent');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(midX, midY, 25, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-}
+// Old physics-based connections removed — lines are now explicit mark types
 
 // --- Agent Connection Threads ---
 function drawAgentConnections(hitAreas, t) {
@@ -772,8 +554,7 @@ function render(now) {
     fpsTime = now;
   }
   
-  // Rebuild spatial hash
-  rebuildGrid();
+  // Update marks
   
   // Update physics
   for (const mark of marks) updatePhysics(mark, dt, t);
@@ -791,7 +572,6 @@ function render(now) {
     if (hit) hitAreas.push(hit);
   }
   
-  drawConnections(hitAreas, t);
   drawAgentConnections(hitAreas, t);
   checkHover(hitAreas);
   drawEmptyState(t);
