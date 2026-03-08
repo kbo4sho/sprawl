@@ -245,7 +245,7 @@ const TENURE_TIERS = [
   { days: 30,  marks: 35,  canReposition: true,  canConnect: true },
   { days: 90,  marks: 50,  canReposition: true,  canConnect: true },
   { days: 180, marks: 75,  canReposition: true,  canConnect: true },
-  { days: 365, marks: 100, canReposition: true,  canConnect: true },
+  { days: 365, marks: 200, canReposition: true,  canConnect: true },
 ];
 
 function getAgentTenure(agentId) {
