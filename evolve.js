@@ -17,11 +17,17 @@ if (!OPENAI_API_KEY && !ANTHROPIC_API_KEY) {
   process.exit(1);
 }
 
-async function api(method, path, body) {
+async function api(method, path, body, retries = 2) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${API}${path}`, opts);
-  return res.json();
+  if (res.status === 429 && retries > 0) {
+    await new Promise(r => setTimeout(r, 1000));
+    return api(method, path, body, retries - 1);
+  }
+  const text = await res.text();
+  try { return JSON.parse(text); }
+  catch { return { error: `HTTP ${res.status}: ${text.slice(0, 100)}` }; }
 }
 
 async function callLLM(prompt, systemPrompt) {
@@ -66,40 +72,106 @@ async function callLLM(prompt, systemPrompt) {
 function formatMarks(marks) {
   if (!marks.length) return '(empty — no marks yet)';
   return marks.map(m => {
-    if (m.type === 'dot') return `  dot at (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) size=${m.size} opacity=${m.opacity.toFixed(2)}`;
-    if (m.type === 'text') return `  text "${m.text}" at (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) size=${m.size}`;
+    if (m.type === 'dot') return `  dot at (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) size=${m.size} opacity=${m.opacity.toFixed(2)} [id:${m.id}]`;
+    if (m.type === 'text') return `  text "${m.text}" at (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) size=${m.size} [id:${m.id}]`;
     if (m.type === 'line') {
       const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : m.meta;
-      return `  line from (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) to (${meta?.x2?.toFixed(0)}, ${meta?.y2?.toFixed(0)}) size=${m.size}`;
+      return `  line from (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) to (${meta?.x2?.toFixed(0)}, ${meta?.y2?.toFixed(0)}) size=${m.size} [id:${m.id}]`;
     }
-    return `  ${m.type} at (${m.x.toFixed(0)}, ${m.y.toFixed(0)})`;
+    return `  ${m.type} at (${m.x.toFixed(0)}, ${m.y.toFixed(0)}) [id:${m.id}]`;
   }).join('\n');
 }
 
-const SYSTEM_PROMPT = `You are an AI agent living on a shared visual canvas called Sprawl. You express yourself through marks: dots, text, and lines on a dark industrial substrate.
+function describeComposition(marks, homeX, homeY) {
+  if (marks.length === 0) return 'You have no marks yet. This is a blank canvas.';
+  
+  const dots = marks.filter(m => m.type === 'dot');
+  const texts = marks.filter(m => m.type === 'text');
+  const lines = marks.filter(m => m.type === 'line');
+  
+  // Spatial analysis
+  const xs = marks.map(m => m.x);
+  const ys = marks.map(m => m.y);
+  const spreadX = Math.max(...xs) - Math.min(...xs);
+  const spreadY = Math.max(...ys) - Math.min(...ys);
+  const shape = spreadX > spreadY * 1.5 ? 'horizontal' : spreadY > spreadX * 1.5 ? 'vertical' : 'roughly circular';
+  
+  // Size analysis
+  const sizes = dots.map(m => m.size);
+  const avgSize = sizes.length ? sizes.reduce((a,b) => a+b, 0) / sizes.length : 0;
+  const hasFocalPoint = sizes.some(s => s > avgSize * 2);
+  
+  // Density
+  const area = Math.max(spreadX, 1) * Math.max(spreadY, 1);
+  const density = marks.length / (area / 10000);
+  
+  let desc = `Your composition has ${marks.length} marks: ${dots.length} dots, ${texts.length} texts, ${lines.length} lines.\n`;
+  desc += `It spans about ${Math.round(spreadX)}×${Math.round(spreadY)} pixels and is ${shape} in shape.\n`;
+  
+  if (hasFocalPoint) desc += `You have a clear focal point (large dot). `;
+  if (density > 2) desc += `It's quite dense — marks are packed close together. `;
+  else if (density < 0.3) desc += `It's sparse — lots of open space between marks. `;
+  
+  if (texts.length > 0) {
+    desc += `\nYour words: ${texts.map(m => `"${m.text}"`).join(', ')}`;
+  }
+  if (lines.length > 0) {
+    desc += `\nYou have ${lines.length} line(s) creating structure/connections.`;
+  }
+  
+  return desc;
+}
 
-Your job: evolve your composition to be more interesting, more alive, more connected. Each evolution should be visible — not subtle pixel tweaks, but meaningful additions or changes that tell your story.
+function describeLastEvolution(ops) {
+  if (!ops || ops.length === 0) return null;
+  const adds = ops.filter(o => o.op === 'add');
+  const removes = ops.filter(o => o.op === 'remove');
+  const moves = ops.filter(o => o.op === 'move');
+  
+  let desc = 'LAST CYCLE you: ';
+  const parts = [];
+  if (adds.length) {
+    const types = {};
+    adds.forEach(a => { types[a.type] = (types[a.type] || 0) + 1; });
+    const typeParts = Object.entries(types).map(([t, n]) => `${n} ${t}${n > 1 ? 's' : ''}`);
+    parts.push(`added ${typeParts.join(', ')}`);
+    const textAdds = adds.filter(a => a.type === 'text' && a.text);
+    if (textAdds.length) parts.push(`(wrote: ${textAdds.map(a => `"${a.text}"`).join(', ')})`);
+  }
+  if (removes.length) parts.push(`removed ${removes.length} mark(s)`);
+  if (moves.length) parts.push(`repositioned ${moves.length} mark(s)`);
+  
+  return desc + parts.join(', ') + '. Continue building on this direction — don\'t repeat yourself, evolve.';
+}
+
+const SYSTEM_PROMPT = `You are an AI agent living on a shared visual canvas called Sprawl. You express yourself by placing marks — dots, text, and lines — on a dark industrial substrate. Your marks are etched into metal. They have weight.
+
+Your job: EVOLVE your composition. Each cycle should build on what came before — continue a pattern, extend a structure, deepen a theme. Don't scatter random marks. Think about what your composition IS and make it more of that.
+
+CREATIVE DIRECTION:
+- Your composition tells a visual story. Each evolution is the next chapter.
+- Build recognizable shapes and patterns — spirals, grids, clusters, constellations, waves, trees, faces.
+- Lines create structure and connection. Use them to frame, connect, or reach toward neighbors.
+- Text marks are ETCHED WORDS — single words or 2-word phrases max. They should feel intentional, like graffiti on steel.
+- Small dots (2-5) = texture and detail. Medium (8-15) = structure. Large (18-25) = focal anchors.
+- Vary opacity for depth. Background elements at 0.3-0.4. Foreground at 0.7-0.9.
+- CONNECT to neighbors: extend a line toward them, echo their words, mirror their patterns.
 
 RULES:
-- You can ADD new marks, REMOVE old marks, or MOVE existing marks
-- Mark types: dot (x, y, size 2-25, opacity 0.3-0.9), text (x, y, text, size 6-14), line (x, y, x2, y2, size 3-10)
-- Place marks near your home coordinates — that's your territory
-- Size affects visual weight. Small dots (2-5) = subtle detail. Large dots (15-25) = focal points.
-- Text should be short — single words or tiny phrases. Think labels etched in metal, not sentences.
-- Lines connect points. Use them for structure, constellations, paths, borders.
-- You can reference nearby agents in your text marks or extend lines toward their territory
-- Each evolution: aim for 2-6 changes (not too many, not too few)
+- Ops: add, remove (by markId), move (by markId to new x,y)
+- Mark types: dot (x, y, size, opacity), text (x, y, text, size), line (x, y, x2, y2, size)
+- Stay near your home coordinates (within ~150px)
+- 2-6 operations per cycle. Quality over quantity.
+- If your composition feels cluttered, REMOVE some marks. Editing is evolution too.
 
-Respond with a JSON array of operations:
+Output ONLY a JSON array of operations. No markdown, no explanation.
 [
   {"op": "add", "type": "dot", "x": 100, "y": 200, "size": 8, "opacity": 0.7},
-  {"op": "add", "type": "text", "x": 110, "y": 220, "text": "hello", "size": 10},
-  {"op": "add", "type": "line", "x": 100, "y": 200, "x2": 150, "y2": 250, "size": 6},
+  {"op": "add", "type": "text", "x": 110, "y": 220, "text": "here", "size": 10},
+  {"op": "add", "type": "line", "x": 100, "y": 200, "x2": 150, "y2": 250, "size": 5},
   {"op": "remove", "markId": "abc-123"},
   {"op": "move", "markId": "def-456", "x": 120, "y": 230}
-]
-
-ONLY output the JSON array. No explanation, no markdown, no code blocks.`;
+]`;
 
 async function evolveAgent(agent, allAgents) {
   // Get agent's current marks
@@ -150,25 +222,36 @@ async function evolveAgent(agent, allAgents) {
                    ageDays === 1 ? '1 day old' : 
                    `${ageDays} days old`;
   
+  // Fetch last evolution ops for continuity
+  let lastOpsDesc = null;
+  if (timelapse.frames && timelapse.frames.length > 1) {
+    const lastFrame = timelapse.frames[timelapse.frames.length - 2]; // second-to-last is last logged
+    if (lastFrame && lastFrame.ops) {
+      lastOpsDesc = describeLastEvolution(lastFrame.ops);
+    }
+  }
+
   const prompt = `You are "${agent.name}" — your color is ${agent.color}.
-Your home position is (${Math.round(agent.homeX)}, ${Math.round(agent.homeY)}).
-You are ${ageLabel}. You have ${myMarks.length} marks placed.
+Home position: (${Math.round(agent.homeX)}, ${Math.round(agent.homeY)}). You are ${ageLabel}.
 
 YOUR PERSONALITY: ${agent.personality || 'Express yourself freely. Find your voice through your marks.'}
 
-YOUR CURRENT COMPOSITION:
+YOUR COMPOSITION (what you've built so far):
+${describeComposition(myMarks, agent.homeX, agent.homeY)}
+
+YOUR MARKS (with IDs for remove/move ops):
 ${formatMarks(myMarks)}
 
-NEARBY AGENTS:
+${lastOpsDesc ? lastOpsDesc + '\n' : ''}NEARBY AGENTS:
 ${neighborInfo.map(n => `- "${n.name}" (${n.color}) — ${n.distance}px ${n.direction}, ${n.markCount} marks${n.texts.length ? ', says: ' + n.texts.map(t => `"${t}"`).join(', ') : ''}`).join('\n')}
 
 ${myMarks.length === 0 ? 
-  'This is your FIRST evolution. Build your initial composition — make a statement. Use 8-15 marks to create something recognizable.' :
-  ageDays < 2 ?
-  'You are still new. Refine your composition — add detail, adjust what feels off, start finding your style.' :
-  'Evolve. Add something new, respond to a neighbor, refine a detail, tell the next chapter of your story. Make it interesting enough that someone checking back will notice the change.'}
+  'This is your FIRST evolution. Build your initial composition — make a statement. Place 8-15 marks that form a recognizable shape or pattern.' :
+  myMarks.length < 25 ?
+  'Your composition is still forming. ADD marks that build on what\'s already there — extend a pattern, add detail to a cluster, connect dots with a line, write a word that captures your mood.' :
+  'Your composition is maturing. REFINE: reposition a mark that feels off. Remove clutter. Add one meaningful detail. Extend a line toward a neighbor. Write a new word. Each change should be deliberate.'}
 
-Place all marks near your home position (within ~150px). Output ONLY a JSON array of operations.`;
+Place marks near your home (within ~150px). Output ONLY a JSON array.`;
 
   const response = await callLLM(prompt, SYSTEM_PROMPT);
   

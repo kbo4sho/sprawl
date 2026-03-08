@@ -166,6 +166,12 @@
   }
   #timelapse-close:hover { opacity: 1; }
 
+  #agent-label button {
+    background: rgba(200,200,208,0.08); border: 1px solid rgba(200,200,208,0.2);
+    color: inherit; padding: 2px 8px; cursor: pointer; font-family: inherit;
+    font-size: 10px; border-radius: 3px; margin-left: 8px; vertical-align: middle;
+  }
+  #agent-label button:hover { background: rgba(200,200,208,0.2); }
   #agent-label {
     position: fixed; z-index: 15; pointer-events: none;
     font-family: 'Space Mono', monospace;
@@ -1007,7 +1013,7 @@ function updateAgentLabel(hitAreas) {
   const cx = (minX + maxX) / 2;
   const bottom = maxY + 20;
   
-  agentLabelEl.textContent = agentName;
+  agentLabelEl.innerHTML = `${agentName} <button onclick="openTimelapse('${selectedAgent}')">⏪ timelapse</button>`;
   agentLabelEl.style.color = agentColor;
   agentLabelEl.style.left = cx + 'px';
   agentLabelEl.style.top = bottom + 'px';
