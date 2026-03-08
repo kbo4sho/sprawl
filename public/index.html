@@ -206,27 +206,23 @@ function rebuildIndex() {
   for (const m of marks) marksById[m.id] = m;
 }
 
-// --- Draw helpers (no offscreen canvases — Safari compat) ---
-function drawGlow(px, py, radius, color, alpha) {
+// --- Draw helpers (simple fills — Safari compat) ---
+function drawDot(px, py, size, color, alpha) {
   const [r, g, b] = hexToRgb(color);
-  const grad = ctx.createRadialGradient(px, py, 0, px, py, radius);
-  grad.addColorStop(0, `rgba(${r},${g},${b},${0.6 * alpha})`);
-  grad.addColorStop(0.3, `rgba(${r},${g},${b},${0.2 * alpha})`);
-  grad.addColorStop(1, 'transparent');
-  ctx.fillStyle = grad;
+  // Soft halo
+  ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.08})`;
   ctx.beginPath();
-  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  ctx.arc(px, py, size * 2, 0, Math.PI * 2);
   ctx.fill();
-}
-
-function drawCore(px, py, radius, color, alpha) {
-  const [r, g, b] = hexToRgb(color);
-  const grad = ctx.createRadialGradient(px, py, 0, px, py, radius);
-  grad.addColorStop(0, `rgba(${Math.min(255,r+120)},${Math.min(255,g+120)},${Math.min(255,b+120)},${alpha})`);
-  grad.addColorStop(1, `rgba(${r},${g},${b},${0.8 * alpha})`);
-  ctx.fillStyle = grad;
+  // Main body
+  ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.5})`;
   ctx.beginPath();
-  ctx.arc(px, py, radius, 0, Math.PI * 2);
+  ctx.arc(px, py, size, 0, Math.PI * 2);
+  ctx.fill();
+  // Bright core
+  ctx.fillStyle = `rgba(${Math.min(255,r+100)},${Math.min(255,g+100)},${Math.min(255,b+100)},${alpha})`;
+  ctx.beginPath();
+  ctx.arc(px, py, size * 0.4, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -535,8 +531,7 @@ function renderMark(mark, t) {
   switch (mark.type) {
     case 'dot':
     case 'particle': {
-      drawGlow(px, py, Math.min(150, sz * 2.5), mark.color, a);
-      if (sz >= 2) drawCore(px, py, sz * 0.5, mark.color, a);
+      drawDot(px, py, sz, mark.color, a);
       break;
     }
     
@@ -684,56 +679,9 @@ function drawAgentConnections(hitAreas, t) {
   }
 }
 
-// --- Ambient ---
-const dust = [];
-for (let i = 0; i < 80; i++) {
-  dust.push({
-    x: Math.random(), y: Math.random(),
-    vx: (Math.random() - 0.5) * 0.00003,
-    vy: -Math.random() * 0.00004 - 0.00001, // slight upward drift
-    size: Math.random() * 1.2 + 0.3,
-    alpha: Math.random() * 0.04 + 0.005,
-    phase: Math.random() * Math.PI * 2
-  });
-}
-
-function drawBackground(t) {
-  // Deep void
+function drawBackground() {
   ctx.fillStyle = '#030306';
   ctx.fillRect(0, 0, W, H);
-  
-  // Vignette
-  const vg = ctx.createRadialGradient(W/2, H/2, W * 0.15, W/2, H/2, W * 0.85);
-  vg.addColorStop(0, 'transparent');
-  vg.addColorStop(1, 'rgba(0,0,0,0.5)');
-  ctx.fillStyle = vg;
-  ctx.fillRect(0, 0, W, H);
-  
-  // Subtle grid (breathing opacity)
-  const gridAlpha = 0.008 + 0.004 * Math.sin(t * 0.3);
-  ctx.strokeStyle = `rgba(255,255,255,${gridAlpha})`;
-  ctx.lineWidth = 0.5;
-  const gridSize = 100;
-  for (let x = gridSize; x < W; x += gridSize) {
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-  }
-  for (let y = gridSize; y < H; y += gridSize) {
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-  }
-  
-  // Dust
-  for (const d of dust) {
-    d.x += d.vx + Math.sin(t * 0.08 + d.phase) * 0.00002;
-    d.y += d.vy;
-    if (d.y < 0) { d.y = 1; d.x = Math.random(); }
-    if (d.x < 0) d.x = 1; if (d.x > 1) d.x = 0;
-    
-    const flicker = d.alpha * (0.6 + 0.4 * Math.sin(t * 3 + d.phase));
-    ctx.fillStyle = `rgba(160,165,190,${flicker})`;
-    ctx.beginPath();
-    ctx.arc(d.x * W, d.y * H, d.size, 0, Math.PI * 2);
-    ctx.fill();
-  }
 }
 
 function drawEmptyState(t) {
@@ -795,7 +743,7 @@ function render(now) {
   for (const mark of marks) updatePhysics(mark, dt, t);
   
   // Draw
-  drawBackground(t);
+  drawBackground();
   
   const hitAreas = [];
   const sorted = [...marks].sort((a, b) => a.opacity - b.opacity);
