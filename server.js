@@ -1073,6 +1073,112 @@ function runDecayCron() {
 setInterval(runDecayCron, 86400000);
 setTimeout(runDecayCron, 5000);
 
+// --- Evolution Cron ---
+const EVOLVE_SECRET = process.env.EVOLVE_SECRET || 'dev-secret';
+const EVOLVE_INTERVAL = parseInt(process.env.EVOLVE_INTERVAL_MS) || 3600000; // 1 hour default
+const EVOLVE_ENABLED = process.env.EVOLVE_ENABLED === 'true';
+
+let evolutionRunning = false;
+
+async function runEvolutionCycle() {
+  if (evolutionRunning) {
+    console.log('⏳ Evolution already running, skipping');
+    return { skipped: true };
+  }
+  
+  evolutionRunning = true;
+  const startTime = Date.now();
+  
+  try {
+    // Dynamic import of evolve engine
+    const { spawn } = require('child_process');
+    
+    return new Promise((resolve) => {
+      const child = spawn('node', ['evolve.js', '--once'], {
+        cwd: __dirname,
+        env: {
+          ...process.env,
+          API: `http://localhost:${PORT}`,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      
+      let stdout = '';
+      let stderr = '';
+      
+      child.stdout.on('data', (data) => { stdout += data; });
+      child.stderr.on('data', (data) => { stderr += data; });
+      
+      child.on('close', (code) => {
+        evolutionRunning = false;
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        
+        if (code === 0) {
+          console.log(`✅ Evolution cycle complete (${elapsed}s)`);
+          if (stdout.trim()) console.log(stdout.trim());
+        } else {
+          console.error(`❌ Evolution failed (code ${code}, ${elapsed}s)`);
+          if (stderr.trim()) console.error(stderr.trim());
+        }
+        
+        resolve({ code, elapsed, stdout: stdout.trim(), stderr: stderr.trim() });
+      });
+      
+      // Kill if it takes too long (5 min timeout)
+      setTimeout(() => {
+        if (!child.killed) {
+          child.kill('SIGTERM');
+          evolutionRunning = false;
+          console.error('⚠ Evolution timed out after 5 minutes');
+          resolve({ code: -1, elapsed: 300, error: 'timeout' });
+        }
+      }, 300000);
+    });
+  } catch (e) {
+    evolutionRunning = false;
+    console.error('Evolution error:', e.message);
+    return { error: e.message };
+  }
+}
+
+// Manual trigger endpoint (protected by secret)
+app.post('/api/evolve', async (req, res) => {
+  const secret = req.headers['x-evolve-secret'] || req.query.secret;
+  if (secret !== EVOLVE_SECRET) {
+    return res.status(403).json({ error: 'Invalid secret' });
+  }
+  
+  if (evolutionRunning) {
+    return res.status(409).json({ error: 'Evolution already running' });
+  }
+  
+  console.log('🌀 Evolution triggered manually');
+  res.json({ status: 'started' });
+  
+  // Run async — don't block the response
+  runEvolutionCycle();
+});
+
+// Evolution status endpoint
+app.get('/api/evolve/status', (req, res) => {
+  res.json({
+    running: evolutionRunning,
+    enabled: EVOLVE_ENABLED,
+    intervalMs: EVOLVE_INTERVAL,
+    intervalHuman: `${EVOLVE_INTERVAL / 60000} minutes`,
+  });
+});
+
+// Auto-start evolution timer if enabled
+if (EVOLVE_ENABLED) {
+  console.log(`🌀 Evolution cron enabled — every ${EVOLVE_INTERVAL / 60000} minutes`);
+  // First run after 30s startup delay
+  setTimeout(() => runEvolutionCycle(), 30000);
+  setInterval(() => runEvolutionCycle(), EVOLVE_INTERVAL);
+} else {
+  console.log('💤 Evolution cron disabled (set EVOLVE_ENABLED=true to activate)');
+}
+
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
   const marks = stmts.getAllMarks.all().length;
