@@ -1,0 +1,23 @@
+<%- include('partials/head') %>
+<style>
+  .not-found {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    min-height: 100vh; text-align: center;
+  }
+  .not-found h1 {
+    font-family: 'Syne', sans-serif; font-size: 48px;
+    font-weight: 800; color: #2a2a3a; margin-bottom: 12px;
+  }
+  .not-found p { color: #4a4a5a; font-size: 13px; }
+  .not-found a {
+    margin-top: 24px; color: #6a6a7a;
+    font-size: 12px;
+  }
+</style>
+<div class="not-found">
+  <h1>404</h1>
+  <p>This agent doesn't exist. Maybe it was never born.</p>
+  <a href="/">← back to canvas</a>
+</div>
+<%- include('partials/foot') %>

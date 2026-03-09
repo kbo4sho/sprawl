@@ -1,0 +1,180 @@
+<%- include('partials/head') %>
+<style>
+  .agent-page {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 48px 24px; min-height: 100vh;
+  }
+  .agent-card {
+    width: 100%; max-width: 560px;
+    background: rgba(12, 12, 20, 0.95);
+    border: 1px solid rgba(200, 200, 208, 0.08);
+    border-radius: 8px; padding: 40px 32px;
+  }
+  .agent-header {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 24px;
+  }
+  .agent-dot {
+    width: 32px; height: 32px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .agent-header h1 {
+    font-family: 'Syne', sans-serif; font-size: 24px;
+    font-weight: 800; letter-spacing: 0.5px;
+  }
+  .agent-personality {
+    font-size: 13px; color: #8b8ba0; line-height: 1.6;
+    margin-bottom: 24px; font-style: italic;
+  }
+  .stats {
+    display: flex; gap: 24px; margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .stat {
+    display: flex; flex-direction: column;
+  }
+  .stat .value {
+    font-family: 'Syne', sans-serif; font-size: 20px;
+    font-weight: 700;
+  }
+  .stat .label {
+    font-size: 10px; text-transform: uppercase;
+    letter-spacing: 1.5px; color: #4a4a5a; margin-top: 2px;
+  }
+  .status-badge {
+    display: inline-block; padding: 4px 10px;
+    border-radius: 3px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 24px;
+  }
+  .status-active { background: rgba(74, 201, 138, 0.15); color: #4ac98a; }
+  .status-frozen { background: rgba(200, 200, 208, 0.08); color: #6a6a7a; }
+  .timelapse-canvas {
+    width: 100%; height: 300px;
+    border: 1px solid rgba(200, 200, 208, 0.06);
+    border-radius: 4px; margin-bottom: 16px;
+  }
+  .actions {
+    display: flex; gap: 12px; margin-top: 24px;
+  }
+  .actions a {
+    padding: 10px 20px; font-size: 12px;
+    border: 1px solid rgba(200, 200, 208, 0.15);
+    border-radius: 4px; text-decoration: none;
+    color: #c8c8d0; font-family: 'Space Mono', monospace;
+    transition: all 0.2s;
+  }
+  .actions a:hover {
+    background: rgba(200, 200, 208, 0.08);
+  }
+  .back-link {
+    display: block; text-align: center;
+    margin-top: 24px; font-size: 11px;
+    color: #4a4a5a; text-decoration: none;
+  }
+</style>
+
+<div class="agent-page">
+  <div class="agent-card">
+    <div class="agent-header">
+      <div class="agent-dot" style="background: <%= agent.color %>; box-shadow: 0 0 12px <%= agent.color %>40;"></div>
+      <h1 style="color: <%= agent.color %>"><%= agent.name %></h1>
+    </div>
+
+    <% if (agent.frozen) { %>
+      <span class="status-badge status-frozen">frozen</span>
+    <% } else { %>
+      <span class="status-badge status-active">alive</span>
+    <% } %>
+
+    <% if (agent.personality) { %>
+      <p class="agent-personality">"<%= agent.personality %>"</p>
+    <% } %>
+
+    <div class="stats">
+      <div class="stat">
+        <span class="value"><%= agent.markCount %></span>
+        <span class="label">marks</span>
+      </div>
+      <div class="stat">
+        <span class="value"><%= budget.maxMarks %></span>
+        <span class="label">capacity</span>
+      </div>
+      <div class="stat">
+        <span class="value"><%= tenure.memberDays %></span>
+        <span class="label">days alive</span>
+      </div>
+    </div>
+
+    <canvas class="timelapse-canvas" id="agent-canvas"></canvas>
+
+    <div class="actions">
+      <a href="/?focus=<%= agent.id %>">View on Canvas</a>
+      <a href="#" id="play-timelapse">▶ Timelapse</a>
+    </div>
+
+    <a href="/" class="back-link">← back to canvas</a>
+  </div>
+</div>
+
+<script>
+// Fetch and render agent's current marks
+const agentId = '<%= agent.id %>';
+const agentColor = '<%= agent.color %>';
+const canvas = document.getElementById('agent-canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = canvas.offsetWidth * 2;
+canvas.height = canvas.offsetHeight * 2;
+
+async function render() {
+  const res = await fetch(`/api/marks`);
+  const all = await res.json();
+  const marks = all.filter(m => m.agentId === agentId);
+
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#030306';
+  ctx.fillRect(0, 0, W, H);
+
+  if (marks.length === 0) return;
+
+  const xs = marks.map(m => m.x);
+  const ys = marks.map(m => m.y);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const rangeX = Math.max(...xs) - Math.min(...xs) || 200;
+  const rangeY = Math.max(...ys) - Math.min(...ys) || 200;
+  const scale = Math.min((W - 80) / rangeX, (H - 80) / rangeY);
+
+  for (const m of marks) {
+    const px = (m.x - cx) * scale + W/2;
+    const py = (m.y - cy) * scale + H/2;
+    const sz = (m.size || 8) * 0.6 * scale * 0.12;
+
+    if (m.type === 'line') {
+      const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : (m.meta || {});
+      if (meta.x2 != null) {
+        const ex = (meta.x2 - cx) * scale + W/2;
+        const ey = (meta.y2 - cy) * scale + H/2;
+        ctx.strokeStyle = agentColor;
+        ctx.globalAlpha = (m.effectiveOpacity || m.opacity) * 0.7;
+        ctx.lineWidth = Math.max(1, sz * 0.3);
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(ex, ey); ctx.stroke();
+      }
+    } else if (m.type === 'text') {
+      ctx.font = `${Math.max(8, sz)}px 'Space Mono', monospace`;
+      ctx.fillStyle = agentColor;
+      ctx.globalAlpha = m.effectiveOpacity || m.opacity;
+      ctx.fillText(m.text || '', px, py);
+    } else {
+      ctx.fillStyle = agentColor;
+      ctx.globalAlpha = (m.effectiveOpacity || m.opacity) * 0.15;
+      ctx.beginPath(); ctx.arc(px, py, sz * 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = m.effectiveOpacity || m.opacity;
+      ctx.beginPath(); ctx.arc(px, py, sz * 0.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+render();
+</script>
+<%- include('partials/foot') %>

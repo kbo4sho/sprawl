@@ -7,6 +7,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const app = express();
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
@@ -375,6 +377,111 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/mark', rateLimit);
 app.use('/api/connect', rateLimit);
+
+// ============================================================
+// PAGES
+// ============================================================
+
+// Agent profile page
+app.get('/agent/:id', (req, res) => {
+  const agent = stmts.getAgent.get(req.params.id);
+  if (!agent) return res.status(404).render('404', { title: 'Agent not found' });
+  const marks = stmts.getMarksByAgent.all(req.params.id);
+  const budget = getBudget(req.params.id);
+  const tenure = getAgentTenure(req.params.id);
+  res.render('agent', {
+    agent: {
+      id: agent.id, name: agent.name, color: agent.color,
+      personality: agent.personality,
+      joinedAt: agent.joined_at,
+      markCount: marks.length,
+      frozen: !!agent.frozen,
+      homeX: agent.home_x, homeY: agent.home_y,
+    },
+    budget,
+    tenure,
+    title: `${agent.name} — Sprawl`,
+    description: agent.personality || `${agent.name} is an AI agent on Sprawl.`,
+  });
+});
+
+// Create agent page
+app.get('/create', (req, res) => {
+  res.render('create', {
+    title: 'Release an Agent — Sprawl',
+    description: 'Create an AI agent that lives and evolves on a shared visual canvas.',
+  });
+});
+
+// ============================================================
+// AGENT CREATION (first marks via evolution engine)
+// ============================================================
+
+app.post('/api/agents/create', rateLimit, async (req, res) => {
+  const { id, name, color, personality } = req.body;
+  if (!id || !name) return res.status(400).json({ error: 'id and name required' });
+  if (!personality || personality.length < 10) return res.status(400).json({ error: 'personality required (min 10 chars)' });
+  if (personality.length > 500) return res.status(400).json({ error: 'personality max 500 chars' });
+  
+  // Check if agent already exists
+  const existing = stmts.getAgent.get(id);
+  if (existing) return res.status(409).json({ error: 'Agent ID already taken' });
+  
+  // Create the agent
+  const homeCoords = assignHomeCoordinates(id);
+  const processedColor = snapToPalette(color || '#ffffff');
+  stmts.upsertAgent.run({
+    id, name, color: processedColor,
+    now: Date.now(), shader_code: null,
+    home_x: homeCoords.home_x, home_y: homeCoords.home_y,
+    personality,
+  });
+  
+  // Place 5 seed marks — simple dots near home to establish presence
+  // The first real evolution cycle will use the LLM to create the real composition
+  const seedMarks = [];
+  const hx = homeCoords.home_x, hy = homeCoords.home_y;
+  
+  // Central focal point
+  seedMarks.push({ type: 'dot', x: hx, y: hy, size: 18, opacity: 0.9 });
+  // 4 surrounding sparks
+  for (let i = 0; i < 4; i++) {
+    const angle = (Math.PI * 2 * i / 4) + (Math.random() * 0.5);
+    const dist = 15 + Math.random() * 25;
+    seedMarks.push({
+      type: 'dot',
+      x: hx + Math.cos(angle) * dist,
+      y: hy + Math.sin(angle) * dist,
+      size: 2 + Math.random() * 4,
+      opacity: 0.4 + Math.random() * 0.3,
+    });
+  }
+  
+  const placedMarks = [];
+  for (const m of seedMarks) {
+    const markId = crypto.randomUUID();
+    stmts.insertMark.run({
+      id: markId, agent_id: id, type: m.type,
+      x: m.x, y: m.y, color: processedColor,
+      size: m.size, opacity: m.opacity,
+      text: null, meta: '{}', now: Date.now(),
+    });
+    placedMarks.push({ id: markId, ...m, color: processedColor });
+    broadcast({ type: 'mark:new', mark: { id: markId, agentId: id, agentName: name, ...m, color: processedColor } });
+  }
+  
+  // Log creation as first evolution
+  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(id, 0, '[]', JSON.stringify(placedMarks.map(m => ({ op: 'add', ...m }))), Date.now());
+  
+  res.status(201).json({
+    id, name, color: processedColor,
+    personality,
+    homeX: homeCoords.home_x, homeY: homeCoords.home_y,
+    agentColor: processedColor,
+    marks: placedMarks,
+  });
+});
 
 // ============================================================
 // API

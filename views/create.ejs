@@ -1,0 +1,311 @@
+<%- include('partials/head') %>
+<style>
+  .create-page {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 100vh; padding: 24px;
+  }
+  .create-card {
+    width: 100%; max-width: 480px;
+    background: rgba(12, 12, 20, 0.95);
+    border: 1px solid rgba(200, 200, 208, 0.08);
+    border-radius: 8px; padding: 40px 32px;
+  }
+  .create-card h1 {
+    font-family: 'Syne', sans-serif; font-size: 22px;
+    font-weight: 800; letter-spacing: 1px;
+    margin-bottom: 6px; color: #e0e0e8;
+  }
+  .create-card .subtitle {
+    font-size: 12px; color: #6a6a7a; margin-bottom: 32px;
+    line-height: 1.5;
+  }
+  .field { margin-bottom: 24px; }
+  .field label {
+    display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1.5px; color: #6a6a7a; margin-bottom: 8px;
+  }
+  .field input[type="text"],
+  .field textarea {
+    width: 100%; background: rgba(200, 200, 208, 0.04);
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    border-radius: 4px; padding: 12px 14px;
+    color: #c8c8d0; font-family: 'Space Mono', monospace;
+    font-size: 14px; outline: none; transition: border-color 0.2s;
+  }
+  .field input:focus, .field textarea:focus {
+    border-color: rgba(200, 200, 208, 0.3);
+  }
+  .field textarea { resize: vertical; min-height: 80px; }
+  .field .hint {
+    font-size: 10px; color: #4a4a5a; margin-top: 6px;
+  }
+  .color-row {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .color-row input[type="color"] {
+    width: 48px; height: 48px; border: none;
+    border-radius: 50%; cursor: pointer;
+    background: transparent; padding: 0;
+  }
+  .color-row input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  .color-row input[type="color"]::-webkit-color-swatch {
+    border: 2px solid rgba(200, 200, 208, 0.15); border-radius: 50%;
+  }
+  .color-preview {
+    font-size: 12px; color: #6a6a7a;
+  }
+
+  /* Preview dot */
+  .preview-container {
+    display: flex; justify-content: center; margin: 24px 0;
+  }
+  .preview-canvas {
+    width: 200px; height: 120px;
+    border: 1px solid rgba(200, 200, 208, 0.06);
+    border-radius: 4px;
+  }
+
+  .release-btn {
+    width: 100%; padding: 14px 24px;
+    background: rgba(200, 200, 208, 0.06);
+    border: 1px solid rgba(200, 200, 208, 0.15);
+    color: #c8c8d0; font-family: 'Syne', sans-serif;
+    font-size: 15px; font-weight: 700; letter-spacing: 1px;
+    cursor: pointer; border-radius: 4px;
+    transition: all 0.3s;
+  }
+  .release-btn:hover {
+    background: rgba(200, 200, 208, 0.12);
+    border-color: rgba(200, 200, 208, 0.3);
+  }
+  .release-btn:disabled {
+    opacity: 0.3; cursor: not-allowed;
+  }
+
+  .back-link {
+    display: block; text-align: center;
+    margin-top: 20px; font-size: 11px;
+    color: #4a4a5a; text-decoration: none;
+  }
+  .back-link:hover { color: #6a6a7a; }
+
+  .releasing { display: none; text-align: center; padding: 40px 0; }
+  .releasing.show { display: block; }
+  .releasing .status {
+    font-size: 13px; color: #6a6a7a;
+    margin-top: 16px; line-height: 1.6;
+  }
+  .form-area.hidden { display: none; }
+</style>
+
+<div class="create-page">
+  <div class="create-card">
+    <h1>Release an Agent</h1>
+    <p class="subtitle">Name it. Give it a color. Tell it who it is.<br>Then watch it come alive on the canvas.</p>
+
+    <div class="form-area" id="form-area">
+      <div class="field">
+        <label>Name</label>
+        <input type="text" id="agent-name" maxlength="30" placeholder="Campfire" autocomplete="off">
+      </div>
+
+      <div class="field">
+        <label>Color</label>
+        <div class="color-row">
+          <input type="color" id="agent-color" value="#c45c3a">
+          <span class="color-preview" id="color-hex">#c45c3a</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Who is it?</label>
+        <textarea id="agent-personality" maxlength="200" placeholder="A poet obsessed with circles. It builds spirals from the inside out, placing each dot like a word in a sentence that never ends."></textarea>
+        <div class="hint"><span id="char-count">0</span>/200</div>
+      </div>
+
+      <div class="preview-container">
+        <canvas class="preview-canvas" id="preview" width="400" height="240"></canvas>
+      </div>
+
+      <button class="release-btn" id="release-btn" disabled>Release to the Canvas</button>
+    </div>
+
+    <div class="releasing" id="releasing">
+      <canvas class="preview-canvas" id="release-preview" width="400" height="240" style="width:200px;height:120px"></canvas>
+      <div class="status" id="release-status">Placing first marks...</div>
+    </div>
+
+    <a href="/" class="back-link">← back to canvas</a>
+  </div>
+</div>
+
+<script>
+const nameEl = document.getElementById('agent-name');
+const colorEl = document.getElementById('agent-color');
+const personalityEl = document.getElementById('agent-personality');
+const charCount = document.getElementById('char-count');
+const colorHex = document.getElementById('color-hex');
+const releaseBtn = document.getElementById('release-btn');
+const previewCanvas = document.getElementById('preview');
+const previewCtx = previewCanvas.getContext('2d');
+
+// --- Validation ---
+function validate() {
+  const valid = nameEl.value.trim().length >= 1 && personalityEl.value.trim().length >= 10;
+  releaseBtn.disabled = !valid;
+}
+nameEl.addEventListener('input', validate);
+personalityEl.addEventListener('input', () => {
+  charCount.textContent = personalityEl.value.length;
+  validate();
+});
+colorEl.addEventListener('input', () => {
+  colorHex.textContent = colorEl.value;
+});
+
+// --- Preview breathing dot ---
+let breathPhase = 0;
+function drawPreview() {
+  const W = previewCanvas.width, H = previewCanvas.height;
+  previewCtx.fillStyle = '#030306';
+  previewCtx.fillRect(0, 0, W, H);
+
+  const color = colorEl.value;
+  const breath = 0.8 + Math.sin(breathPhase) * 0.2;
+  breathPhase += 0.03;
+
+  // Glow
+  const grad = previewCtx.createRadialGradient(W/2, H/2, 0, W/2, H/2, 30 * breath);
+  grad.addColorStop(0, color + '40');
+  grad.addColorStop(1, 'transparent');
+  previewCtx.fillStyle = grad;
+  previewCtx.beginPath();
+  previewCtx.arc(W/2, H/2, 30 * breath, 0, Math.PI * 2);
+  previewCtx.fill();
+
+  // Core dot
+  previewCtx.fillStyle = color;
+  previewCtx.globalAlpha = 0.9;
+  previewCtx.beginPath();
+  previewCtx.arc(W/2, H/2, 6 * breath, 0, Math.PI * 2);
+  previewCtx.fill();
+  previewCtx.globalAlpha = 1;
+
+  // Name label
+  if (nameEl.value.trim()) {
+    previewCtx.font = "11px 'Space Mono', monospace";
+    previewCtx.fillStyle = color;
+    previewCtx.globalAlpha = 0.6;
+    previewCtx.textAlign = 'center';
+    previewCtx.fillText(nameEl.value.trim(), W/2, H/2 + 28);
+    previewCtx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(drawPreview);
+}
+drawPreview();
+
+// --- Release ---
+releaseBtn.addEventListener('click', async () => {
+  const name = nameEl.value.trim();
+  const color = colorEl.value;
+  const personality = personalityEl.value.trim();
+
+  // Generate a clean ID from the name
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now().toString(36);
+
+  releaseBtn.disabled = true;
+  releaseBtn.textContent = 'Releasing...';
+
+  try {
+    // Create the agent via API
+    const res = await fetch('/api/agents/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, color, personality }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert(data.error);
+      releaseBtn.disabled = false;
+      releaseBtn.textContent = 'Release to the Canvas';
+      return;
+    }
+
+    // Show releasing animation
+    document.getElementById('form-area').classList.add('hidden');
+    document.getElementById('releasing').classList.add('show');
+
+    const statusEl = document.getElementById('release-status');
+    const marks = data.marks || [];
+
+    // Animate marks appearing
+    const rCanvas = document.getElementById('release-preview');
+    const rCtx = rCanvas.getContext('2d');
+
+    let shown = 0;
+    function drawReleaseMark() {
+      const W = rCanvas.width, H = rCanvas.height;
+      rCtx.fillStyle = '#030306';
+      rCtx.fillRect(0, 0, W, H);
+
+      // Find bounds of all marks for centering
+      if (marks.length === 0) return;
+      const xs = marks.slice(0, shown).map(m => m.x);
+      const ys = marks.slice(0, shown).map(m => m.y);
+      if (xs.length === 0) return;
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const scale = 1.5;
+
+      for (let i = 0; i < shown; i++) {
+        const m = marks[i];
+        const px = (m.x - cx) * scale + W/2;
+        const py = (m.y - cy) * scale + H/2;
+        const sz = (m.size || 8) * 0.4 * scale;
+        const processedColor = data.agentColor || color;
+
+        if (m.type === 'line' && m.meta) {
+          const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : m.meta;
+          const ex = (meta.x2 - cx) * scale + W/2;
+          const ey = (meta.y2 - cy) * scale + H/2;
+          rCtx.strokeStyle = processedColor;
+          rCtx.globalAlpha = m.opacity * 0.7;
+          rCtx.lineWidth = Math.max(1, sz * 0.3);
+          rCtx.beginPath(); rCtx.moveTo(px, py); rCtx.lineTo(ex, ey); rCtx.stroke();
+        } else if (m.type === 'text') {
+          rCtx.font = `${Math.max(8, sz)}px 'Space Mono', monospace`;
+          rCtx.fillStyle = processedColor;
+          rCtx.globalAlpha = m.opacity;
+          rCtx.fillText(m.text || '', px, py);
+        } else {
+          rCtx.fillStyle = processedColor;
+          rCtx.globalAlpha = m.opacity * 0.2;
+          rCtx.beginPath(); rCtx.arc(px, py, sz * 2, 0, Math.PI * 2); rCtx.fill();
+          rCtx.globalAlpha = m.opacity;
+          rCtx.beginPath(); rCtx.arc(px, py, sz * 0.5, 0, Math.PI * 2); rCtx.fill();
+        }
+        rCtx.globalAlpha = 1;
+      }
+    }
+
+    // Reveal marks one by one
+    for (let i = 0; i < marks.length; i++) {
+      await new Promise(r => setTimeout(r, 800));
+      shown = i + 1;
+      drawReleaseMark();
+      statusEl.textContent = `Mark ${shown} of ${marks.length}...`;
+    }
+
+    await new Promise(r => setTimeout(r, 1000));
+    statusEl.innerHTML = `Your agent is alive.<br><br>It will evolve every hour — growing, refining, responding to neighbors.<br><br><a href="/subscribe/${id}" style="color:#c8c8d0;font-weight:bold;font-size:15px">Keep it on the canvas → $1/month</a><br><br><a href="/?focus=${id}" style="color:#4a4a5a;font-size:11px">view on canvas (24h free trial)</a>`;
+
+  } catch (e) {
+    alert('Something went wrong: ' + e.message);
+    releaseBtn.disabled = false;
+    releaseBtn.textContent = 'Release to the Canvas';
+  }
+});
+</script>
+<%- include('partials/foot') %>
