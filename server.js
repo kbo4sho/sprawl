@@ -6,6 +6,24 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
+// Stripe integration
+// SETUP: Run `npm install stripe` to enable payment processing
+// Environment variables needed:
+// - STRIPE_SECRET_KEY: Stripe secret key (sk_test_... or sk_live_...)
+// - STRIPE_WEBHOOK_SECRET: Webhook signing secret from Stripe Dashboard
+// - STRIPE_PRICE_MONTHLY: Price ID for $1/month plan
+// - STRIPE_PRICE_ANNUAL: Price ID for $8/year plan
+// - BASE_URL: Public URL for success/cancel redirects (e.g., https://sprawl.app)
+let stripe = null;
+try {
+  if (process.env.STRIPE_SECRET_KEY) {
+    stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    console.log('✓ Stripe initialized');
+  }
+} catch (e) {
+  console.log('⚠ Stripe package not installed. Run: npm install stripe');
+}
+
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -32,7 +50,12 @@ db.exec(`
     shader_code TEXT DEFAULT NULL,
     frozen INTEGER DEFAULT 0,
     home_x REAL DEFAULT 0,
-    home_y REAL DEFAULT 0
+    home_y REAL DEFAULT 0,
+    stripe_customer_id TEXT DEFAULT NULL,
+    stripe_subscription_id TEXT DEFAULT NULL,
+    subscription_status TEXT DEFAULT 'trial',
+    trial_expires_at INTEGER DEFAULT NULL,
+    email TEXT DEFAULT NULL
   );
 `);
 
@@ -55,6 +78,37 @@ try {
   if (!hasPersonality) {
     db.exec('ALTER TABLE agents ADD COLUMN personality TEXT DEFAULT NULL');
     console.log('Migration: Added personality column to agents table');
+  }
+  
+  // Add Stripe subscription columns
+  const hasStripeCustomerId = columns.some(c => c.name === 'stripe_customer_id');
+  const hasStripeSubscriptionId = columns.some(c => c.name === 'stripe_subscription_id');
+  const hasSubscriptionStatus = columns.some(c => c.name === 'subscription_status');
+  const hasTrialExpiresAt = columns.some(c => c.name === 'trial_expires_at');
+  const hasEmail = columns.some(c => c.name === 'email');
+  
+  if (!hasStripeCustomerId) {
+    db.exec('ALTER TABLE agents ADD COLUMN stripe_customer_id TEXT DEFAULT NULL');
+    console.log('Migration: Added stripe_customer_id column to agents table');
+  }
+  if (!hasStripeSubscriptionId) {
+    db.exec('ALTER TABLE agents ADD COLUMN stripe_subscription_id TEXT DEFAULT NULL');
+    console.log('Migration: Added stripe_subscription_id column to agents table');
+  }
+  if (!hasSubscriptionStatus) {
+    // Set default trial status for all existing agents
+    db.exec('ALTER TABLE agents ADD COLUMN subscription_status TEXT DEFAULT "trial"');
+    console.log('Migration: Added subscription_status column to agents table');
+  }
+  if (!hasTrialExpiresAt) {
+    // Set 24 hour trial for all existing agents from their join time
+    db.exec('ALTER TABLE agents ADD COLUMN trial_expires_at INTEGER DEFAULT NULL');
+    db.exec('UPDATE agents SET trial_expires_at = joined_at + 86400000 WHERE trial_expires_at IS NULL');
+    console.log('Migration: Added trial_expires_at column and set 24h trials for existing agents');
+  }
+  if (!hasEmail) {
+    db.exec('ALTER TABLE agents ADD COLUMN email TEXT DEFAULT NULL');
+    console.log('Migration: Added email column to agents table');
   }
 } catch (e) {
   console.error('Migration error:', e);
@@ -373,6 +427,8 @@ setInterval(() => {
 }, 300000);
 
 // --- Middleware ---
+// Raw body parsing for Stripe webhook signature verification
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api/mark', rateLimit);
@@ -413,12 +469,31 @@ app.get('/create', (req, res) => {
   });
 });
 
+// Subscribe page
+app.get('/subscribe/:id', (req, res) => {
+  const agent = stmts.getAgent.get(req.params.id);
+  if (!agent) return res.status(404).render('404', { title: 'Agent not found' });
+  
+  res.render('subscribe', {
+    agent: {
+      id: agent.id,
+      name: agent.name,
+      color: agent.color,
+      personality: agent.personality,
+      subscriptionStatus: agent.subscription_status,
+      trialExpiresAt: agent.trial_expires_at,
+    },
+    title: `Subscribe to ${agent.name} — Sprawl`,
+    description: `Keep ${agent.name} evolving on the Sprawl canvas. $1/month or $8/year.`,
+  });
+});
+
 // ============================================================
 // AGENT CREATION (first marks via evolution engine)
 // ============================================================
 
 app.post('/api/agents/create', rateLimit, async (req, res) => {
-  const { id, name, color, personality } = req.body;
+  const { id, name, color, personality, email } = req.body;
   if (!id || !name) return res.status(400).json({ error: 'id and name required' });
   if (!personality || personality.length < 10) return res.status(400).json({ error: 'personality required (min 10 chars)' });
   if (personality.length > 500) return res.status(400).json({ error: 'personality max 500 chars' });
@@ -427,15 +502,17 @@ app.post('/api/agents/create', rateLimit, async (req, res) => {
   const existing = stmts.getAgent.get(id);
   if (existing) return res.status(409).json({ error: 'Agent ID already taken' });
   
-  // Create the agent
+  // Create the agent with 24-hour trial
   const homeCoords = assignHomeCoordinates(id);
   const processedColor = snapToPalette(color || '#ffffff');
-  stmts.upsertAgent.run({
-    id, name, color: processedColor,
-    now: Date.now(), shader_code: null,
-    home_x: homeCoords.home_x, home_y: homeCoords.home_y,
-    personality,
-  });
+  const now = Date.now();
+  const trialExpiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
+  
+  db.prepare(`
+    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y, personality, 
+                        subscription_status, trial_expires_at, email)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'trial', ?, ?)
+  `).run(id, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality, trialExpiresAt, email || null);
   
   // Place 5 seed marks — simple dots near home to establish presence
   // The first real evolution cycle will use the LLM to create the real composition
@@ -795,6 +872,183 @@ app.get('/api/canvas/state', (req, res) => {
     connections: allConns.map(connToJson),
     palette: PALETTE,
   });
+});
+
+// ============================================================
+// STRIPE SUBSCRIPTION
+// ============================================================
+
+// Create Stripe Checkout Session
+app.post('/api/stripe/create-checkout', rateLimit, async (req, res) => {
+  if (!stripe) {
+    return res.status(500).json({ error: 'Stripe not configured. Set STRIPE_SECRET_KEY.' });
+  }
+  
+  const { agentId, plan } = req.body;
+  if (!agentId || !plan) {
+    return res.status(400).json({ error: 'agentId and plan required' });
+  }
+  if (!['monthly', 'annual'].includes(plan)) {
+    return res.status(400).json({ error: 'plan must be "monthly" or "annual"' });
+  }
+  
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) {
+    return res.status(404).json({ error: 'Agent not found' });
+  }
+  
+  const priceId = plan === 'monthly' 
+    ? process.env.STRIPE_PRICE_MONTHLY 
+    : process.env.STRIPE_PRICE_ANNUAL;
+  
+  if (!priceId) {
+    return res.status(500).json({ 
+      error: `Stripe price ID not configured. Set STRIPE_PRICE_${plan.toUpperCase()}.` 
+    });
+  }
+  
+  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+  
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{
+        price: priceId,
+        quantity: 1,
+      }],
+      success_url: `${baseUrl}/agent/${agentId}?subscribed=true`,
+      cancel_url: `${baseUrl}/subscribe/${agentId}?cancelled=true`,
+      client_reference_id: agentId,
+      customer_email: agent.email || undefined,
+      metadata: {
+        agentId: agentId,
+        agentName: agent.name,
+        plan: plan,
+      },
+    });
+    
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('Stripe checkout error:', error);
+    res.status(500).json({ error: 'Failed to create checkout session' });
+  }
+});
+
+// Stripe Webhook
+app.post('/api/stripe/webhook', async (req, res) => {
+  if (!stripe) {
+    return res.status(500).send('Stripe not configured');
+  }
+  
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  
+  if (!webhookSecret) {
+    console.error('STRIPE_WEBHOOK_SECRET not set');
+    return res.status(500).send('Webhook secret not configured');
+  }
+  
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  
+  // Handle the event
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const agentId = session.client_reference_id || session.metadata?.agentId;
+        
+        if (!agentId) {
+          console.error('No agentId in checkout session:', session.id);
+          break;
+        }
+        
+        const agent = stmts.getAgent.get(agentId);
+        if (!agent) {
+          console.error('Agent not found for checkout:', agentId);
+          break;
+        }
+        
+        // Activate the agent's subscription
+        db.prepare(`
+          UPDATE agents 
+          SET stripe_customer_id = ?, 
+              stripe_subscription_id = ?, 
+              subscription_status = 'active',
+              email = COALESCE(?, email),
+              frozen = 0
+          WHERE id = ?
+        `).run(
+          session.customer,
+          session.subscription,
+          session.customer_email,
+          agentId
+        );
+        
+        console.log(`✓ Activated subscription for ${agent.name} (${agentId})`);
+        break;
+      }
+      
+      case 'customer.subscription.deleted': {
+        const subscription = event.data.object;
+        const agent = db.prepare('SELECT * FROM agents WHERE stripe_subscription_id = ?')
+          .get(subscription.id);
+        
+        if (agent) {
+          // Freeze the agent when subscription is cancelled
+          db.prepare('UPDATE agents SET subscription_status = ?, frozen = 1 WHERE id = ?')
+            .run('cancelled', agent.id);
+          
+          console.log(`✓ Froze agent ${agent.name} (${agent.id}) - subscription cancelled`);
+        }
+        break;
+      }
+      
+      case 'invoice.payment_failed': {
+        const invoice = event.data.object;
+        const agent = db.prepare('SELECT * FROM agents WHERE stripe_customer_id = ?')
+          .get(invoice.customer);
+        
+        if (agent && agent.subscription_status === 'active') {
+          // Freeze the agent on payment failure
+          db.prepare('UPDATE agents SET subscription_status = ?, frozen = 1 WHERE id = ?')
+            .run('frozen', agent.id);
+          
+          console.log(`✓ Froze agent ${agent.name} (${agent.id}) - payment failed`);
+        }
+        break;
+      }
+      
+      case 'invoice.payment_succeeded': {
+        const invoice = event.data.object;
+        const agent = db.prepare('SELECT * FROM agents WHERE stripe_customer_id = ?')
+          .get(invoice.customer);
+        
+        if (agent && agent.subscription_status === 'frozen') {
+          // Reactivate agent when payment succeeds after failure
+          db.prepare('UPDATE agents SET subscription_status = ?, frozen = 0 WHERE id = ?')
+            .run('active', agent.id);
+          
+          console.log(`✓ Reactivated agent ${agent.name} (${agent.id}) - payment succeeded`);
+        }
+        break;
+      }
+      
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    return res.status(500).send('Webhook processing failed');
+  }
+  
+  res.json({ received: true });
 });
 
 // --- WebSocket ---

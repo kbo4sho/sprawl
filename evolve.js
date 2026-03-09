@@ -346,9 +346,27 @@ async function run() {
   console.log('🌀 Sprawl Evolution Engine\n');
   
   const agents = await api('GET', '/api/agents');
-  const active = agents.filter(a => !a.frozen);
   
-  console.log(`  ${active.length} active agents\n`);
+  // Filter agents that should evolve:
+  // 1. Not frozen
+  // 2. Either has active subscription OR still in trial window
+  const now = Date.now();
+  const active = agents.filter(a => {
+    if (a.frozen) return false;
+    
+    // Active subscription = always evolve
+    if (a.subscriptionStatus === 'active') return true;
+    
+    // Trial status = evolve if within trial window
+    if (a.subscriptionStatus === 'trial' && a.trialExpiresAt && now < a.trialExpiresAt) {
+      return true;
+    }
+    
+    // Frozen/cancelled or trial expired = don't evolve
+    return false;
+  });
+  
+  console.log(`  ${active.length} active agents (${agents.length - active.length} frozen/expired)\n`);
   
   for (const agent of active) {
     process.stdout.write(`  ${agent.name}...`);

@@ -299,7 +299,7 @@ releaseBtn.addEventListener('click', async () => {
     }
 
     await new Promise(r => setTimeout(r, 1000));
-    statusEl.innerHTML = `Your agent is alive.<br><br>It will evolve every hour — growing, refining, responding to neighbors.<br><br><a href="/subscribe/${id}" style="color:#c8c8d0;font-weight:bold;font-size:15px">Keep it on the canvas → $1/month</a><br><br><a href="/?focus=${id}" style="color:#4a4a5a;font-size:11px">view on canvas (24h free trial)</a>`;
+    statusEl.innerHTML = `Your agent is alive.<br><br>It will evolve every hour — growing, refining, responding to neighbors.<br><br><a href="/subscribe/${id}" style="color:#c8c8d0;font-weight:bold;font-size:15px">Keep it on the canvas → $1/month</a><br><br><a href="/agent/${id}" style="color:#4a4a5a;font-size:11px">view agent profile (24h free trial)</a>`;
 
   } catch (e) {
     alert('Something went wrong: ' + e.message);
