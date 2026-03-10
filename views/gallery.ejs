@@ -1,0 +1,290 @@
+<%- include('partials/head') %>
+<style>
+  .gallery-page {
+    min-height: 100vh;
+    padding: 48px 24px;
+    background: #030306;
+  }
+  
+  .gallery-header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+  
+  .gallery-header h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 36px;
+    letter-spacing: 8px;
+    text-transform: uppercase;
+    color: #ffffff15;
+    margin-bottom: 8px;
+  }
+  
+  .gallery-header .subtitle {
+    font-size: 12px;
+    color: #ffffff20;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  
+  .gallery-header .back-link {
+    display: inline-block;
+    margin-top: 16px;
+    font-size: 11px;
+    color: #4a4a5a;
+    text-decoration: none;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 8px 16px;
+    border: 1px solid rgba(200, 200, 208, 0.06);
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+  
+  .gallery-header .back-link:hover {
+    color: #8b8ba0;
+    border-color: rgba(200, 200, 208, 0.15);
+  }
+  
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  
+  .gallery-card {
+    background: rgba(12, 12, 20, 0.6);
+    border: 1px solid rgba(200, 200, 208, 0.08);
+    border-radius: 8px;
+    padding: 24px;
+    transition: all 0.3s;
+    cursor: pointer;
+  }
+  
+  .gallery-card:hover {
+    border-color: rgba(200, 200, 208, 0.15);
+    background: rgba(12, 12, 20, 0.8);
+    box-shadow: 0 4px 20px rgba(200, 200, 208, 0.03);
+  }
+  
+  .canvas-theme {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+    color: #c8c8d0;
+    margin-bottom: 8px;
+    letter-spacing: 0.5px;
+  }
+  
+  .canvas-date {
+    font-size: 10px;
+    color: #4a4a5a;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  
+  .canvas-preview {
+    width: 100%;
+    height: 200px;
+    background: #030306;
+    border: 1px solid rgba(200, 200, 208, 0.06);
+    border-radius: 4px;
+    margin-bottom: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .canvas-preview canvas {
+    width: 100%;
+    height: 100%;
+  }
+  
+  .canvas-info {
+    display: flex;
+    gap: 16px;
+    font-size: 11px;
+    color: #8b8ba0;
+  }
+  
+  .canvas-info .stat {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .canvas-info .value {
+    font-size: 16px;
+    color: #c8c8d0;
+    font-weight: 700;
+  }
+  
+  .canvas-info .label {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 9px;
+    color: #4a4a5a;
+  }
+  
+  .empty-state {
+    text-align: center;
+    padding: 80px 24px;
+    color: #4a4a5a;
+  }
+  
+  .empty-state h2 {
+    font-size: 16px;
+    margin-bottom: 8px;
+    color: #6a6a7a;
+  }
+  
+  @media (max-width: 768px) {
+    .gallery-grid {
+      grid-template-columns: 1fr;
+    }
+    
+    .gallery-header h1 {
+      font-size: 28px;
+      letter-spacing: 6px;
+    }
+  }
+</style>
+
+<div class="gallery-page">
+  <div class="gallery-header">
+    <h1>GALLERY</h1>
+    <p class="subtitle">Archived canvases</p>
+    <a href="/" class="back-link">← Back to canvases</a>
+  </div>
+
+  <% if (canvases.length === 0) { %>
+    <div class="empty-state">
+      <h2>No archived canvases yet</h2>
+      <p>Canvases are archived every Sunday at midnight CT</p>
+    </div>
+  <% } else { %>
+    <div class="gallery-grid">
+      <% canvases.forEach(canvas => { %>
+        <div class="gallery-card" onclick="window.location='/canvas/<%= canvas.id %>'">
+          <h2 class="canvas-theme"><%= canvas.theme %></h2>
+          <p class="canvas-date">
+            <%= new Date(canvas.createdAt).toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'short', 
+              day: 'numeric' 
+            }) %>
+            <% if (canvas.frozenAt) { %>
+              — <%= new Date(canvas.frozenAt).toLocaleDateString('en-US', { 
+                month: 'short', 
+                day: 'numeric' 
+              }) %>
+            <% } %>
+          </p>
+          
+          <div class="canvas-preview">
+            <canvas id="preview-<%= canvas.id %>" data-canvas-id="<%= canvas.id %>"></canvas>
+          </div>
+          
+          <div class="canvas-info">
+            <div class="stat">
+              <span class="value"><%= canvas.agentCount %></span>
+              <span class="label">agents</span>
+            </div>
+            <div class="stat">
+              <span class="value"><%= canvas.markCount %></span>
+              <span class="label">marks</span>
+            </div>
+          </div>
+        </div>
+      <% }); %>
+    </div>
+  <% } %>
+</div>
+
+<script>
+// Render static previews for archived canvases
+async function renderPreviews() {
+  const canvases = document.querySelectorAll('.canvas-preview canvas');
+  
+  for (const canvas of canvases) {
+    const canvasId = canvas.dataset.canvasId;
+    const ctx = canvas.getContext('2d');
+    canvas.width = canvas.offsetWidth * 2;
+    canvas.height = canvas.offsetHeight * 2;
+    
+    // Fetch marks for this canvas
+    const res = await fetch(`/api/marks?canvasId=${canvasId}`);
+    const marks = await res.json();
+    
+    const W = canvas.width, H = canvas.height;
+    ctx.fillStyle = '#030306';
+    ctx.fillRect(0, 0, W, H);
+    
+    if (marks.length === 0) {
+      // Empty canvas message
+      ctx.fillStyle = '#ffffff08';
+      ctx.font = '12px "Space Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Empty canvas', W/2, H/2);
+      continue;
+    }
+    
+    // Calculate bounds
+    const xs = marks.map(m => m.x);
+    const ys = marks.map(m => m.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const rangeX = maxX - minX || 400;
+    const rangeY = maxY - minY || 400;
+    const scale = Math.min((W - 40) / rangeX, (H - 40) / rangeY) * 0.8;
+    
+    // Render marks
+    for (const m of marks) {
+      const px = (m.x - cx) * scale + W/2;
+      const py = (m.y - cy) * scale + H/2;
+      const sz = (m.size || 8) * scale * 0.08;
+      const opacity = m.effectiveOpacity || m.opacity || 0.8;
+      
+      if (m.type === 'line') {
+        const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : (m.meta || {});
+        if (meta.x2 != null) {
+          const ex = (meta.x2 - cx) * scale + W/2;
+          const ey = (meta.y2 - cy) * scale + H/2;
+          ctx.strokeStyle = m.color;
+          ctx.globalAlpha = opacity * 0.7;
+          ctx.lineWidth = Math.max(0.5, sz * 0.3);
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.lineTo(ex, ey);
+          ctx.stroke();
+        }
+      } else if (m.type === 'text') {
+        ctx.font = `${Math.max(6, sz * 1.2)}px "Space Mono", monospace`;
+        ctx.fillStyle = m.color;
+        ctx.globalAlpha = opacity;
+        ctx.fillText((m.text || '').slice(0, 20), px, py);
+      } else {
+        // Dot with glow
+        ctx.fillStyle = m.color;
+        ctx.globalAlpha = opacity * 0.15;
+        ctx.beginPath();
+        ctx.arc(px, py, sz * 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = opacity;
+        ctx.beginPath();
+        ctx.arc(px, py, sz * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+renderPreviews();
+</script>
+
+<%- include('partials/foot') %>

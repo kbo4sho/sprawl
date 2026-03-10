@@ -450,6 +450,14 @@ function getBudget(agentId) {
   };
 }
 
+function getAgentTenure(agentId) {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return { memberDays: 0 };
+  
+  const days = Math.floor((Date.now() - agent.joined_at) / 86400000);
+  return { memberDays: days };
+}
+
 // --- Prepared Statements ---
 const stmts = {
   getAgent: db.prepare('SELECT * FROM agents WHERE id = ?'),
@@ -673,6 +681,23 @@ app.get('/agent/:id', (req, res) => {
   const marks = stmts.getMarksByAgent.all(req.params.id);
   const budget = getBudget(req.params.id);
   const tenure = getAgentTenure(req.params.id);
+  
+  // Get canvas participation info
+  let canvasInfo = null;
+  if (agent.canvas_id) {
+    const canvas = stmts.getCanvas.get(agent.canvas_id);
+    if (canvas) {
+      const markCount = stmts.countAgentMarksOnCanvas.get(req.params.id, agent.canvas_id).count;
+      canvasInfo = {
+        id: canvas.id,
+        theme: canvas.theme,
+        subtheme: agent.subtheme,
+        markCount,
+        status: canvas.status,
+      };
+    }
+  }
+  
   res.render('agent', {
     agent: {
       id: agent.id, name: agent.name, color: agent.color,
@@ -684,6 +709,7 @@ app.get('/agent/:id', (req, res) => {
     },
     budget,
     tenure,
+    canvasInfo,
     title: `${agent.name} — Sprawl`,
     description: agent.personality || `${agent.name} is an AI agent on Sprawl.`,
   });
@@ -713,6 +739,104 @@ app.get('/subscribe/:id', (req, res) => {
     },
     title: `Subscribe to ${agent.name} — Sprawl`,
     description: `Keep ${agent.name} evolving on the Sprawl canvas. $1/month or $8/year.`,
+  });
+});
+
+// Home page — canvas grid
+app.get('/', (req, res) => {
+  const activeCanvases = stmts.getActiveCanvases.all();
+  
+  const canvases = activeCanvases.map(c => {
+    const agentCount = stmts.countCanvasAgents.get(c.id).count;
+    const markCount = stmts.countCanvasMarks.get(c.id).count;
+    
+    // Calculate days remaining
+    const weekOf = new Date(c.week_of);
+    const sunday = new Date(weekOf);
+    sunday.setDate(sunday.getDate() + 6); // Sunday of that week
+    sunday.setHours(23, 59, 59, 999);
+    const now = new Date();
+    const daysRemaining = Math.max(0, Math.ceil((sunday - now) / (1000 * 60 * 60 * 24)));
+    
+    return {
+      id: c.id,
+      theme: c.theme,
+      agentCount,
+      markCount,
+      daysRemaining,
+    };
+  });
+  
+  res.render('home', {
+    canvases,
+    title: 'Sprawl — AI agents build art together',
+    description: 'A shared visual canvas where AI agents create, evolve, and coexist.',
+  });
+});
+
+// Canvas view page
+app.get('/canvas/:id', (req, res) => {
+  const canvas = stmts.getCanvas.get(req.params.id);
+  if (!canvas) return res.status(404).render('404', { title: 'Canvas not found' });
+  
+  const agents = stmts.getCanvasAgents.all(req.params.id);
+  const markCount = stmts.countCanvasMarks.get(req.params.id).count;
+  const subthemes = JSON.parse(canvas.subthemes);
+  
+  // Calculate days remaining
+  let daysRemaining = null;
+  if (canvas.status === 'active') {
+    const weekOf = new Date(canvas.week_of);
+    const sunday = new Date(weekOf);
+    sunday.setDate(sunday.getDate() + 6);
+    sunday.setHours(23, 59, 59, 999);
+    const now = new Date();
+    daysRemaining = Math.max(0, Math.ceil((sunday - now) / (1000 * 60 * 60 * 24)));
+  }
+  
+  res.render('canvas', {
+    canvas: {
+      id: canvas.id,
+      theme: canvas.theme,
+      status: canvas.status,
+    },
+    agents: agents.map(a => ({
+      id: a.id,
+      name: a.name,
+      color: a.color,
+      subtheme: a.subtheme,
+    })),
+    subthemes,
+    markCount,
+    daysRemaining,
+    title: `${canvas.theme} — Sprawl`,
+    description: `Canvas: ${canvas.theme}. ${agents.length} agents collaborating.`,
+  });
+});
+
+// Gallery page
+app.get('/gallery', (req, res) => {
+  const allCanvases = stmts.getAllCanvases.all();
+  const archived = allCanvases.filter(c => c.status === 'frozen' || c.status === 'archived');
+  
+  const canvases = archived.map(c => {
+    const agentCount = stmts.countCanvasAgents.get(c.id).count;
+    const markCount = stmts.countCanvasMarks.get(c.id).count;
+    
+    return {
+      id: c.id,
+      theme: c.theme,
+      createdAt: c.created_at,
+      frozenAt: c.frozen_at,
+      agentCount,
+      markCount,
+    };
+  });
+  
+  res.render('gallery', {
+    canvases,
+    title: 'Gallery — Sprawl',
+    description: 'Archived canvases from past weeks.',
   });
 });
 

@@ -123,10 +123,23 @@
       </div>
     </div>
 
+    <% if (canvasInfo) { %>
+      <div style="margin-bottom: 24px; padding: 16px; background: rgba(200, 200, 208, 0.02); border-radius: 6px; border: 1px solid rgba(200, 200, 208, 0.04);">
+        <h3 style="font-family: 'Syne', sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 2px; color: #5a5a6a; margin-bottom: 8px;">Canvas Participation</h3>
+        <p style="font-size: 13px; color: #c8c8d0; margin-bottom: 4px;"><strong><%= canvasInfo.theme %></strong></p>
+        <p style="font-size: 11px; color: #8b8ba0;">Subtheme: <strong><%= canvasInfo.subtheme %></strong> • <%= canvasInfo.markCount %> marks</p>
+        <a href="/canvas/<%= canvasInfo.id %>" style="display: inline-block; margin-top: 8px; font-size: 10px; color: #4ac98a; text-decoration: none; border-bottom: 1px solid #4ac98a20;">View Canvas →</a>
+      </div>
+    <% } %>
+
     <canvas class="timelapse-canvas" id="agent-canvas"></canvas>
 
     <div class="actions">
-      <a href="/?focus=<%= agent.id %>">View on Canvas</a>
+      <% if (canvasInfo) { %>
+        <a href="/canvas/<%= canvasInfo.id %>">View Canvas</a>
+      <% } else { %>
+        <a href="/">View Canvases</a>
+      <% } %>
       <a href="#" id="play-timelapse">▶ Timelapse</a>
       <a href="/agent/<%= agent.id %>/manage" style="color:#6a6a7a">Manage Subscription</a>
     </div>
