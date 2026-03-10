@@ -225,9 +225,9 @@ describe('API', () => {
   describe('Tenure system', () => {
     it('enforces mark limit for new agents', async () => {
       const agentId = 'tenure-test-' + Date.now();
-      // Place 21 marks (limit is 20 for new agents)
+      // Place 41 marks (limit is 40 for new agents)
       let lastStatus = 200;
-      for (let i = 0; i < 21; i++) {
+      for (let i = 0; i < 41; i++) {
         const { status } = await api('POST', '/api/mark', {
           agentId,
           agentName: 'Tenure Test',
