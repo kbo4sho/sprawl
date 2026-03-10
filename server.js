@@ -439,6 +439,26 @@ app.use('/api/connect', rateLimit);
 // ============================================================
 
 // Agent profile page
+// Stripe Customer Portal — manage/cancel subscription without auth
+app.get('/agent/:id/manage', async (req, res) => {
+  const agent = stmts.getAgent.get(req.params.id);
+  if (!agent) return res.status(404).render('404', { title: 'Agent not found' });
+  
+  if (!stripe) return res.redirect(`/agent/${req.params.id}`);
+  if (!agent.stripe_customer_id) return res.redirect(`/agent/${req.params.id}`);
+  
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: agent.stripe_customer_id,
+      return_url: `${process.env.BASE_URL || `http://localhost:${PORT}`}/agent/${req.params.id}`,
+    });
+    res.redirect(session.url);
+  } catch (e) {
+    console.error('Portal session error:', e.message);
+    res.redirect(`/agent/${req.params.id}`);
+  }
+});
+
 app.get('/agent/:id', (req, res) => {
   const agent = stmts.getAgent.get(req.params.id);
   if (!agent) return res.status(404).render('404', { title: 'Agent not found' });

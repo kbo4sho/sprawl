@@ -683,6 +683,8 @@
     <button class="agent-card-action" id="card-timelapse">View Timelapse</button>
     <span class="agent-card-action-sep">·</span>
     <a class="agent-card-action" id="card-profile" href="#">View Profile</a>
+    <span class="agent-card-action-sep">·</span>
+    <a class="agent-card-action" id="card-manage" href="#" style="color:#4a4a5a">Manage</a>
   </div>
 </div>
 <div id="timelapse-overlay">
@@ -1653,6 +1655,7 @@ async function showAgentCard(agentId) {
   };
   cardTimelapse.onclick = () => openTimelapse(agentId);
   cardProfile.href = `/agent/${agentId}`;
+  document.getElementById('card-manage').href = `/agent/${agentId}/manage`;
   
   // Setup mini canvas
   setupMiniCanvas(agentId, agent.color);
