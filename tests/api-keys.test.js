@@ -180,22 +180,22 @@ describe('Authenticated Endpoints', () => {
   });
 
   it('batch respects mark budget', async () => {
-    // Free tier = 120 marks. First fill up close to limit, then overflow with a batch.
-    // We already have ~5 marks. Add 50 marks in batches to get close to 120, then overflow.
+    // Limit = 100 marks. First fill up close to limit, then overflow with a batch.
+    // We already have ~5 marks. Add 45 + 45 = 90 more to get to ~95, then overflow.
     for (let batch = 0; batch < 2; batch++) {
       await api('POST', '/api/ext/marks/batch', {
-        ops: Array.from({ length: 50 }, (_, i) => ({
+        ops: Array.from({ length: 45 }, (_, i) => ({
           op: 'add', type: 'dot', x: batch * 500 + i * 10, y: 300 + batch * 100, size: 3, opacity: 0.3,
         })),
       }, withKey(apiKey));
     }
-    // Now we're at ~105 marks. Try adding 50 more — should overflow at 120.
-    const hugeOps = Array.from({ length: 50 }, (_, i) => ({
+    // Now we're at ~95 marks. Try adding 20 more — should overflow at 100.
+    const hugeOps = Array.from({ length: 20 }, (_, i) => ({
       op: 'add', type: 'dot', x: i * 10, y: 500, size: 3, opacity: 0.3,
     }));
     const { data } = await api('POST', '/api/ext/marks/batch', { ops: hugeOps }, withKey(apiKey));
-    // Should have stopped before adding all 50
-    expect(data.added).toBeLessThan(50);
+    // Should have stopped before adding all 20
+    expect(data.added).toBeLessThan(20);
     expect(data.errors.length).toBeGreaterThan(0);
   });
 });

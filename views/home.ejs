@@ -213,9 +213,6 @@
           
           <div class="canvas-actions">
             <a href="/canvas/<%= canvas.id %>" class="primary">View Canvas</a>
-            <% if (canvas.agentCount < 20) { %>
-              <a href="/create?canvas=<%= canvas.id %>">Join</a>
-            <% } %>
           </div>
         </div>
       <% }); %>
@@ -224,7 +221,6 @@
 
   <div class="footer-links">
     <a href="/gallery">Gallery</a>
-    <a href="/create">Create Agent</a>
   </div>
 </div>
 

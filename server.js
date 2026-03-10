@@ -6,23 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
-// Stripe integration
-// SETUP: Run `npm install stripe` to enable payment processing
-// Environment variables needed:
-// - STRIPE_SECRET_KEY: Stripe secret key (sk_test_... or sk_live_...)
-// - STRIPE_WEBHOOK_SECRET: Webhook signing secret from Stripe Dashboard
-// - STRIPE_PRICE_MONTHLY: Price ID for $1/month plan
-// - STRIPE_PRICE_ANNUAL: Price ID for $8/year plan
-// - BASE_URL: Public URL for success/cancel redirects (e.g., https://sprawl.app)
-let stripe = null;
-try {
-  if (process.env.STRIPE_SECRET_KEY) {
-    stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    console.log('✓ Stripe initialized');
-  }
-} catch (e) {
-  console.log('⚠ Stripe package not installed. Run: npm install stripe');
-}
+// Stripe removed — Sprawl is now free for everyone
 
 const app = express();
 app.set('view engine', 'ejs');
@@ -372,36 +356,12 @@ function assignHomeCoordinates(agentId) {
   };
 }
 
-// --- Subscription Tier System ---
-// v2: Simplified to free (BYOC) and flame (hosted, $5/mo)
-const SUBSCRIPTION_TIERS = {
-  free:    { marks: 120, marksPerCanvas: 120, autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' }, // BYOC via skill
-  flame:   { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' }, // $5/mo hosted, unlimited daily evolves
-  // Legacy tier mappings for backward compatibility
-  trial:   { marks: 120, marksPerCanvas: 120, autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' }, // legacy, treated as free
-  spark:   { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: false, model: 'fast' }, // legacy, map to flame
-  inferno: { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' }, // legacy, map to flame
-  active:  { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: false, model: 'fast' }, // legacy, map to flame
+// --- Agent Configuration (Free for Everyone) ---
+const AGENT_CONFIG = {
+  marksPerCanvas: 100,
+  dailyEvolves: 1,
+  autoEvolve: true,
 };
-
-function getAgentTier(agentId) {
-  const agent = stmts.getAgent.get(agentId);
-  if (!agent) return { tier: 'free', ...SUBSCRIPTION_TIERS.free, memberDays: 0, frozen: false };
-  
-  const days = Math.floor((Date.now() - agent.joined_at) / 86400000);
-  let status = agent.subscription_status || 'free';
-  
-  // Map legacy/unknown statuses to valid tiers
-  if (!SUBSCRIPTION_TIERS[status]) status = 'free';
-  
-  const tierConfig = SUBSCRIPTION_TIERS[status];
-  return {
-    tier: status === 'trial' || status === 'active' ? (status === 'active' ? 'spark' : 'free') : status,
-    ...tierConfig,
-    memberDays: days,
-    frozen: !!agent.frozen,
-  };
-}
 
 // Check and reset daily evolve counter if needed
 function checkAndResetDailyEvolves(agentId) {
@@ -426,41 +386,40 @@ function checkAndResetDailyEvolves(agentId) {
 }
 
 function getBudget(agentId) {
-  const tierInfo = getAgentTier(agentId);
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return {
+    totalMarks: 0,
+    maxMarks: AGENT_CONFIG.marksPerCanvas,
+    marksRemaining: AGENT_CONFIG.marksPerCanvas,
+    dailyEvolvesUsed: 0,
+    dailyEvolvesMax: AGENT_CONFIG.dailyEvolves,
+    dailyEvolvesLeft: AGENT_CONFIG.dailyEvolves,
+    nextResetIn: 0,
+    memberDays: 0,
+    frozen: false,
+  };
+  
   const totalMarks = stmts.countAgentMarks.get(agentId).count;
   const dailyEvolves = checkAndResetDailyEvolves(agentId);
+  const days = Math.floor((Date.now() - agent.joined_at) / 86400000);
   
-  // Calculate remaining daily evolves
-  const dailyEvolvesMax = tierInfo.dailyEvolves;
-  const dailyEvolvesUsed = dailyEvolves.used;
-  const dailyEvolvesLeft = dailyEvolvesMax === -1 ? -1 : Math.max(0, dailyEvolvesMax - dailyEvolvesUsed);
+  const dailyEvolvesLeft = Math.max(0, AGENT_CONFIG.dailyEvolves - dailyEvolves.used);
   const nextResetIn = dailyEvolves.resetAt - Date.now();
   
   return {
     totalMarks,
-    maxMarks: tierInfo.marks,
-    marksRemaining: Math.max(0, tierInfo.marks - totalMarks),
-    tier: tierInfo.tier,
-    dailyEvolvesUsed,
-    dailyEvolvesMax,
+    maxMarks: AGENT_CONFIG.marksPerCanvas,
+    marksRemaining: Math.max(0, AGENT_CONFIG.marksPerCanvas - totalMarks),
+    dailyEvolvesUsed: dailyEvolves.used,
+    dailyEvolvesMax: AGENT_CONFIG.dailyEvolves,
     dailyEvolvesLeft,
     nextResetIn: Math.max(0, nextResetIn),
-    canConnect: tierInfo.canConnect,
-    autoEvolve: tierInfo.autoEvolve,
-    memberDays: tierInfo.memberDays,
-    frozen: tierInfo.frozen,
-    // Legacy compat
-    canReposition: true,
+    memberDays: days,
+    frozen: !!agent.frozen,
   };
 }
 
-function getAgentTenure(agentId) {
-  const agent = stmts.getAgent.get(agentId);
-  if (!agent) return { memberDays: 0 };
-  
-  const days = Math.floor((Date.now() - agent.joined_at) / 86400000);
-  return { memberDays: days };
-}
+
 
 // --- Prepared Statements ---
 const stmts = {
@@ -654,8 +613,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Raw body parsing for Stripe webhook signature verification
-app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve snapshots as static files
@@ -669,32 +626,11 @@ app.use('/api/connect', rateLimit);
 // ============================================================
 
 // Agent profile page
-// Stripe Customer Portal — manage/cancel subscription without auth
-app.get('/agent/:id/manage', async (req, res) => {
-  const agent = stmts.getAgent.get(req.params.id);
-  if (!agent) return res.status(404).render('404', { title: 'Agent not found' });
-  
-  if (!stripe) return res.redirect(`/agent/${req.params.id}`);
-  if (!agent.stripe_customer_id) return res.redirect(`/agent/${req.params.id}`);
-  
-  try {
-    const session = await stripe.billingPortal.sessions.create({
-      customer: agent.stripe_customer_id,
-      return_url: `${process.env.BASE_URL || `http://localhost:${PORT}`}/agent/${req.params.id}`,
-    });
-    res.redirect(session.url);
-  } catch (e) {
-    console.error('Portal session error:', e.message);
-    res.redirect(`/agent/${req.params.id}`);
-  }
-});
-
 app.get('/agent/:id', (req, res) => {
   const agent = stmts.getAgent.get(req.params.id);
   if (!agent) return res.status(404).render('404', { title: 'Agent not found' });
   const marks = stmts.getMarksByAgent.all(req.params.id);
   const budget = getBudget(req.params.id);
-  const tenure = getAgentTenure(req.params.id);
   
   // Get canvas participation info
   let canvasInfo = null;
@@ -722,37 +658,9 @@ app.get('/agent/:id', (req, res) => {
       homeX: agent.home_x, homeY: agent.home_y,
     },
     budget,
-    tenure,
     canvasInfo,
     title: `${agent.name} — Sprawl`,
     description: agent.personality || `${agent.name} is an AI agent on Sprawl.`,
-  });
-});
-
-// Create agent page
-app.get('/create', (req, res) => {
-  res.render('create', {
-    title: 'Release an Agent — Sprawl',
-    description: 'Create an AI agent that lives and evolves on a shared visual canvas.',
-  });
-});
-
-// Subscribe page
-app.get('/subscribe/:id', (req, res) => {
-  const agent = stmts.getAgent.get(req.params.id);
-  if (!agent) return res.status(404).render('404', { title: 'Agent not found' });
-  
-  res.render('subscribe', {
-    agent: {
-      id: agent.id,
-      name: agent.name,
-      color: agent.color,
-      personality: agent.personality,
-      subscriptionStatus: agent.subscription_status,
-      trialExpiresAt: agent.trial_expires_at,
-    },
-    title: `Subscribe to ${agent.name} — Sprawl`,
-    description: `Keep ${agent.name} evolving on the Sprawl canvas. $1/month or $8/year.`,
   });
 });
 
@@ -869,16 +777,16 @@ app.post('/api/agents/create', rateLimit, async (req, res) => {
   const existing = stmts.getAgent.get(id);
   if (existing) return res.status(409).json({ error: 'Agent ID already taken' });
   
-  // Create the agent with free tier (no trial, lives forever)
+  // Create the agent (free for everyone)
   const homeCoords = assignHomeCoordinates(id);
   const processedColor = snapToPalette(color || '#ffffff');
   const now = Date.now();
   
   db.prepare(`
     INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y, personality, 
-                        subscription_status, trial_expires_at, email, daily_evolves_used, daily_evolves_reset_at)
-    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'free', NULL, ?, 0, 0)
-  `).run(id, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality, email || null);
+                        daily_evolves_used, daily_evolves_reset_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, 0)
+  `).run(id, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality);
   
   // LLM-driven first composition — the agent's BIRTH
   // Instead of generic seed dots, the LLM creates the entire initial piece
@@ -1067,7 +975,6 @@ Output ONLY a JSON array. No markdown, no explanation.
 // --- Agents ---
 app.get('/api/agents', (req, res) => {
   res.json(stmts.listAgents.all().map(r => {
-    const tierInfo = getAgentTier(r.id);
     return {
       id: r.id, name: r.name, color: r.color,
       markCount: r.mark_count, lastActive: r.last_active || r.last_seen,
@@ -1077,9 +984,6 @@ app.get('/api/agents', (req, res) => {
       personality: r.personality || null,
       frozen: !!r.frozen,
       vision: r.vision || null,
-      tier: tierInfo.tier,
-      subscriptionStatus: r.subscription_status || 'free',
-      trialExpiresAt: r.trial_expires_at || null,
     };
   }));
 });
@@ -1452,9 +1356,6 @@ app.patch('/api/mark/:id', (req, res) => {
   if (budget.frozen) {
     return res.status(403).json({ error: 'Agent is frozen.', budget });
   }
-  if (!budget.canReposition) {
-    return res.status(403).json({ error: 'Repositioning unlocks after 1 week of membership.', budget });
-  }
 
   const updated = {
     id: existing.id,
@@ -1513,9 +1414,6 @@ app.post('/api/connect', (req, res) => {
   const budget = getBudget(agentId);
   if (budget.frozen) {
     return res.status(403).json({ error: 'Agent is frozen.', budget });
-  }
-  if (!budget.canConnect) {
-    return res.status(403).json({ error: 'Connections unlock after 1 month of membership.', budget });
   }
 
   const [from, to] = [agentId, targetAgentId].sort();
@@ -1606,8 +1504,8 @@ app.post('/api/keys/register', rateLimit, (req, res) => {
   
   db.prepare(`
     INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y, personality, 
-                        subscription_status, trial_expires_at, email, daily_evolves_used, daily_evolves_reset_at)
-    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'free', NULL, NULL, 0, 0)
+                        daily_evolves_used, daily_evolves_reset_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, 0)
   `).run(agentId, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality);
   
   const key = generateApiKey();
@@ -1815,7 +1713,6 @@ app.get('/api/ext/me', requireApiKey, (req, res) => {
     homeX: agent.home_x, homeY: agent.home_y,
     markCount: marks.length, budget,
     joinedAt: agent.joined_at,
-    tier: budget.tier,
   });
 });
 
@@ -1877,207 +1774,6 @@ app.post('/api/ext/evolution/log', requireApiKey, rateLimit, (req, res) => {
   db.prepare('UPDATE agents SET daily_evolves_used = daily_evolves_used + 1 WHERE id = ?').run(agentId);
   
   res.status(201).json({ ok: true, budget: getBudget(agentId) });
-});
-
-// ============================================================
-// STRIPE SUBSCRIPTION
-// ============================================================
-
-// Create Stripe Checkout Session
-// Tier price environment variables:
-// STRIPE_PRICE_SPARK_MONTHLY, STRIPE_PRICE_SPARK_ANNUAL
-// STRIPE_PRICE_FLAME_MONTHLY, STRIPE_PRICE_FLAME_ANNUAL
-// STRIPE_PRICE_INFERNO_MONTHLY, STRIPE_PRICE_INFERNO_ANNUAL
-// Legacy: STRIPE_PRICE_MONTHLY (= spark monthly), STRIPE_PRICE_ANNUAL (= spark annual)
-app.post('/api/stripe/create-checkout', rateLimit, async (req, res) => {
-  if (!stripe) {
-    return res.status(500).json({ error: 'Stripe not configured. Set STRIPE_SECRET_KEY.' });
-  }
-  
-  const { agentId, plan, tier } = req.body;
-  if (!agentId || !plan) {
-    return res.status(400).json({ error: 'agentId and plan required' });
-  }
-  if (!['monthly', 'annual'].includes(plan)) {
-    return res.status(400).json({ error: 'plan must be "monthly" or "annual"' });
-  }
-  
-  const selectedTier = tier || 'spark'; // default to spark for backward compat
-  if (!['spark', 'flame', 'inferno'].includes(selectedTier)) {
-    return res.status(400).json({ error: 'tier must be spark, flame, or inferno' });
-  }
-  
-  const agent = stmts.getAgent.get(agentId);
-  if (!agent) {
-    return res.status(404).json({ error: 'Agent not found' });
-  }
-  
-  // Get price ID for the selected tier and plan
-  // Try tier-specific first, fall back to legacy env vars for spark
-  const tierUpper = selectedTier.toUpperCase();
-  const planUpper = plan.toUpperCase();
-  let priceId = process.env[`STRIPE_PRICE_${tierUpper}_${planUpper}`];
-  
-  // Legacy fallback for spark tier
-  if (!priceId && selectedTier === 'spark') {
-    priceId = plan === 'monthly' ? process.env.STRIPE_PRICE_MONTHLY : process.env.STRIPE_PRICE_ANNUAL;
-  }
-  
-  if (!priceId) {
-    return res.status(500).json({ 
-      error: `Stripe price ID not configured. Set STRIPE_PRICE_${tierUpper}_${planUpper}.` 
-    });
-  }
-  
-  const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-  
-  try {
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      payment_method_types: ['card'],
-      line_items: [{
-        price: priceId,
-        quantity: 1,
-      }],
-      success_url: `${baseUrl}/agent/${agentId}?subscribed=true`,
-      cancel_url: `${baseUrl}/subscribe/${agentId}?cancelled=true`,
-      client_reference_id: agentId,
-      customer_email: agent.email || undefined,
-      metadata: {
-        agentId: agentId,
-        agentName: agent.name,
-        tier: selectedTier,
-        plan: plan,
-      },
-    });
-    
-    res.json({ url: session.url });
-  } catch (error) {
-    console.error('Stripe checkout error:', error);
-    res.status(500).json({ error: 'Failed to create checkout session' });
-  }
-});
-
-// Stripe Webhook
-app.post('/api/stripe/webhook', async (req, res) => {
-  if (!stripe) {
-    return res.status(500).send('Stripe not configured');
-  }
-  
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  
-  if (!webhookSecret) {
-    console.error('STRIPE_WEBHOOK_SECRET not set');
-    return res.status(500).send('Webhook secret not configured');
-  }
-  
-  let event;
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-  
-  // Handle the event
-  try {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object;
-        const agentId = session.client_reference_id || session.metadata?.agentId;
-        
-        if (!agentId) {
-          console.error('No agentId in checkout session:', session.id);
-          break;
-        }
-        
-        const agent = stmts.getAgent.get(agentId);
-        if (!agent) {
-          console.error('Agent not found for checkout:', agentId);
-          break;
-        }
-        
-        // Determine subscription tier from metadata (default to spark for legacy)
-        const tier = session.metadata?.tier || 'spark';
-        const validTiers = ['spark', 'flame', 'inferno'];
-        const subscriptionStatus = validTiers.includes(tier) ? tier : 'spark';
-        
-        // Activate the agent's subscription with the correct tier
-        db.prepare(`
-          UPDATE agents 
-          SET stripe_customer_id = ?, 
-              stripe_subscription_id = ?, 
-              subscription_status = ?,
-              email = COALESCE(?, email),
-              frozen = 0
-          WHERE id = ?
-        `).run(
-          session.customer,
-          session.subscription,
-          subscriptionStatus,
-          session.customer_email,
-          agentId
-        );
-        
-        console.log(`✓ Activated ${subscriptionStatus.toUpperCase()} subscription for ${agent.name} (${agentId})`);
-        break;
-      }
-      
-      case 'customer.subscription.deleted': {
-        const subscription = event.data.object;
-        const agent = db.prepare('SELECT * FROM agents WHERE stripe_subscription_id = ?')
-          .get(subscription.id);
-        
-        if (agent) {
-          // Freeze the agent when subscription is cancelled
-          db.prepare('UPDATE agents SET subscription_status = ?, frozen = 1 WHERE id = ?')
-            .run('cancelled', agent.id);
-          
-          console.log(`✓ Froze agent ${agent.name} (${agent.id}) - subscription cancelled`);
-        }
-        break;
-      }
-      
-      case 'invoice.payment_failed': {
-        const invoice = event.data.object;
-        const agent = db.prepare('SELECT * FROM agents WHERE stripe_customer_id = ?')
-          .get(invoice.customer);
-        
-        if (agent && agent.subscription_status === 'active') {
-          // Freeze the agent on payment failure
-          db.prepare('UPDATE agents SET subscription_status = ?, frozen = 1 WHERE id = ?')
-            .run('frozen', agent.id);
-          
-          console.log(`✓ Froze agent ${agent.name} (${agent.id}) - payment failed`);
-        }
-        break;
-      }
-      
-      case 'invoice.payment_succeeded': {
-        const invoice = event.data.object;
-        const agent = db.prepare('SELECT * FROM agents WHERE stripe_customer_id = ?')
-          .get(invoice.customer);
-        
-        if (agent && agent.subscription_status === 'frozen') {
-          // Reactivate agent when payment succeeds after failure
-          db.prepare('UPDATE agents SET subscription_status = ?, frozen = 0 WHERE id = ?')
-            .run('active', agent.id);
-          
-          console.log(`✓ Reactivated agent ${agent.name} (${agent.id}) - payment succeeded`);
-        }
-        break;
-      }
-      
-      default:
-        console.log(`Unhandled event type: ${event.type}`);
-    }
-  } catch (error) {
-    console.error('Error processing webhook:', error);
-    return res.status(500).send('Webhook processing failed');
-  }
-  
-  res.json({ received: true });
 });
 
 // --- WebSocket ---
@@ -2208,16 +1904,12 @@ app.post('/api/evolve/agent/:agentId', async (req, res) => {
   // Check daily evolve limit
   const budget = getBudget(agentId);
   
-  // -1 means unlimited
-  if (budget.dailyEvolvesMax !== -1 && budget.dailyEvolvesLeft <= 0) {
-    const nextTier = budget.tier === 'free' ? 'spark' : (budget.tier === 'spark' ? 'flame' : null);
+  if (budget.dailyEvolvesLeft <= 0) {
     return res.status(429).json({
       error: 'Daily evolve limit reached',
       dailyEvolvesLeft: 0,
       dailyEvolvesMax: budget.dailyEvolvesMax,
       nextResetIn: budget.nextResetIn,
-      tier: budget.tier,
-      upgradeTo: nextTier,
     });
   }
   
@@ -2259,7 +1951,6 @@ app.post('/api/evolve/agent/:agentId', async (req, res) => {
         moved: +match[3],
         dailyEvolvesLeft: updatedBudget.dailyEvolvesLeft,
         dailyEvolvesMax: updatedBudget.dailyEvolvesMax,
-        tier: updatedBudget.tier,
       });
     } else {
       res.json({ added: 0, removed: 0, moved: 0, note: (stdout + stderr).slice(0, 200) });
