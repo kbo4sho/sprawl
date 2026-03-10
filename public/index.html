@@ -1094,7 +1094,10 @@ async function fetchAgents() {
         camera.x = targetCamera.x = focusAgent.homeX;
         camera.y = targetCamera.y = focusAgent.homeY;
         selectedAgent = focusAgent.id;
+        focusTarget = 1;
         focusTransition = 1;
+        // Trigger agent card after a short delay (let render loop initialize)
+        setTimeout(() => showAgentCard(focusAgent.id), 500);
       } else {
         const avgX = allAgents.reduce((s, a) => s + a.homeX, 0) / allAgents.length;
         const avgY = allAgents.reduce((s, a) => s + a.homeY, 0) / allAgents.length;
@@ -1989,7 +1992,8 @@ let lastSelectedAgent = null;
 
 function updateAgentCard() {
   if (selectedAgent !== lastSelectedAgent) {
-    if (selectedAgent && focusTransition > 0.3) {
+    if (selectedAgent) {
+      // Show card immediately on selection (don't wait for focus transition)
       showAgentCard(selectedAgent);
     } else if (!selectedAgent) {
       // Only hide if card was visible
