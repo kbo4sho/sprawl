@@ -1242,6 +1242,49 @@ function drawScanlines(t) {
   ctx.fillRect(0, sweepY - 30, W, 60);
 }
 
+// --- Ambient Shimmer (slow-moving light that sweeps across the canvas) ---
+let shimmerPhase = Math.random() * Math.PI * 2;
+
+function drawShimmer(t) {
+  // Two overlapping gradient beams that sweep diagonally across the canvas
+  // Very subtle — like light catching dust in a dark room
+  
+  // Beam 1: slow diagonal sweep (warm)
+  const beam1X = W * (0.5 + 0.7 * Math.sin(t * 0.05 + shimmerPhase));
+  const beam1Y = H * (0.5 + 0.5 * Math.cos(t * 0.03 + shimmerPhase));
+  const beam1R = Math.max(W, H) * 0.6;
+  const grad1 = ctx.createRadialGradient(beam1X, beam1Y, 0, beam1X, beam1Y, beam1R);
+  grad1.addColorStop(0, 'rgba(180, 140, 100, 0.012)');
+  grad1.addColorStop(0.4, 'rgba(140, 120, 160, 0.006)');
+  grad1.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad1;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Beam 2: slower counter-sweep (cool)
+  const beam2X = W * (0.5 + 0.6 * Math.sin(t * 0.035 + shimmerPhase + 2.5));
+  const beam2Y = H * (0.5 + 0.4 * Math.cos(t * 0.045 + shimmerPhase + 1.2));
+  const beam2R = Math.max(W, H) * 0.5;
+  const grad2 = ctx.createRadialGradient(beam2X, beam2Y, 0, beam2X, beam2Y, beam2R);
+  grad2.addColorStop(0, 'rgba(100, 140, 200, 0.010)');
+  grad2.addColorStop(0.5, 'rgba(120, 100, 180, 0.005)');
+  grad2.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad2;
+  ctx.fillRect(0, 0, W, H);
+  
+  // Beam 3: very slow broad wash (barely visible, gives the whole canvas a living feel)
+  const washPhase = t * 0.02;
+  const washAlpha = 0.004 + 0.003 * Math.sin(washPhase);
+  const washGrad = ctx.createLinearGradient(
+    W * (0.3 + 0.2 * Math.sin(washPhase * 0.7)), 0,
+    W * (0.7 + 0.2 * Math.cos(washPhase * 0.5)), H
+  );
+  washGrad.addColorStop(0, `rgba(160, 130, 180, ${washAlpha})`);
+  washGrad.addColorStop(0.5, 'transparent');
+  washGrad.addColorStop(1, `rgba(130, 160, 140, ${washAlpha})`);
+  ctx.fillStyle = washGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
 // --- Ambient Particles ---
 const PARTICLE_COUNT = 25;
 const particles = [];
@@ -1520,6 +1563,7 @@ function render(now) {
   
   // Draw
   drawBackground();
+  drawShimmer(t);
   
   const hitAreas = [];
   const sorted = [...marks].sort((a, b) => a.opacity - b.opacity);

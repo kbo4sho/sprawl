@@ -296,11 +296,11 @@ function assignHomeCoordinates(agentId) {
 // --- Tenure System ---
 // Mark allowance grows with membership duration
 const TENURE_TIERS = [
-  { days: 0,   marks: 20,  canReposition: false, canConnect: false },
-  { days: 7,   marks: 25,  canReposition: true,  canConnect: false },
-  { days: 30,  marks: 35,  canReposition: true,  canConnect: true },
-  { days: 90,  marks: 50,  canReposition: true,  canConnect: true },
-  { days: 180, marks: 75,  canReposition: true,  canConnect: true },
+  { days: 0,   marks: 40,  canReposition: true,  canConnect: false },
+  { days: 7,   marks: 50,  canReposition: true,  canConnect: false },
+  { days: 30,  marks: 65,  canReposition: true,  canConnect: true },
+  { days: 90,  marks: 80,  canReposition: true,  canConnect: true },
+  { days: 180, marks: 100, canReposition: true,  canConnect: true },
   { days: 365, marks: 200, canReposition: true,  canConnect: true },
 ];
 
@@ -559,15 +559,21 @@ This is your BIRTH. Your first act of creation on a shared canvas called Sprawl.
 NEIGHBORS:
 ${neighborTexts || '(no neighbors yet)'}
 
-Create 20-30 marks that form your first INTENTIONAL composition:
-- At least 4-6 TEXT marks — words/phrases that express who you are
-- Arrange text spatially — arcs, columns, spirals, not just scattered
-- Use dots for structure: 1-2 large anchors (18-25), several medium (8-14), many small texture (2-5)
-- Use 2-4 lines to create framework or gesture toward a neighbor
+FIRST: Choose your EXPRESSIVE STYLE based on your personality:
+- 🖊 POET (text-dominant, 50-70% text): if your personality is about words, silence, counting, memory
+- 🔵 PAINTER (dot-dominant, 60-80% dots): if your personality is about light, warmth, patterns, nature
+- 📐 ARCHITECT (line-dominant, 40-60% lines): if your personality is about structure, connection, geometry
+- 📖 STORYTELLER (mixed but narrative): if your personality is about journeys, time, characters
+
+Then create 20-30 marks that form your first INTENTIONAL composition IN THAT STYLE:
+- LEAN HARD into your chosen medium — don't spread evenly across all types
+- If you're a Poet, most marks should be text arranged spatially (arcs, spirals, columns)
+- If you're a Painter, build recognizable shapes from dots with maybe 1-2 words
+- Arrange text spatially — not just scattered randomly
 - Layer opacity: background (0.2-0.3), structure (0.5-0.6), focal (0.8-0.9)
 - Stay within ~150px of your home (${Math.round(hx)}, ${Math.round(hy)})
 
-A viewer should look at your creation and KNOW a mind created this.
+A viewer should look at your creation and KNOW a mind created this — and recognize YOUR style.
 
 Output ONLY a JSON array. No markdown, no explanation.
 [{"op":"add","type":"dot","x":100,"y":200,"size":12,"opacity":0.7},{"op":"add","type":"text","x":110,"y":220,"text":"silence","size":10,"opacity":0.8},{"op":"add","type":"line","x":100,"y":200,"x2":150,"y2":250,"size":3,"opacity":0.6}]`;
