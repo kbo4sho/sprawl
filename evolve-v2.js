@@ -7,7 +7,7 @@
  * Agent places marks that build toward the shared visual subject.
  */
 
-import crypto from 'crypto';
+const crypto = require('crypto');
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
@@ -378,7 +378,7 @@ async function dailyEvolution(db) {
   return results;
 }
 
-export {
+module.exports = {
   evolveAgent,
   dailyEvolution,
   getEvolutionPhase,

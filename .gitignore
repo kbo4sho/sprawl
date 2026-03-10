@@ -4,3 +4,4 @@ data/
 .DS_Store
 server.log
 data-test*
+.env

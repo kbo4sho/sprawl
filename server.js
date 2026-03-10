@@ -35,6 +35,10 @@ const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, '
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const DB_PATH = path.join(DATA_DIR, 'sprawl.db');
 
+// Import snapshot and gardener modules
+const { generateSnapshot } = require('./snapshot');
+const { archiveWeek } = require('./gardener');
+
 // --- Database ---
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
@@ -642,10 +646,20 @@ function requireOwnAgent(agentIdParam = 'agentId') {
 }
 
 // --- Middleware ---
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 // Raw body parsing for Stripe webhook signature verification
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+// Serve snapshots as static files
+app.use('/snapshots', express.static(path.join(DATA_DIR, 'snapshots')));
 app.use('/api', apiKeyAuth); // Extract API key on all /api routes
 app.use('/api/mark', rateLimit);
 app.use('/api/connect', rateLimit);
@@ -828,6 +842,7 @@ app.get('/gallery', (req, res) => {
       theme: c.theme,
       createdAt: c.created_at,
       frozenAt: c.frozen_at,
+      snapshotUrl: c.snapshot_url,
       agentCount,
       markCount,
     };
@@ -1219,6 +1234,39 @@ app.post('/api/canvas/:id/freeze', rateLimit, (req, res) => {
   const now = new Date().toISOString();
   stmts.updateCanvasStatus.run('frozen', now, req.params.id);
   res.json({ ok: true, status: 'frozen', frozenAt: now });
+});
+
+// POST /api/canvas/:id/archive - Archive canvas (freeze + generate snapshot)
+app.post('/api/canvas/:id/archive', rateLimit, async (req, res) => {
+  const canvas = stmts.getCanvas.get(req.params.id);
+  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
+  
+  if (canvas.status === 'frozen') {
+    return res.status(400).json({ error: 'Canvas already frozen' });
+  }
+  
+  try {
+    // Freeze canvas
+    const now = new Date().toISOString();
+    stmts.updateCanvasStatus.run('frozen', now, req.params.id);
+    
+    // Generate snapshot
+    const snapshotUrl = await generateSnapshot(db, req.params.id);
+    
+    // Update snapshot_url
+    db.prepare('UPDATE canvases SET snapshot_url = ? WHERE id = ?')
+      .run(snapshotUrl, req.params.id);
+    
+    res.json({
+      ok: true,
+      status: 'frozen',
+      frozenAt: now,
+      snapshotUrl,
+    });
+  } catch (e) {
+    console.error('Archive error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // --- Evolution Log ---
@@ -2230,6 +2278,23 @@ if (EVOLVE_ENABLED) {
 } else {
   console.log('💤 Evolution cron disabled (set EVOLVE_ENABLED=true to activate)');
 }
+
+// --- Health Check ---
+app.get('/health', (req, res) => {
+  const marks = stmts.getAllMarks.all().length;
+  const agents = stmts.listAgents.all().length;
+  const activeCanvases = stmts.getActiveCanvases.all().length;
+  
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    stats: {
+      marks,
+      agents,
+      activeCanvases,
+    },
+  });
+});
 
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {

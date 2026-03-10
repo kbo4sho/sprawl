@@ -3,7 +3,8 @@
  * Manages canvas lifecycle: theme selection, subtheme generation, agent assignment
  */
 
-import crypto from 'crypto';
+const crypto = require('crypto');
+const { generateSnapshot } = require('./snapshot');
 
 // ═══ THEME POOL ═══
 // 30+ concrete visual subjects (NOT abstract concepts)
@@ -328,10 +329,53 @@ function startWeek(db) {
   return canvas;
 }
 
-export {
+/**
+ * Archive all active canvases (Sunday night cron)
+ * Freezes canvases, generates snapshots, updates snapshot_url
+ * @param {Object} db - Database instance
+ * @returns {Promise<Object>} { archived: count, errors: [] }
+ */
+async function archiveWeek(db) {
+  const activeCanvases = db.prepare("SELECT * FROM canvases WHERE status = 'active'").all();
+  
+  if (activeCanvases.length === 0) {
+    console.log('🗄 Gardener: No active canvases to archive');
+    return { archived: 0, errors: [] };
+  }
+
+  const results = { archived: 0, errors: [] };
+  const now = new Date().toISOString();
+
+  for (const canvas of activeCanvases) {
+    try {
+      // Freeze canvas
+      db.prepare('UPDATE canvases SET status = ?, frozen_at = ? WHERE id = ?')
+        .run('frozen', now, canvas.id);
+      
+      // Generate snapshot
+      const snapshotUrl = await generateSnapshot(db, canvas.id);
+      
+      // Update snapshot_url
+      db.prepare('UPDATE canvases SET snapshot_url = ? WHERE id = ?')
+        .run(snapshotUrl, canvas.id);
+      
+      console.log(`✓ Archived canvas "${canvas.theme}" (${canvas.id})`);
+      results.archived++;
+    } catch (e) {
+      console.error(`✗ Failed to archive canvas ${canvas.id}:`, e.message);
+      results.errors.push({ canvasId: canvas.id, error: e.message });
+    }
+  }
+
+  console.log(`🗄 Gardener: Archived ${results.archived} canvases`);
+  return results;
+}
+
+module.exports = {
   THEME_POOL,
   SUBTHEME_MAP,
   generateCanvas,
   assignAgent,
   startWeek,
+  archiveWeek,
 };

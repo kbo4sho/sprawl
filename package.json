@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
+    "canvas": "^3.2.1",
     "ejs": "^5.0.1",
     "express": "^4.22.1",
     "stripe": "^20.4.1",

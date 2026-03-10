@@ -103,6 +103,12 @@
     height: 100%;
   }
   
+  .canvas-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
   .canvas-info {
     display: flex;
     gap: 16px;
@@ -184,7 +190,11 @@
           </p>
           
           <div class="canvas-preview">
-            <canvas id="preview-<%= canvas.id %>" data-canvas-id="<%= canvas.id %>"></canvas>
+            <% if (canvas.snapshotUrl) { %>
+              <img src="<%= canvas.snapshotUrl %>" alt="<%= canvas.theme %>" />
+            <% } else { %>
+              <canvas id="preview-<%= canvas.id %>" data-canvas-id="<%= canvas.id %>"></canvas>
+            <% } %>
           </div>
           
           <div class="canvas-info">
@@ -204,9 +214,11 @@
 </div>
 
 <script>
-// Render static previews for archived canvases
+// Render static previews for archived canvases (fallback for canvases without snapshots)
 async function renderPreviews() {
   const canvases = document.querySelectorAll('.canvas-preview canvas');
+  
+  if (canvases.length === 0) return; // All canvases have snapshots
   
   for (const canvas of canvases) {
     const canvasId = canvas.dataset.canvasId;
