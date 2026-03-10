@@ -21,8 +21,5 @@
   "type": "commonjs",
   "devDependencies": {
     "vitest": "^4.0.18"
-  },
-  "optionalDependencies": {
-    "canvas": "^3.2.1"
   }
 }
