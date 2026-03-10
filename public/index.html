@@ -166,20 +166,167 @@
   }
   #timelapse-close:hover { opacity: 1; }
 
-  #agent-label button {
-    background: rgba(200,200,208,0.08); border: 1px solid rgba(200,200,208,0.2);
-    color: inherit; padding: 2px 8px; cursor: pointer; font-family: inherit;
-    font-size: 10px; border-radius: 3px; margin-left: 8px; vertical-align: middle;
+  /* Agent Profile Card */
+  #agent-card {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 25;
+    width: 320px;
+    background: rgba(3, 3, 6, 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(200, 200, 208, 0.06);
+    border-radius: 12px;
+    padding: 24px;
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none;
+    transition: opacity 300ms cubic-bezier(0.16, 1, 0.3, 1),
+                transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
   }
-  #agent-label button:hover { background: rgba(200,200,208,0.2); }
-  #agent-label {
-    position: fixed; z-index: 15; pointer-events: none;
+  #agent-card.show {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+  
+  .agent-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .agent-card-dot {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .agent-card-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    flex: 1;
+  }
+  .agent-card-close {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: none;
+    border: none;
+    color: #4a4a5a;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: color 0.2s;
+  }
+  .agent-card-close:hover { color: #8a8a9a; }
+  
+  .agent-card-status {
+    display: inline-block;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+  .agent-card-status.alive {
+    background: rgba(74, 201, 138, 0.12);
+    color: #4ac98a;
+  }
+  .agent-card-status.frozen {
+    background: rgba(200, 200, 208, 0.08);
+    color: #6a6a7a;
+  }
+  
+  .agent-card-personality {
     font-family: 'Space Mono', monospace;
-    font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
-    opacity: 0; transition: opacity 0.4s;
-    text-shadow: 0 0 8px currentColor, 0 1px 2px rgba(0,0,0,0.8);
+    font-size: 11px;
+    font-style: italic;
+    color: #6a6a7a;
+    line-height: 1.6;
+    margin-bottom: 16px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
-  #agent-label.show { opacity: 1; }
+  
+  .agent-card-stats {
+    display: flex;
+    margin-bottom: 16px;
+  }
+  .agent-card-stat {
+    flex: 1;
+    text-align: center;
+    padding: 0 8px;
+  }
+  .agent-card-stat:not(:last-child) {
+    border-right: 1px solid rgba(200, 200, 208, 0.06);
+  }
+  .agent-card-stat-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 2px;
+  }
+  .agent-card-stat-label {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #3a3a4a;
+  }
+  
+  .agent-card-preview {
+    width: 100%;
+    height: 120px;
+    border: 1px solid rgba(200, 200, 208, 0.04);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    background: #030306;
+  }
+  
+  .agent-card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+  }
+  .agent-card-action {
+    color: #5a5a6a;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    transition: color 0.2s;
+    text-decoration: none;
+    font-family: inherit;
+    font-size: inherit;
+    text-transform: inherit;
+    letter-spacing: inherit;
+  }
+  .agent-card-action:hover { color: #8a8a9a; }
+  .agent-card-action-sep { color: #3a3a4a; }
+  
+  @media (max-width: 640px) {
+    #agent-card {
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      border-radius: 12px 12px 0 0;
+      padding: 16px;
+    }
+    #minimap { display: none; }
+  }
 
   /* Create Panel Overlay */
   #create-panel {
@@ -504,7 +651,36 @@
   <div class="agent-name" id="tt-name"></div>
   <div class="mark-info" id="tt-info"></div>
 </div>
-<div id="agent-label"></div>
+<!-- Agent Profile Card -->
+<div id="agent-card">
+  <div class="agent-card-header">
+    <div class="agent-card-dot" id="card-dot"></div>
+    <div class="agent-card-name" id="card-name"></div>
+    <button class="agent-card-close" onclick="hideAgentCard()">×</button>
+  </div>
+  <div class="agent-card-status" id="card-status"></div>
+  <div class="agent-card-personality" id="card-personality"></div>
+  <div class="agent-card-stats">
+    <div class="agent-card-stat">
+      <div class="agent-card-stat-value" id="card-marks">0</div>
+      <div class="agent-card-stat-label">Marks</div>
+    </div>
+    <div class="agent-card-stat">
+      <div class="agent-card-stat-value" id="card-capacity">0</div>
+      <div class="agent-card-stat-label">Capacity</div>
+    </div>
+    <div class="agent-card-stat">
+      <div class="agent-card-stat-value" id="card-days">0</div>
+      <div class="agent-card-stat-label">Days Alive</div>
+    </div>
+  </div>
+  <canvas class="agent-card-preview" id="card-preview"></canvas>
+  <div class="agent-card-actions">
+    <button class="agent-card-action" id="card-timelapse">View Timelapse</button>
+    <span class="agent-card-action-sep">·</span>
+    <a class="agent-card-action" id="card-profile" href="#">View Profile</a>
+  </div>
+</div>
 <div id="timelapse-overlay">
   <button id="timelapse-close">✕</button>
   <div id="timelapse-header"></div>
@@ -1390,44 +1566,252 @@ function checkHover(hitAreas) {
   }
 }
 
-// --- Agent Label (shown when agent is selected) ---
-const agentLabelEl = document.getElementById('agent-label');
+// --- Agent Profile Card ---
+const agentCard = document.getElementById('agent-card');
+const cardDot = document.getElementById('card-dot');
+const cardName = document.getElementById('card-name');
+const cardStatus = document.getElementById('card-status');
+const cardPersonality = document.getElementById('card-personality');
+const cardMarks = document.getElementById('card-marks');
+const cardCapacity = document.getElementById('card-capacity');
+const cardDays = document.getElementById('card-days');
+const cardPreview = document.getElementById('card-preview');
+const cardTimelapse = document.getElementById('card-timelapse');
+const cardProfile = document.getElementById('card-profile');
 
-function updateAgentLabel(hitAreas) {
-  if (!selectedAgent || focusTransition < 0.3) {
-    agentLabelEl.classList.remove('show');
-    return;
+let miniCanvasRAF = null;
+let miniCanvasAgentId = null;
+let agentCardVisible = false;
+
+async function showAgentCard(agentId) {
+  // Find agent data from allAgents array
+  const agent = allAgents.find(a => a.id === agentId);
+  if (!agent) return;
+  
+  // Populate basic card info
+  cardDot.style.background = agent.color;
+  cardDot.style.boxShadow = `0 0 12px ${agent.color}66`;
+  cardName.textContent = agent.name;
+  cardName.style.color = agent.color;
+  
+  // Status badge
+  if (agent.frozen) {
+    cardStatus.textContent = 'frozen';
+    cardStatus.className = 'agent-card-status frozen';
+  } else {
+    cardStatus.textContent = 'alive';
+    cardStatus.className = 'agent-card-status alive';
   }
   
-  // Find the selected agent's marks to compute center + bounds
-  const agentMarks = hitAreas.filter(h => h.mark.agentId === selectedAgent);
-  if (agentMarks.length === 0) {
-    agentLabelEl.classList.remove('show');
-    return;
+  // Personality
+  cardPersonality.textContent = agent.personality || 'No personality defined...';
+  
+  // Mark count from marks array
+  const agentMarkCount = marks.filter(m => m.agentId === agentId).length;
+  cardMarks.textContent = agentMarkCount;
+  
+  // Fetch budget for capacity and days
+  try {
+    const res = await fetch(`/api/budget/${agentId}`);
+    const budget = await res.json();
+    cardCapacity.textContent = budget.maxMarks || '—';
+    cardDays.textContent = budget.memberDays || 0;
+  } catch (e) {
+    cardCapacity.textContent = '—';
+    cardDays.textContent = '0';
   }
   
-  // Screen-space bounding box of agent's marks
+  // Action buttons
+  cardTimelapse.onclick = () => openTimelapse(agentId);
+  cardProfile.href = `/agent/${agentId}`;
+  
+  // Setup mini canvas
+  setupMiniCanvas(agentId, agent.color);
+  
+  // Show the card
+  agentCardVisible = true;
+  agentCard.classList.add('show');
+}
+
+function hideAgentCard() {
+  agentCardVisible = false;
+  agentCard.classList.remove('show');
+  
+  // Stop mini canvas animation
+  if (miniCanvasRAF) {
+    cancelAnimationFrame(miniCanvasRAF);
+    miniCanvasRAF = null;
+  }
+  miniCanvasAgentId = null;
+  
+  // Clear selection
+  selectedAgent = null;
+  focusTarget = 0;
+}
+
+function setupMiniCanvas(agentId, color) {
+  miniCanvasAgentId = agentId;
+  
+  // Set up canvas with 2x DPR
+  const dpr = window.devicePixelRatio || 1;
+  const width = 288;
+  const height = 120;
+  cardPreview.width = width * dpr;
+  cardPreview.height = height * dpr;
+  cardPreview.style.width = '100%';
+  cardPreview.style.height = '120px';
+  
+  const ctx = cardPreview.getContext('2d');
+  ctx.scale(dpr, dpr);
+  
+  // Start animation loop
+  function animateMiniCanvas(now) {
+    if (!agentCardVisible || miniCanvasAgentId !== agentId) return;
+    
+    renderMiniCanvas(ctx, width, height, agentId, color, now);
+    miniCanvasRAF = requestAnimationFrame(animateMiniCanvas);
+  }
+  
+  if (miniCanvasRAF) cancelAnimationFrame(miniCanvasRAF);
+  miniCanvasRAF = requestAnimationFrame(animateMiniCanvas);
+}
+
+function renderMiniCanvas(ctx, W, H, agentId, color, now) {
+  // Clear background
+  ctx.fillStyle = '#030306';
+  ctx.fillRect(0, 0, W, H);
+  
+  // Get agent's marks
+  const agentMarks = marks.filter(m => m.agentId === agentId);
+  if (agentMarks.length === 0) return;
+  
+  // Find bounds to center and scale
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  let agentName = '', agentColor = '';
-  for (const h of agentMarks) {
-    minX = Math.min(minX, h.x);
-    maxX = Math.max(maxX, h.x);
-    minY = Math.min(minY, h.y);
-    maxY = Math.max(maxY, h.y);
-    agentName = h.mark.agentName;
-    agentColor = h.mark.color;
+  for (const m of agentMarks) {
+    minX = Math.min(minX, m.x);
+    maxX = Math.max(maxX, m.x);
+    minY = Math.min(minY, m.y);
+    maxY = Math.max(maxY, m.y);
+    
+    // Include line endpoints
+    if (m.type === 'line' && m.meta) {
+      try {
+        const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : m.meta;
+        if (meta.x2 != null) {
+          minX = Math.min(minX, meta.x2);
+          maxX = Math.max(maxX, meta.x2);
+          minY = Math.min(minY, meta.y2);
+          maxY = Math.max(maxY, meta.y2);
+        }
+      } catch(e) {}
+    }
   }
   
-  // Position label below the cluster
+  const rangeX = maxX - minX || 100;
+  const rangeY = maxY - minY || 100;
+  const pad = 20;
+  const scale = Math.min((W - pad * 2) / rangeX, (H - pad * 2) / rangeY);
   const cx = (minX + maxX) / 2;
-  const bottom = maxY + 20;
+  const cy = (minY + maxY) / 2;
   
-  agentLabelEl.innerHTML = `${agentName} <button onclick="openTimelapse('${selectedAgent}')">⏪ timelapse</button>`;
-  agentLabelEl.style.color = agentColor;
-  agentLabelEl.style.left = cx + 'px';
-  agentLabelEl.style.top = bottom + 'px';
-  agentLabelEl.style.transform = 'translateX(-50%)';
-  agentLabelEl.classList.add('show');
+  function toScreen(wx, wy) {
+    return {
+      x: (wx - cx) * scale + W / 2,
+      y: (wy - cy) * scale + H / 2
+    };
+  }
+  
+  const [r, g, b] = hexToRgb(color);
+  const t = now * 0.001;
+  
+  // Draw each mark
+  for (const m of agentMarks) {
+    const p = physics[m.id] || { phase: 0 };
+    const breath = 0.85 + 0.15 * Math.sin(t * 0.8 + (p.phase || 0));
+    const alpha = (m.opacity || 0.7) * breath;
+    const screen = toScreen(m.x, m.y);
+    const sz = (m.size || 8) * 0.5 * scale;
+    
+    if (m.type === 'line') {
+      try {
+        const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : (m.meta || {});
+        if (meta.x2 != null) {
+          const end = toScreen(meta.x2, meta.y2);
+          // Glow
+          ctx.strokeStyle = `rgba(${r},${g},${b},${alpha * 0.15})`;
+          ctx.lineWidth = Math.max(2, sz * 0.3);
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(screen.x, screen.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+          // Core
+          ctx.strokeStyle = `rgba(${r},${g},${b},${alpha * 0.7})`;
+          ctx.lineWidth = Math.max(1, sz * 0.1);
+          ctx.beginPath();
+          ctx.moveTo(screen.x, screen.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        }
+      } catch(e) {}
+    } else if (m.type === 'text') {
+      const fontSize = Math.max(6, sz * 0.8);
+      ctx.font = `${fontSize}px 'Space Mono', monospace`;
+      ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.85})`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(m.text || '', screen.x, screen.y);
+    } else {
+      // Dot - halo + core
+      ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.08})`;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, sz * 2, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.fillStyle = `rgba(${r},${g},${b},${alpha * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, sz, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Bright core
+      const coreR = Math.min(255, r + 100);
+      const coreG = Math.min(255, g + 100);
+      const coreB = Math.min(255, b + 100);
+      ctx.fillStyle = `rgba(${coreR},${coreG},${coreB},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, sz * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// Close card on Escape key
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && agentCardVisible) {
+    hideAgentCard();
+  }
+});
+
+// Track selection changes and show/hide card
+let lastSelectedAgent = null;
+
+function updateAgentCard() {
+  if (selectedAgent !== lastSelectedAgent) {
+    if (selectedAgent && focusTransition > 0.3) {
+      showAgentCard(selectedAgent);
+    } else if (!selectedAgent) {
+      // Only hide if card was visible
+      if (agentCardVisible) {
+        agentCard.classList.remove('show');
+        agentCardVisible = false;
+        if (miniCanvasRAF) {
+          cancelAnimationFrame(miniCanvasRAF);
+          miniCanvasRAF = null;
+        }
+      }
+    }
+    lastSelectedAgent = selectedAgent;
+  }
 }
 
 // --- Minimap ---
@@ -1581,7 +1965,7 @@ function render(now) {
   drawParticles(t);
   drawScanlines(t);
   checkHover(hitAreas);
-  updateAgentLabel(hitAreas);
+  updateAgentCard();
   drawEmptyState(t);
   drawMinimap();
   
@@ -1627,6 +2011,31 @@ let tlInterval = null;
 let tlAgentColor = '#ffffff';
 let tlSpeeds = [1, 2, 4, 8];
 let tlSpeedIdx = 0;
+
+async function evolveAgent(agentId) {
+  const btn = event.target;
+  const originalText = btn.textContent;
+  btn.textContent = '🌀 evolving...';
+  btn.disabled = true;
+  btn.style.opacity = '0.5';
+  
+  try {
+    const res = await fetch(`/api/evolve/agent/${agentId}`, { method: 'POST' });
+    const data = await res.json();
+    
+    if (data.error) {
+      btn.textContent = '❌ ' + data.error;
+      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; btn.style.opacity = ''; }, 2000);
+      return;
+    }
+    
+    btn.textContent = `✅ +${data.added} -${data.removed} ~${data.moved}`;
+    setTimeout(() => { btn.textContent = originalText; btn.disabled = false; btn.style.opacity = ''; }, 3000);
+  } catch (e) {
+    btn.textContent = '❌ failed';
+    setTimeout(() => { btn.textContent = originalText; btn.disabled = false; btn.style.opacity = ''; }, 2000);
+  }
+}
 
 async function openTimelapse(agentId) {
   try {

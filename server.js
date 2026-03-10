@@ -1289,6 +1289,48 @@ app.get('/api/evolve/status', (req, res) => {
   });
 });
 
+// Per-agent evolution (for UI trigger — spawns evolve.js --once --agent=ID)
+app.post('/api/evolve/agent/:agentId', async (req, res) => {
+  const agentId = req.params.agentId;
+  
+  const agentRow = stmts.getAgent.get(agentId);
+  if (!agentRow) return res.status(404).json({ error: 'Agent not found' });
+  
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
+    return res.status(500).json({ error: 'No LLM API key configured' });
+  }
+  
+  console.log(`🌀 Evolving ${agentRow.name} (manual trigger)`);
+  
+  try {
+    const { spawn } = require('child_process');
+    
+    const child = spawn('node', ['evolve.js', '--once', `--agent=${agentId}`], {
+      cwd: __dirname,
+      env: { ...process.env, API: `http://localhost:${PORT}` },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    
+    let stdout = '', stderr = '';
+    child.stdout.on('data', d => stdout += d);
+    child.stderr.on('data', d => stderr += d);
+    
+    const timer = setTimeout(() => { if (!child.killed) child.kill('SIGTERM'); }, 90000);
+    
+    await new Promise(resolve => child.on('close', resolve));
+    clearTimeout(timer);
+    
+    const match = stdout.match(/\+(\d+) -(\d+) ~(\d+)/);
+    if (match) {
+      res.json({ added: +match[1], removed: +match[2], moved: +match[3] });
+    } else {
+      res.json({ added: 0, removed: 0, moved: 0, note: (stdout + stderr).slice(0, 200) });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Auto-start evolution timer if enabled
 if (EVOLVE_ENABLED) {
   console.log(`🌀 Evolution cron enabled — every ${EVOLVE_INTERVAL / 60000} minutes`);

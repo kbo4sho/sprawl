@@ -608,8 +608,31 @@ async function run() {
   console.log('\n  ✅ Evolution complete');
 }
 
+// Parse --agent=ID flag for single-agent evolution
+const singleAgentFlag = process.argv.find(a => a.startsWith('--agent='));
+const SINGLE_AGENT_ID = singleAgentFlag ? singleAgentFlag.split('=')[1] : null;
+
+async function runSingleAgent(agentId) {
+  console.log(`🌀 Sprawl Evolution — single agent: ${agentId}\n`);
+  
+  const agents = await api('GET', '/api/agents');
+  const agent = agents.find(a => a.id === agentId);
+  
+  if (!agent) {
+    console.error(`  Agent "${agentId}" not found`);
+    return;
+  }
+  
+  process.stdout.write(`  ${agent.name}...`);
+  const result = await evolveAgent(agent, agents);
+  console.log(` +${result.added} -${result.removed} ~${result.moved} (${result.texts} text)`);
+  console.log('\n  ✅ Done');
+}
+
 // Run single cycle or continuous
-if (process.argv.includes('--once') || !process.argv.includes('--loop')) {
+if (SINGLE_AGENT_ID) {
+  runSingleAgent(SINGLE_AGENT_ID).catch(console.error);
+} else if (process.argv.includes('--once') || !process.argv.includes('--loop')) {
   run().catch(console.error);
 } else {
   const INTERVAL = parseInt(process.env.EVOLVE_INTERVAL) || 3600000;
