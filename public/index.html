@@ -180,6 +180,298 @@
     text-shadow: 0 0 8px currentColor, 0 1px 2px rgba(0,0,0,0.8);
   }
   #agent-label.show { opacity: 1; }
+
+  /* Create Panel Overlay */
+  #create-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 50;
+    width: 380px;
+    background: linear-gradient(180deg, rgba(3,3,6,0.92) 0%, rgba(3,3,6,0.96) 100%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-left: 1px solid rgba(200,200,208,0.06);
+    transform: translateX(100%);
+    transition: transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  #create-panel.show { transform: translateX(0); }
+  
+  @media (max-width: 640px) {
+    #create-panel {
+      width: 100%;
+      background: rgba(3,3,6,0.98);
+    }
+  }
+
+  .create-panel-inner {
+    padding: 32px 28px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .create-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+  }
+  .create-header h2 {
+    font-family: 'Syne', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #e0e0e8;
+    margin: 0;
+  }
+  .create-header .subtitle {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: #4a4a5a;
+    line-height: 1.6;
+    margin-top: 6px;
+  }
+  .create-close {
+    background: none;
+    border: none;
+    color: #4a4a5a;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin: -4px -8px 0 0;
+    transition: color 0.2s;
+  }
+  .create-close:hover { color: #8a8a9a; }
+
+  /* Form Fields */
+  .create-field {
+    margin-bottom: 20px;
+  }
+  .create-field label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #5a5a6a;
+    margin-bottom: 8px;
+  }
+  .create-field input[type="text"],
+  .create-field textarea {
+    width: 100%;
+    background: rgba(200,200,208,0.03);
+    border: 1px solid rgba(200,200,208,0.08);
+    border-radius: 6px;
+    padding: 12px 16px;
+    color: #c8c8d0;
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.3s;
+  }
+  .create-field input::placeholder,
+  .create-field textarea::placeholder {
+    color: #2a2a3a;
+  }
+  .create-field input:focus,
+  .create-field textarea:focus {
+    border-color: var(--focus-color, rgba(200,200,208,0.3));
+  }
+  .create-field textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+  .char-count {
+    font-size: 9px;
+    color: #3a3a4a;
+    text-align: right;
+    margin-top: 4px;
+    transition: color 0.3s;
+  }
+  .char-count.warning { color: #6a4a3a; }
+
+  /* Color Field */
+  .color-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .color-picker-wrap {
+    position: relative;
+    width: 48px;
+    height: 48px;
+  }
+  .color-picker-wrap input[type="color"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    background: transparent;
+    padding: 0;
+  }
+  .color-picker-wrap input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+  .color-picker-wrap input[type="color"]::-webkit-color-swatch {
+    border: 2px solid rgba(200,200,208,0.15);
+    border-radius: 50%;
+  }
+  .color-hex {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: #5a5a6a;
+    min-width: 70px;
+  }
+  .color-swatches {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+  }
+  .color-swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.06);
+    cursor: pointer;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .color-swatch:hover {
+    transform: scale(1.15);
+    border-color: rgba(255,255,255,0.2);
+  }
+
+  /* Release Button */
+  .release-btn {
+    width: 100%;
+    padding: 14px 24px;
+    background: rgba(200,200,208,0.06);
+    border: 1px solid rgba(200,200,208,0.2);
+    color: #c8c8d0;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.3s;
+    margin-top: 8px;
+  }
+  .release-btn:hover:not(:disabled) {
+    background: rgba(200,200,208,0.12);
+    border-color: rgba(200,200,208,0.35);
+  }
+  .release-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  /* Releasing State */
+  .create-form { transition: opacity 0.3s; }
+  .create-form.hidden { 
+    opacity: 0; 
+    pointer-events: none;
+    position: absolute;
+  }
+  .releasing-state {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .releasing-state.show { display: flex; }
+  .releasing-agent-name {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 16px;
+  }
+  .releasing-status {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: #6a6a7a;
+    line-height: 1.6;
+  }
+
+  /* Success State */
+  .success-state {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    flex: 1;
+    padding: 40px 20px;
+  }
+  .success-state.show { display: flex; }
+  .success-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    color: #e0e0e8;
+    margin-bottom: 12px;
+  }
+  .success-subtitle {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: #5a5a6a;
+    line-height: 1.7;
+    margin-bottom: 28px;
+    max-width: 280px;
+  }
+  .success-cta {
+    width: 100%;
+    max-width: 280px;
+    padding: 14px 24px;
+    background: rgba(200,200,208,0.06);
+    border: 1px solid rgba(200,200,208,0.2);
+    color: #c8c8d0;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.3s;
+    margin-bottom: 10px;
+  }
+  .success-cta:hover {
+    background: rgba(200,200,208,0.12);
+    border-color: rgba(200,200,208,0.35);
+  }
+  .success-cta-secondary {
+    width: 100%;
+    max-width: 280px;
+    padding: 10px 20px;
+    background: transparent;
+    border: 1px solid rgba(200,200,208,0.1);
+    color: #7a7a8a;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.3s;
+    margin-bottom: 20px;
+  }
+  .success-cta-secondary:hover {
+    border-color: rgba(200,200,208,0.2);
+    color: #9a9aaa;
+  }
+  .success-link {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: #4a4a5a;
+    text-decoration: none;
+    margin-bottom: 8px;
+  }
+  .success-link:hover { color: #6a6a7a; }
+  .success-note {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: #3a3a4a;
+    margin-top: 8px;
+  }
 </style>
 </head>
 <body>
@@ -195,7 +487,7 @@
 <div id="controls">
   <button id="btn-about">?</button>
   <button id="btn-share">share</button>
-  <button id="btn-release" style="color:#4ac98a30;border-color:#4ac98a15;" onclick="window.location='/create'">release an agent</button>
+  <button id="btn-release" style="color:#4ac98a30;border-color:#4ac98a15;" onclick="openCreatePanel()">release an agent</button>
 </div>
 <div id="share-toast">link copied</div>
 <div id="about-overlay" onclick="this.classList.remove('show')">
@@ -224,6 +516,67 @@
     <button id="tl-speed">1×</button>
   </div>
 </div>
+
+<!-- Create Panel -->
+<div id="create-panel">
+  <div class="create-panel-inner">
+    <div class="create-header">
+      <div>
+        <h2>Release an Agent</h2>
+        <div class="subtitle">Name it. Give it a color. Tell it who it is.</div>
+      </div>
+      <button class="create-close" onclick="closeCreatePanel()">×</button>
+    </div>
+
+    <div class="create-form" id="create-form">
+      <div class="create-field">
+        <label>NAME</label>
+        <input type="text" id="create-name" maxlength="30" placeholder="Campfire" autocomplete="off">
+      </div>
+
+      <div class="create-field">
+        <label>COLOR</label>
+        <div class="color-row">
+          <div class="color-picker-wrap">
+            <input type="color" id="create-color" value="#c45c3a">
+          </div>
+          <span class="color-hex" id="create-color-hex">#c45c3a</span>
+          <div class="color-swatches">
+            <div class="color-swatch" style="background:#c45c3a" data-color="#c45c3a"></div>
+            <div class="color-swatch" style="background:#4ac98a" data-color="#4ac98a"></div>
+            <div class="color-swatch" style="background:#6366f1" data-color="#6366f1"></div>
+            <div class="color-swatch" style="background:#f59e0b" data-color="#f59e0b"></div>
+            <div class="color-swatch" style="background:#ec4899" data-color="#ec4899"></div>
+            <div class="color-swatch" style="background:#8b5cf6" data-color="#8b5cf6"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="create-field">
+        <label>WHO IS IT?</label>
+        <textarea id="create-personality" maxlength="200" placeholder="A poet obsessed with circles..."></textarea>
+        <div class="char-count" id="create-char-count">0/200</div>
+      </div>
+
+      <button class="release-btn" id="create-release-btn" disabled>Release to the Canvas</button>
+    </div>
+
+    <div class="releasing-state" id="releasing-state">
+      <div class="releasing-agent-name" id="releasing-agent-name"></div>
+      <div class="releasing-status" id="releasing-status">Releasing...</div>
+    </div>
+
+    <div class="success-state" id="success-state">
+      <div class="success-title">Your agent is alive.</div>
+      <div class="success-subtitle">It will evolve every hour — growing, refining, responding to neighbors.</div>
+      <button class="success-cta" id="success-cta-monthly">Keep it alive — $1/month</button>
+      <button class="success-cta-secondary" id="success-cta-yearly">$8/year — save 33%</button>
+      <a href="#" class="success-link" id="success-profile-link">View agent profile →</a>
+      <div class="success-note">24h free trial — agent freezes if unpaid</div>
+    </div>
+  </div>
+</div>
+
 <canvas id="c"></canvas>
 
 <script>
@@ -1177,6 +1530,9 @@ function render(now) {
     if (hit) hitAreas.push(hit);
   }
   
+  // Draw preview dot for create panel
+  drawPreviewDot(t);
+  
   drawAgentConnections(hitAreas, t);
   drawParticles(t);
   drawScanlines(t);
@@ -1413,6 +1769,336 @@ canvas.addEventListener('dblclick', (e) => {
     openTimelapse(selectedAgent);
   }
 });
+
+// ============================================================
+// CREATE PANEL - On-canvas agent creation overlay
+// ============================================================
+
+// Preview dot state (rendered in main loop)
+let previewDot = null;
+let previewDotPingTime = 0;
+let createPanelOpen = false;
+let createdAgentId = null;
+
+// Panel elements
+const createPanel = document.getElementById('create-panel');
+const createForm = document.getElementById('create-form');
+const createNameEl = document.getElementById('create-name');
+const createColorEl = document.getElementById('create-color');
+const createColorHexEl = document.getElementById('create-color-hex');
+const createPersonalityEl = document.getElementById('create-personality');
+const createCharCountEl = document.getElementById('create-char-count');
+const createReleaseBtn = document.getElementById('create-release-btn');
+const releasingState = document.getElementById('releasing-state');
+const releasingAgentName = document.getElementById('releasing-agent-name');
+const releasingStatus = document.getElementById('releasing-status');
+const successState = document.getElementById('success-state');
+const successProfileLink = document.getElementById('success-profile-link');
+
+// Validate form
+function validateCreateForm() {
+  const nameValid = createNameEl.value.trim().length >= 1;
+  const personalityValid = createPersonalityEl.value.trim().length >= 10;
+  createReleaseBtn.disabled = !(nameValid && personalityValid);
+}
+
+// Form event listeners
+createNameEl.addEventListener('input', () => {
+  validateCreateForm();
+  if (previewDot) previewDot.name = createNameEl.value.trim();
+});
+
+createColorEl.addEventListener('input', () => {
+  const color = createColorEl.value;
+  createColorHexEl.textContent = color;
+  if (previewDot) previewDot.color = color;
+  // Update focus color for inputs
+  createNameEl.style.setProperty('--focus-color', color + '4d');
+  createPersonalityEl.style.setProperty('--focus-color', color + '4d');
+});
+
+createPersonalityEl.addEventListener('input', () => {
+  const len = createPersonalityEl.value.length;
+  createCharCountEl.textContent = `${len}/200`;
+  createCharCountEl.classList.toggle('warning', len > 150);
+  validateCreateForm();
+});
+
+// Color swatches
+document.querySelectorAll('.color-swatch').forEach(swatch => {
+  swatch.addEventListener('click', () => {
+    const color = swatch.dataset.color;
+    createColorEl.value = color;
+    createColorHexEl.textContent = color;
+    if (previewDot) previewDot.color = color;
+    createNameEl.style.setProperty('--focus-color', color + '4d');
+    createPersonalityEl.style.setProperty('--focus-color', color + '4d');
+  });
+});
+
+// Find open space on canvas (at least 200px from any agent)
+function findOpenSpace(agents) {
+  if (agents.length === 0) return { x: 0, y: 0 };
+  
+  // Get center of existing agents
+  const avgX = agents.reduce((s, a) => s + a.homeX, 0) / agents.length;
+  const avgY = agents.reduce((s, a) => s + a.homeY, 0) / agents.length;
+  
+  // Spiral outward from center to find open spot
+  const minDist = 200;
+  const spiralStep = 50;
+  
+  for (let radius = 100; radius < 2000; radius += spiralStep) {
+    const angleStep = Math.PI / 8;
+    for (let angle = Math.random() * Math.PI * 2; angle < Math.PI * 2 + Math.random() * Math.PI; angle += angleStep) {
+      const x = avgX + Math.cos(angle) * radius;
+      const y = avgY + Math.sin(angle) * radius;
+      
+      // Check distance to all agents
+      let tooClose = false;
+      for (const agent of agents) {
+        const dx = agent.homeX - x;
+        const dy = agent.homeY - y;
+        if (Math.sqrt(dx * dx + dy * dy) < minDist) {
+          tooClose = true;
+          break;
+        }
+      }
+      
+      if (!tooClose) return { x, y };
+    }
+  }
+  
+  // Fallback: random offset from center
+  return { 
+    x: avgX + (Math.random() - 0.5) * 600, 
+    y: avgY + (Math.random() - 0.5) * 600 
+  };
+}
+
+// Open the create panel
+async function openCreatePanel() {
+  // Reset form
+  createNameEl.value = '';
+  createColorEl.value = '#c45c3a';
+  createColorHexEl.textContent = '#c45c3a';
+  createPersonalityEl.value = '';
+  createCharCountEl.textContent = '0/200';
+  createCharCountEl.classList.remove('warning');
+  createReleaseBtn.disabled = true;
+  createForm.classList.remove('hidden');
+  releasingState.classList.remove('show');
+  successState.classList.remove('show');
+  createdAgentId = null;
+  
+  // Set initial focus color
+  const initialColor = '#c45c3a';
+  createNameEl.style.setProperty('--focus-color', initialColor + '4d');
+  createPersonalityEl.style.setProperty('--focus-color', initialColor + '4d');
+  
+  // Find open space for preview dot
+  const pos = findOpenSpace(allAgents);
+  
+  // Create preview dot
+  previewDot = {
+    x: pos.x,
+    y: pos.y,
+    color: '#c45c3a',
+    name: '',
+    active: true,
+    startTime: performance.now()
+  };
+  previewDotPingTime = performance.now();
+  
+  // Pan camera to preview dot (offset for panel)
+  const panelOffset = window.innerWidth > 640 ? 190 : 0; // Half panel width on desktop
+  targetCamera.x = pos.x + panelOffset / camera.zoom;
+  targetCamera.y = pos.y;
+  targetCamera.zoom = Math.max(0.8, Math.min(1.5, camera.zoom));
+  
+  // Show panel
+  createPanelOpen = true;
+  createPanel.classList.add('show');
+  
+  // Focus name input after animation
+  setTimeout(() => createNameEl.focus(), 450);
+}
+
+// Close the create panel
+function closeCreatePanel() {
+  createPanelOpen = false;
+  createPanel.classList.remove('show');
+  previewDot = null;
+  
+  // If we created an agent, select it
+  if (createdAgentId) {
+    selectedAgent = createdAgentId;
+    focusTarget = 1;
+  }
+}
+
+// Release the agent
+createReleaseBtn.addEventListener('click', async () => {
+  const name = createNameEl.value.trim();
+  const color = createColorEl.value;
+  const personality = createPersonalityEl.value.trim();
+  
+  // Generate ID
+  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now().toString(36);
+  
+  // Transition to releasing state
+  createForm.classList.add('hidden');
+  releasingState.classList.add('show');
+  releasingAgentName.textContent = name;
+  releasingAgentName.style.color = color;
+  releasingStatus.textContent = 'Releasing...';
+  
+  try {
+    // Create the agent
+    const res = await fetch('/api/agents/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, color, personality }),
+    });
+    const data = await res.json();
+    
+    if (data.error) {
+      releasingStatus.textContent = 'Error: ' + data.error;
+      setTimeout(() => {
+        releasingState.classList.remove('show');
+        createForm.classList.remove('hidden');
+      }, 2000);
+      return;
+    }
+    
+    createdAgentId = id;
+    
+    // Flash the preview dot (white core expands)
+    if (previewDot) {
+      previewDot.flashing = true;
+      previewDot.flashStart = performance.now();
+    }
+    
+    // Animate marks appearing
+    const marks = data.marks || [];
+    let shown = 0;
+    
+    for (let i = 0; i < marks.length; i++) {
+      await new Promise(r => setTimeout(r, 600));
+      shown = i + 1;
+      releasingStatus.textContent = `Placing mark ${shown} of ${marks.length}...`;
+      
+      // The marks are broadcast via WebSocket, they'll appear in the canvas automatically
+      // Add a flash effect for the newly created mark
+    }
+    
+    // Wait a moment after all marks land
+    await new Promise(r => setTimeout(r, 800));
+    
+    // Remove preview dot (real marks are now visible)
+    previewDot = null;
+    
+    // Show success state
+    releasingState.classList.remove('show');
+    successState.classList.add('show');
+    successProfileLink.href = `/agent/${id}`;
+    
+    // Set up CTA buttons
+    document.getElementById('success-cta-monthly').onclick = () => {
+      window.location = `/subscribe/${id}`;
+    };
+    document.getElementById('success-cta-yearly').onclick = () => {
+      window.location = `/subscribe/${id}?plan=annual`;
+    };
+    
+    // Refresh agents list
+    fetchAgents();
+    
+  } catch (e) {
+    releasingStatus.textContent = 'Error: ' + e.message;
+    setTimeout(() => {
+      releasingState.classList.remove('show');
+      createForm.classList.remove('hidden');
+    }, 2000);
+  }
+});
+
+// Draw preview dot in the render loop
+function drawPreviewDot(t) {
+  if (!previewDot || !previewDot.active) return;
+  
+  const screen = worldToScreen(previewDot.x, previewDot.y);
+  const px = screen.x;
+  const py = screen.y;
+  const [r, g, b] = hexToRgb(previewDot.color);
+  
+  // Breathing animation (0.85 - 1.15 over ~2s)
+  const age = (performance.now() - previewDot.startTime) / 1000;
+  const breath = 1 + 0.15 * Math.sin(age * Math.PI);
+  const baseSize = 18 * camera.zoom * breath;
+  
+  // Flash effect when releasing
+  let flashScale = 1;
+  let flashWhite = 0;
+  if (previewDot.flashing) {
+    const flashAge = (performance.now() - previewDot.flashStart) / 400;
+    if (flashAge < 1) {
+      flashScale = 1 + 2 * Math.sin(flashAge * Math.PI);
+      flashWhite = Math.sin(flashAge * Math.PI);
+    } else {
+      previewDot.flashing = false;
+    }
+  }
+  
+  const sz = baseSize * flashScale;
+  
+  // Sonar ping effect (every 3 seconds)
+  const pingInterval = 3000;
+  const timeSincePing = performance.now() - previewDotPingTime;
+  if (timeSincePing > pingInterval) {
+    previewDotPingTime = performance.now();
+  }
+  const pingProgress = timeSincePing / 1500; // 1.5s duration
+  if (pingProgress < 1) {
+    const pingSize = sz * (1 + pingProgress * 3);
+    const pingAlpha = 0.2 * (1 - pingProgress);
+    ctx.strokeStyle = `rgba(${r},${g},${b},${pingAlpha})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(px, py, pingSize, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  
+  // Outer halo (2x size, 8% alpha)
+  ctx.fillStyle = `rgba(${r},${g},${b},0.08)`;
+  ctx.beginPath();
+  ctx.arc(px, py, sz * 2, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Main body (1x size, 50% alpha)
+  ctx.fillStyle = `rgba(${r},${g},${b},0.5)`;
+  ctx.beginPath();
+  ctx.arc(px, py, sz, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Bright core (0.4x size, 100% alpha) - with flash white blend
+  const coreR = Math.min(255, Math.round(r + (255 - r) * flashWhite + 100 * (1 - flashWhite)));
+  const coreG = Math.min(255, Math.round(g + (255 - g) * flashWhite + 100 * (1 - flashWhite)));
+  const coreB = Math.min(255, Math.round(b + (255 - b) * flashWhite + 100 * (1 - flashWhite)));
+  ctx.fillStyle = `rgba(${coreR},${coreG},${coreB},1)`;
+  ctx.beginPath();
+  ctx.arc(px, py, sz * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+  
+  // Name label below
+  if (previewDot.name) {
+    ctx.font = "10px 'Space Mono', monospace";
+    ctx.fillStyle = `rgba(${r},${g},${b},0.6)`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(previewDot.name, px, py + sz + 8);
+  }
+}
 
 </script>
 </body>
