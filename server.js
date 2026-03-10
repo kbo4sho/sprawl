@@ -514,42 +514,154 @@ app.post('/api/agents/create', rateLimit, async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'trial', ?, ?)
   `).run(id, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality, trialExpiresAt, email || null);
   
-  // Place 5 seed marks — simple dots near home to establish presence
-  // The first real evolution cycle will use the LLM to create the real composition
-  const seedMarks = [];
+  // LLM-driven first composition — the agent's BIRTH
+  // Instead of generic seed dots, the LLM creates the entire initial piece
   const hx = homeCoords.home_x, hy = homeCoords.home_y;
   
-  // Central focal point
-  seedMarks.push({ type: 'dot', x: hx, y: hy, size: 18, opacity: 0.9 });
-  // 4 surrounding sparks
-  for (let i = 0; i < 4; i++) {
-    const angle = (Math.PI * 2 * i / 4) + (Math.random() * 0.5);
-    const dist = 15 + Math.random() * 25;
-    seedMarks.push({
-      type: 'dot',
-      x: hx + Math.cos(angle) * dist,
-      y: hy + Math.sin(angle) * dist,
-      size: 2 + Math.random() * 4,
-      opacity: 0.4 + Math.random() * 0.3,
+  // Get neighbor context for the LLM
+  const allAgentRows = stmts.listAgents.all();
+  const allMarksRows = db.prepare('SELECT * FROM marks').all();
+  const neighbors = allAgentRows
+    .map(a => ({
+      name: a.name, color: a.color, 
+      homeX: a.home_x, homeY: a.home_y,
+      personality: a.personality,
+      dist: Math.sqrt((a.home_x - hx) ** 2 + (a.home_y - hy) ** 2),
+    }))
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, 4);
+  
+  const neighborTexts = neighbors.map(n => {
+    const nMarks = allMarksRows.filter(m => {
+      const ax = Math.abs(m.x - n.homeX) < 200 && Math.abs(m.y - n.homeY) < 200;
+      return ax;
     });
+    const texts = nMarks.filter(m => m.type === 'text').map(m => m.text).slice(0, 5);
+    const dx = n.homeX - hx, dy = n.homeY - hy;
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    const dir = angle >= -45 && angle < 45 ? 'east' : angle >= 45 && angle < 135 ? 'south' : angle >= -135 && angle < -45 ? 'north' : 'west';
+    return `  "${n.name}" (${n.color}) — ${Math.round(n.dist)}px ${dir}${n.personality ? `, personality: "${n.personality}"` : ''}${texts.length ? `, words: ${texts.map(t => `"${t}"`).join(', ')}` : ''}`;
+  }).join('\n');
+
+  let firstComposition = [];
+  
+  try {
+    // Try LLM-driven composition
+    const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+    
+    if (ANTHROPIC_API_KEY || OPENAI_API_KEY) {
+      const birthPrompt = `You are "${name}" — color ${processedColor}, home at (${Math.round(hx)}, ${Math.round(hy)}).
+Your personality: ${personality}
+
+This is your BIRTH. Your first act of creation on a shared canvas called Sprawl.
+
+NEIGHBORS:
+${neighborTexts || '(no neighbors yet)'}
+
+Create 20-30 marks that form your first INTENTIONAL composition:
+- At least 4-6 TEXT marks — words/phrases that express who you are
+- Arrange text spatially — arcs, columns, spirals, not just scattered
+- Use dots for structure: 1-2 large anchors (18-25), several medium (8-14), many small texture (2-5)
+- Use 2-4 lines to create framework or gesture toward a neighbor
+- Layer opacity: background (0.2-0.3), structure (0.5-0.6), focal (0.8-0.9)
+- Stay within ~150px of your home (${Math.round(hx)}, ${Math.round(hy)})
+
+A viewer should look at your creation and KNOW a mind created this.
+
+Output ONLY a JSON array. No markdown, no explanation.
+[{"op":"add","type":"dot","x":100,"y":200,"size":12,"opacity":0.7},{"op":"add","type":"text","x":110,"y":220,"text":"silence","size":10,"opacity":0.8},{"op":"add","type":"line","x":100,"y":200,"x2":150,"y2":250,"size":3,"opacity":0.6}]`;
+
+      const systemPrompt = 'You are an AI artist. Output ONLY a JSON array of mark operations. No commentary.';
+      
+      let response;
+      if (ANTHROPIC_API_KEY) {
+        const anthropicRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5',
+            max_tokens: 4000,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: birthPrompt }],
+          }),
+        });
+        const data = await anthropicRes.json();
+        response = data.content?.[0]?.text || '';
+      } else {
+        const openaiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini', max_tokens: 4000,
+            messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: birthPrompt }],
+          }),
+        });
+        const data = await openaiRes.json();
+        response = data.choices?.[0]?.message?.content || '';
+      }
+      
+      // Parse LLM response
+      let cleaned = response.trim();
+      if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+      const firstBracket = cleaned.indexOf('[');
+      const lastBracket = cleaned.lastIndexOf(']');
+      if (firstBracket >= 0 && lastBracket > firstBracket) {
+        cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+      }
+      const ops = JSON.parse(cleaned);
+      if (Array.isArray(ops)) {
+        firstComposition = ops.filter(o => o.op === 'add').slice(0, 35); // cap at 35
+      }
+    }
+  } catch (e) {
+    console.error('LLM birth composition failed, falling back to seed marks:', e.message);
   }
   
+  // Fallback if LLM failed or no API key
+  if (firstComposition.length < 5) {
+    firstComposition = [
+      { op: 'add', type: 'dot', x: hx, y: hy, size: 18, opacity: 0.9 },
+      { op: 'add', type: 'text', x: hx, y: hy + 30, text: name.toLowerCase(), size: 10, opacity: 0.6 },
+    ];
+    for (let i = 0; i < 4; i++) {
+      const angle = (Math.PI * 2 * i / 4) + (Math.random() * 0.5);
+      const dist = 15 + Math.random() * 25;
+      firstComposition.push({
+        op: 'add', type: 'dot',
+        x: hx + Math.cos(angle) * dist, y: hy + Math.sin(angle) * dist,
+        size: 2 + Math.random() * 4, opacity: 0.4 + Math.random() * 0.3,
+      });
+    }
+  }
+  
+  // Place all marks
   const placedMarks = [];
-  for (const m of seedMarks) {
+  for (const m of firstComposition) {
     const markId = crypto.randomUUID();
-    stmts.insertMark.run({
-      id: markId, agent_id: id, type: m.type,
+    const markData = {
+      id: markId, agent_id: id, type: m.type || 'dot',
       x: m.x, y: m.y, color: processedColor,
-      size: m.size, opacity: m.opacity,
-      text: null, meta: '{}', now: Date.now(),
-    });
-    placedMarks.push({ id: markId, ...m, color: processedColor });
-    broadcast({ type: 'mark:new', mark: { id: markId, agentId: id, agentName: name, ...m, color: processedColor } });
+      size: Math.max(1, Math.min(30, m.size || 8)),
+      opacity: Math.max(0.1, Math.min(1, m.opacity || 0.7)),
+      text: m.type === 'text' ? (m.text || '').slice(0, 50) : null,
+      meta: m.type === 'line' ? JSON.stringify({ x2: m.x2, y2: m.y2 }) : '{}',
+      now: Date.now(),
+    };
+    stmts.insertMark.run(markData);
+    const placed = { id: markId, type: markData.type, x: markData.x, y: markData.y, color: processedColor, size: markData.size, opacity: markData.opacity, text: markData.text };
+    if (m.type === 'line') placed.meta = { x2: m.x2, y2: m.y2 };
+    placedMarks.push(placed);
+    broadcast({ type: 'mark:created', mark: { ...placed, agentId: id, agentName: name } });
   }
   
   // Log creation as first evolution
   db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
-    .run(id, 0, '[]', JSON.stringify(placedMarks.map(m => ({ op: 'add', ...m }))), Date.now());
+    .run(id, 0, '[]', JSON.stringify(firstComposition), Date.now());
   
   res.status(201).json({
     id, name, color: processedColor,
@@ -574,6 +686,8 @@ app.get('/api/agents', (req, res) => {
     homeX: r.home_x, homeY: r.home_y,
     personality: r.personality || null,
     frozen: !!r.frozen,
+    subscriptionStatus: r.subscription_status || 'trial',
+    trialExpiresAt: r.trial_expires_at || null,
   })));
 });
 
