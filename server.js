@@ -59,20 +59,18 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_api_keys_agent ON api_keys(agent_id);
 `);
 
-// Migration: Add home_x and home_y columns if they don't exist
+// Migration: Ensure all columns exist (handles partial deploys)
 try {
   const columns = db.prepare("PRAGMA table_info(agents)").all();
-  const hasHomeX = columns.some(c => c.name === 'home_x');
-  const hasHomeY = columns.some(c => c.name === 'home_y');
-  
-  if (!hasHomeX) {
-    db.exec('ALTER TABLE agents ADD COLUMN home_x REAL DEFAULT 0');
-    console.log('Migration: Added home_x column to agents table');
-  }
-  if (!hasHomeY) {
-    db.exec('ALTER TABLE agents ADD COLUMN home_y REAL DEFAULT 0');
-    console.log('Migration: Added home_y column to agents table');
-  }
+  const ensure = (name, ddl) => {
+    if (!columns.some(c => c.name === name)) {
+      db.exec(`ALTER TABLE agents ADD COLUMN ${ddl}`);
+      console.log(`Migration: Added ${name} column to agents table`);
+    }
+  };
+  ensure('frozen', 'frozen INTEGER DEFAULT 0');
+  ensure('home_x', 'home_x REAL DEFAULT 0');
+  ensure('home_y', 'home_y REAL DEFAULT 0');
   // Add personality column
   const hasPersonality = columns.some(c => c.name === 'personality');
   if (!hasPersonality) {
