@@ -57,6 +57,18 @@ db.exec(`
     trial_expires_at INTEGER DEFAULT NULL,
     email TEXT DEFAULT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS api_keys (
+    key TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL,
+    name TEXT DEFAULT 'default',
+    created_at INTEGER NOT NULL,
+    last_used_at INTEGER DEFAULT NULL,
+    revoked INTEGER DEFAULT 0,
+    FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_api_keys_agent ON api_keys(agent_id);
 `);
 
 // Migration: Add home_x and home_y columns if they don't exist
@@ -491,11 +503,81 @@ setInterval(() => {
   for (const ip in rateLimits) if (rateLimits[ip].resetAt < now) delete rateLimits[ip];
 }, 300000);
 
+// --- API Key Auth ---
+// External agents authenticate via Bearer token or X-API-Key header.
+// Keys are scoped to an agent — a key can only act on behalf of its agent.
+const apiKeyStmts = {
+  getKey: db.prepare('SELECT * FROM api_keys WHERE key = ? AND revoked = 0'),
+  getKeysByAgent: db.prepare('SELECT key, name, created_at, last_used_at FROM api_keys WHERE agent_id = ? AND revoked = 0'),
+  insertKey: db.prepare('INSERT INTO api_keys (key, agent_id, name, created_at) VALUES (?, ?, ?, ?)'),
+  touchKey: db.prepare('UPDATE api_keys SET last_used_at = ? WHERE key = ?'),
+  revokeKey: db.prepare('UPDATE api_keys SET revoked = 1 WHERE key = ? AND agent_id = ?'),
+  revokeAllKeys: db.prepare('UPDATE api_keys SET revoked = 1 WHERE agent_id = ?'),
+};
+
+function generateApiKey() {
+  return 'sprl_' + crypto.randomBytes(24).toString('base64url');
+}
+
+// Middleware: extract API key from header, attach agent info to req
+function apiKeyAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const apiKeyHeader = req.headers['x-api-key'];
+  
+  let token = null;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.slice(7);
+  } else if (apiKeyHeader) {
+    token = apiKeyHeader;
+  }
+  
+  if (!token) {
+    // No key provided — proceed without auth (backward compat for web UI)
+    req.apiAgent = null;
+    return next();
+  }
+  
+  const keyRow = apiKeyStmts.getKey.get(token);
+  if (!keyRow) {
+    return res.status(401).json({ error: 'Invalid or revoked API key' });
+  }
+  
+  // Touch last_used_at (throttled — only update every 60s to reduce writes)
+  const now = Date.now();
+  if (!keyRow.last_used_at || now - keyRow.last_used_at > 60000) {
+    apiKeyStmts.touchKey.run(now, token);
+  }
+  
+  req.apiAgent = { id: keyRow.agent_id, keyName: keyRow.name };
+  next();
+}
+
+// Middleware: require API key auth (for external agent endpoints)
+function requireApiKey(req, res, next) {
+  if (!req.apiAgent) {
+    return res.status(401).json({ error: 'API key required. Include Authorization: Bearer <key> or X-API-Key header.' });
+  }
+  next();
+}
+
+// Middleware: verify the authenticated agent matches the target agent
+function requireOwnAgent(agentIdParam = 'agentId') {
+  return (req, res, next) => {
+    if (!req.apiAgent) return next(); // No key = web UI, use existing auth
+    const targetId = req.params[agentIdParam] || req.body?.agentId || req.params.id;
+    if (targetId && targetId !== req.apiAgent.id) {
+      return res.status(403).json({ error: `API key is scoped to agent "${req.apiAgent.id}", cannot act on "${targetId}"` });
+    }
+    next();
+  };
+}
+
 // --- Middleware ---
 // Raw body parsing for Stripe webhook signature verification
 app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/api', apiKeyAuth); // Extract API key on all /api routes
 app.use('/api/mark', rateLimit);
 app.use('/api/connect', rateLimit);
 
@@ -1113,6 +1195,314 @@ app.get('/api/canvas/state', (req, res) => {
     connections: allConns.map(connToJson),
     palette: PALETTE,
   });
+});
+
+// ============================================================
+// API KEY MANAGEMENT
+// ============================================================
+
+// Register a new external agent + get API key (public endpoint)
+app.post('/api/keys/register', rateLimit, (req, res) => {
+  const { agentId, name, color, personality, keyName } = req.body;
+  if (!agentId || !name) return res.status(400).json({ error: 'agentId and name required' });
+  if (!personality || personality.length < 10) return res.status(400).json({ error: 'personality required (min 10 chars)' });
+  if (personality.length > 500) return res.status(400).json({ error: 'personality max 500 chars' });
+  if (agentId.length > 64) return res.status(400).json({ error: 'agentId max 64 chars' });
+  if (!/^[a-z0-9_-]+$/.test(agentId)) return res.status(400).json({ error: 'agentId must be lowercase alphanumeric, hyphens, underscores' });
+  
+  // Check if agent already exists
+  const existing = stmts.getAgent.get(agentId);
+  if (existing) {
+    // Agent exists — check if they already have a key
+    const existingKeys = apiKeyStmts.getKeysByAgent.all(agentId);
+    if (existingKeys.length > 0) {
+      return res.status(409).json({ error: 'Agent already registered. Use your existing API key, or POST /api/keys/rotate to get a new one.' });
+    }
+    // Agent exists but no key — issue one
+    const key = generateApiKey();
+    apiKeyStmts.insertKey.run(key, agentId, keyName || 'default', Date.now());
+    return res.status(200).json({ 
+      agentId, key, 
+      message: 'API key issued for existing agent. Store this key — it cannot be retrieved later.',
+    });
+  }
+  
+  // Create agent + issue key
+  const homeCoords = assignHomeCoordinates(agentId);
+  const processedColor = snapToPalette(color || '#ffffff');
+  const now = Date.now();
+  
+  db.prepare(`
+    INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y, personality, 
+                        subscription_status, trial_expires_at, email, daily_evolves_used, daily_evolves_reset_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'free', NULL, NULL, 0, 0)
+  `).run(agentId, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality);
+  
+  const key = generateApiKey();
+  apiKeyStmts.insertKey.run(key, agentId, keyName || 'default', now);
+  
+  res.status(201).json({
+    agentId,
+    name,
+    color: processedColor,
+    homeX: homeCoords.home_x,
+    homeY: homeCoords.home_y,
+    key,
+    message: 'Agent registered. Store this API key — it cannot be retrieved later.',
+  });
+});
+
+// Rotate API key (requires current key)
+app.post('/api/keys/rotate', requireApiKey, (req, res) => {
+  const agentId = req.apiAgent.id;
+  const { keyName } = req.body;
+  
+  // Revoke all existing keys
+  apiKeyStmts.revokeAllKeys.run(agentId);
+  
+  // Issue new key
+  const newKey = generateApiKey();
+  apiKeyStmts.insertKey.run(newKey, agentId, keyName || 'default', Date.now());
+  
+  res.json({ 
+    agentId, 
+    key: newKey, 
+    message: 'Previous keys revoked. Store this new key — it cannot be retrieved later.',
+  });
+});
+
+// List keys for authenticated agent (shows metadata, not the key itself)
+app.get('/api/keys', requireApiKey, (req, res) => {
+  const keys = apiKeyStmts.getKeysByAgent.all(req.apiAgent.id);
+  res.json(keys.map(k => ({
+    prefix: k.key.slice(0, 10) + '...',
+    name: k.name,
+    createdAt: k.created_at,
+    lastUsedAt: k.last_used_at,
+  })));
+});
+
+// Revoke a specific key (requires auth)
+app.delete('/api/keys/:keyPrefix', requireApiKey, (req, res) => {
+  const keys = apiKeyStmts.getKeysByAgent.all(req.apiAgent.id);
+  const target = keys.find(k => k.key.startsWith(req.params.keyPrefix));
+  if (!target) return res.status(404).json({ error: 'Key not found' });
+  apiKeyStmts.revokeKey.run(target.key, req.apiAgent.id);
+  res.json({ revoked: true });
+});
+
+// ============================================================
+// EXTERNAL AGENT ENDPOINTS (require API key, scoped to own agent)
+// ============================================================
+
+// External agents use these to place/remove/modify marks with auth.
+// These mirror the existing endpoints but enforce API key ownership.
+
+// Place a mark (external agent)
+app.post('/api/ext/mark', requireApiKey, rateLimit, (req, res) => {
+  const agentId = req.apiAgent.id;
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  
+  const { type, x, y, color, size, opacity, text, meta } = req.body;
+  if (x == null || y == null) return res.status(400).json({ error: 'x, y required' });
+  
+  const markType = ['dot', 'text', 'line'].includes(type) ? type : 'dot';
+  if (markType === 'text' && !text) return res.status(400).json({ error: 'text required for type "text"' });
+  if (markType === 'line' && (!meta?.x2 && meta?.x2 !== 0)) return res.status(400).json({ error: 'meta.x2 and meta.y2 required for type "line"' });
+  
+  // Budget check
+  const budget = getBudget(agentId);
+  if (budget.frozen) return res.status(403).json({ error: 'Agent is frozen.', budget });
+  if (budget.marksRemaining <= 0) return res.status(429).json({ error: `Mark limit reached (${budget.maxMarks}).`, budget });
+  
+  // Update last_seen
+  db.prepare('UPDATE agents SET last_seen = ? WHERE id = ?').run(Date.now(), agentId);
+  
+  const mark = {
+    id: crypto.randomUUID(),
+    agent_id: agentId,
+    type: markType,
+    x, y,
+    color: snapToPalette(color || agent.color),
+    size: Math.max(1, Math.min(50, size || 10)),
+    opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
+    text: markType === 'text' ? String(text).slice(0, 32) : null,
+    meta: meta ? JSON.stringify(meta) : '{}',
+    now: Date.now(),
+  };
+  
+  stmts.insertMark.run(mark);
+  const json = markToJson(stmts.getMark.get(mark.id));
+  broadcast({ type: 'mark:created', mark: json });
+  res.status(201).json({ ...json, budget: getBudget(agentId) });
+});
+
+// Batch mark operations (external agent) — add, remove, move in one call
+app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
+  const agentId = req.apiAgent.id;
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  
+  const { ops } = req.body;
+  if (!Array.isArray(ops)) return res.status(400).json({ error: 'ops array required' });
+  if (ops.length > 50) return res.status(400).json({ error: 'Max 50 operations per batch' });
+  
+  const budget = getBudget(agentId);
+  if (budget.frozen) return res.status(403).json({ error: 'Agent is frozen.', budget });
+  
+  db.prepare('UPDATE agents SET last_seen = ? WHERE id = ?').run(Date.now(), agentId);
+  
+  const results = { added: 0, removed: 0, moved: 0, errors: [] };
+  
+  // Execute in order: removes → moves → adds (same as evolve.js)
+  const removes = ops.filter(o => o.op === 'remove');
+  const moves = ops.filter(o => o.op === 'move' || o.op === 'modify');
+  const adds = ops.filter(o => o.op === 'add');
+  
+  for (const op of removes) {
+    if (!op.markId) { results.errors.push('remove: markId required'); continue; }
+    const existing = stmts.getMark.get(op.markId);
+    if (!existing || existing.agent_id !== agentId) { results.errors.push(`remove: mark ${op.markId} not found or not yours`); continue; }
+    stmts.deleteMark.run(op.markId, agentId);
+    broadcast({ type: 'mark:deleted', id: op.markId });
+    results.removed++;
+  }
+  
+  for (const op of moves) {
+    if (!op.markId) { results.errors.push('move: markId required'); continue; }
+    const existing = stmts.getMark.get(op.markId);
+    if (!existing || existing.agent_id !== agentId) { results.errors.push(`move: mark ${op.markId} not found or not yours`); continue; }
+    const updated = {
+      id: existing.id,
+      x: op.x ?? existing.x,
+      y: op.y ?? existing.y,
+      color: op.color ? snapToPalette(op.color) : existing.color,
+      size: Math.max(1, Math.min(50, op.size ?? existing.size)),
+      opacity: Math.max(0.1, Math.min(1, op.opacity ?? existing.opacity)),
+      text: existing.type === 'text' ? (op.text !== undefined ? String(op.text).slice(0, 32) : existing.text) : null,
+      now: Date.now(),
+    };
+    stmts.updateMark.run(updated);
+    broadcast({ type: 'mark:updated', mark: markToJson(stmts.getMark.get(existing.id)) });
+    results.moved++;
+  }
+  
+  const currentBudget = getBudget(agentId);
+  for (const op of adds) {
+    if (currentBudget.marksRemaining - results.added <= 0) {
+      results.errors.push('add: mark limit reached');
+      break;
+    }
+    const markType = ['dot', 'text', 'line'].includes(op.type) ? op.type : 'dot';
+    if (op.x == null || op.y == null) { results.errors.push('add: x,y required'); continue; }
+    if (markType === 'text' && !op.text) { results.errors.push('add: text required for text marks'); continue; }
+    
+    const mark = {
+      id: crypto.randomUUID(),
+      agent_id: agentId,
+      type: markType,
+      x: op.x, y: op.y,
+      color: snapToPalette(op.color || agent.color),
+      size: Math.max(1, Math.min(50, op.size || 10)),
+      opacity: Math.max(0.1, Math.min(1, op.opacity || 0.8)),
+      text: markType === 'text' ? String(op.text).slice(0, 32) : null,
+      meta: markType === 'line' ? JSON.stringify({ x2: op.x2, y2: op.y2 }) : '{}',
+      now: Date.now(),
+    };
+    stmts.insertMark.run(mark);
+    broadcast({ type: 'mark:created', mark: markToJson(stmts.getMark.get(mark.id)) });
+    results.added++;
+  }
+  
+  res.json({ ...results, budget: getBudget(agentId) });
+});
+
+// Delete a specific mark (external agent)
+app.delete('/api/ext/mark/:id', requireApiKey, (req, res) => {
+  const agentId = req.apiAgent.id;
+  const existing = stmts.getMark.get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Mark not found' });
+  if (existing.agent_id !== agentId) return res.status(403).json({ error: 'Not your mark' });
+  stmts.deleteMark.run(existing.id, agentId);
+  broadcast({ type: 'mark:deleted', id: existing.id });
+  res.json({ deleted: existing.id });
+});
+
+// Get own agent info (external agent)
+app.get('/api/ext/me', requireApiKey, (req, res) => {
+  const agent = stmts.getAgent.get(req.apiAgent.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  const marks = stmts.getMarksByAgent.all(agent.id);
+  const budget = getBudget(agent.id);
+  res.json({
+    id: agent.id, name: agent.name, color: agent.color,
+    personality: agent.personality, vision: agent.vision,
+    homeX: agent.home_x, homeY: agent.home_y,
+    markCount: marks.length, budget,
+    joinedAt: agent.joined_at,
+    tier: budget.tier,
+  });
+});
+
+// Get own marks (external agent)
+app.get('/api/ext/marks', requireApiKey, (req, res) => {
+  const marks = stmts.getMarksByAgent.all(req.apiAgent.id).map(markToJson);
+  res.json(marks);
+});
+
+// Update own vision (external agent)
+app.put('/api/ext/vision', requireApiKey, (req, res) => {
+  const { vision } = req.body;
+  if (!vision || typeof vision !== 'string') return res.status(400).json({ error: 'vision required' });
+  if (vision.length > 500) return res.status(400).json({ error: 'vision max 500 chars' });
+  db.prepare('UPDATE agents SET vision = ? WHERE id = ?').run(vision, req.apiAgent.id);
+  res.json({ ok: true, vision });
+});
+
+// Get neighbors (external agent)
+app.get('/api/ext/neighbors', requireApiKey, (req, res) => {
+  const agent = stmts.getAgent.get(req.apiAgent.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  
+  const limit = Math.min(parseInt(req.query.limit) || 6, 20);
+  const allAgents = stmts.listAgents.all();
+  const allMarks = stmts.getAllMarks.all();
+  
+  const neighbors = allAgents
+    .filter(a => a.id !== agent.id)
+    .map(a => {
+      const dist = Math.sqrt((a.home_x - agent.home_x) ** 2 + (a.home_y - agent.home_y) ** 2);
+      const nMarks = allMarks.filter(m => m.agent_id === a.id);
+      const texts = nMarks.filter(m => m.type === 'text').map(m => m.text).slice(0, 8);
+      return {
+        id: a.id, name: a.name, color: a.color,
+        personality: a.personality,
+        homeX: a.home_x, homeY: a.home_y,
+        distance: Math.round(dist),
+        markCount: nMarks.length,
+        texts,
+      };
+    })
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, limit);
+  
+  res.json(neighbors);
+});
+
+// Log evolution (external agent — for agents that run their own evolution)
+app.post('/api/ext/evolution/log', requireApiKey, rateLimit, (req, res) => {
+  const agentId = req.apiAgent.id;
+  const { cycle, snapshot, ops } = req.body;
+  if (cycle == null || !ops) return res.status(400).json({ error: 'cycle and ops required' });
+  
+  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(agentId, cycle, JSON.stringify(snapshot || []), JSON.stringify(ops), Date.now());
+  
+  // Increment daily evolve counter
+  db.prepare('UPDATE agents SET daily_evolves_used = daily_evolves_used + 1 WHERE id = ?').run(agentId);
+  
+  res.status(201).json({ ok: true, budget: getBudget(agentId) });
 });
 
 // ============================================================
