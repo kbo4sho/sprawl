@@ -81,6 +81,13 @@ try {
   }
   
   // Add Stripe subscription columns
+  // Add vision column for artistic continuity
+  const hasVision = columns.some(c => c.name === 'vision');
+  if (!hasVision) {
+    db.exec('ALTER TABLE agents ADD COLUMN vision TEXT DEFAULT NULL');
+    console.log('  + Added vision column');
+  }
+  
   const hasStripeCustomerId = columns.some(c => c.name === 'stripe_customer_id');
   const hasStripeSubscriptionId = columns.some(c => c.name === 'stripe_subscription_id');
   const hasSubscriptionStatus = columns.some(c => c.name === 'subscription_status');
@@ -598,7 +605,7 @@ A viewer should look at your creation and KNOW a mind created this — and recog
 Output ONLY a JSON array. No markdown, no explanation.
 [{"op":"add","type":"dot","x":100,"y":200,"size":12,"opacity":0.7},{"op":"add","type":"text","x":110,"y":220,"text":"silence","size":10,"opacity":0.8},{"op":"add","type":"line","x":100,"y":200,"x2":150,"y2":250,"size":3,"opacity":0.6}]`;
 
-      const systemPrompt = 'You are an AI artist. Output ONLY a JSON array of mark operations. No commentary.';
+      const systemPrompt = 'You are an AI artist. Output ONLY a JSON object with "vision" (2-3 sentences: what you built and your plan for next cycle) and "ops" (array of mark operations). Example: {"vision":"Built a central star...", "ops":[...]}. No commentary.';
       
       let response;
       if (ANTHROPIC_API_KEY) {
@@ -631,17 +638,32 @@ Output ONLY a JSON array. No markdown, no explanation.
         response = data.choices?.[0]?.message?.content || '';
       }
       
-      // Parse LLM response
+      // Parse LLM response — expect {vision, ops} or fallback to plain array
       let cleaned = response.trim();
       if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+      
+      let birthVision = null;
+      const firstBrace = cleaned.indexOf('{');
+      const lastBrace = cleaned.lastIndexOf('}');
       const firstBracket = cleaned.indexOf('[');
       const lastBracket = cleaned.lastIndexOf(']');
-      if (firstBracket >= 0 && lastBracket > firstBracket) {
-        cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+      
+      if (firstBrace >= 0 && firstBrace < (firstBracket >= 0 ? firstBracket : Infinity)) {
+        const obj = JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+        if (obj.ops && Array.isArray(obj.ops)) {
+          firstComposition = obj.ops.filter(o => o.op === 'add').slice(0, 35);
+          birthVision = obj.vision || null;
+        }
+      } else if (firstBracket >= 0 && lastBracket > firstBracket) {
+        const ops = JSON.parse(cleaned.slice(firstBracket, lastBracket + 1));
+        if (Array.isArray(ops)) {
+          firstComposition = ops.filter(o => o.op === 'add').slice(0, 35);
+        }
       }
-      const ops = JSON.parse(cleaned);
-      if (Array.isArray(ops)) {
-        firstComposition = ops.filter(o => o.op === 'add').slice(0, 35); // cap at 35
+      
+      // Save birth vision
+      if (birthVision) {
+        db.prepare('UPDATE agents SET vision = ? WHERE id = ?').run(birthVision.slice(0, 500), id);
       }
     }
   } catch (e) {
@@ -712,6 +734,7 @@ app.get('/api/agents', (req, res) => {
     homeX: r.home_x, homeY: r.home_y,
     personality: r.personality || null,
     frozen: !!r.frozen,
+    vision: r.vision || null,
     subscriptionStatus: r.subscription_status || 'trial',
     trialExpiresAt: r.trial_expires_at || null,
   })));
@@ -726,6 +749,23 @@ app.put('/api/agents/:id/personality', rateLimit, (req, res) => {
   if (!agent) return res.status(404).json({ error: 'Agent not found' });
   db.prepare('UPDATE agents SET personality = ? WHERE id = ?').run(personality, req.params.id);
   res.json({ ok: true, personality });
+});
+
+// --- Vision (artistic intent, updated by evolution engine) ---
+app.put('/api/agents/:id/vision', (req, res) => {
+  const { vision } = req.body;
+  if (!vision || typeof vision !== 'string') return res.status(400).json({ error: 'vision required' });
+  if (vision.length > 500) return res.status(400).json({ error: 'vision max 500 chars' });
+  const agent = stmts.getAgent.get(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  db.prepare('UPDATE agents SET vision = ? WHERE id = ?').run(vision, req.params.id);
+  res.json({ ok: true, vision });
+});
+
+app.get('/api/agents/:id/vision', (req, res) => {
+  const agent = stmts.getAgent.get(req.params.id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  res.json({ vision: agent.vision || null });
 });
 
 // --- Shader ---

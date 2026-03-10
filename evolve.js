@@ -314,7 +314,23 @@ Operations:
 - remove: {"op":"remove","markId":"abc-123"}
 - move: {"op":"move","markId":"abc-123","x":120,"y":230}
 
-CRITICAL: Output ONLY the JSON array. No markdown. No explanation. No \`\`\`json blocks.`;
+═══ OUTPUT FORMAT ═══
+
+You MUST output a JSON object with two fields:
+1. "vision" — 2-3 sentences describing what you're building and what you plan to do NEXT cycle. This is your artistic memory. Be specific: name shapes, positions, themes, next steps.
+2. "ops" — array of mark operations
+
+Example:
+{
+  "vision": "Building a spiral galaxy. Two arms extend NE and SW with text fragments along them. Next: add a ring of tiny dots at 120px radius and write 'orbit' at the tip of the NE arm.",
+  "ops": [
+    {"op":"add","type":"dot","x":100,"y":200,"size":12,"opacity":0.7},
+    {"op":"add","type":"text","x":110,"y":220,"text":"orbit","size":10,"opacity":0.8},
+    {"op":"remove","markId":"abc-123"}
+  ]
+}
+
+CRITICAL: Output ONLY the JSON object. No markdown. No explanation. No \`\`\`json blocks.`;
 
 
 function buildPrompt(agent, myMarks, allMarks, allAgents, timelapse) {
@@ -355,12 +371,15 @@ function buildPrompt(agent, myMarks, allMarks, allAgents, timelapse) {
   const historyDesc = describeEvolutionHistory(timelapse);
   
   // Build the prompt
+  const currentVision = agent._vision || null;
+  
   let prompt = `═══ YOU ═══
 Name: "${agent.name}"
 Color: ${agent.color}
 Home: (${Math.round(agent.homeX)}, ${Math.round(agent.homeY)})
 Age: ${ageLabel} (cycle ${cycle})
 Personality: ${agent.personality || 'Express yourself freely. Find your voice.'}
+${currentVision ? `\n═══ YOUR ARTISTIC VISION (from last cycle) ═══\n${currentVision}\n\nThis is what you said you were building and what you planned to do next. FOLLOW THROUGH on this plan. Then update your vision for the next cycle.` : ''}
 
 ═══ YOUR CANVAS ═══
 ${analyzeComposition(myMarks, agent.homeX, agent.homeY)}
@@ -423,7 +442,9 @@ REQUIRED:
    - Place some marks 100-140px from home — claim your territory
 
 The viewer should look at your creation, recognize YOUR style, and understand WHO you are.
-Stay within ~150px of your home (${Math.round(agent.homeX)}, ${Math.round(agent.homeY)}).`;
+Stay within ~150px of your home (${Math.round(agent.homeX)}, ${Math.round(agent.homeY)}).
+
+In your "vision" field, describe what you just built and what you plan to do in the NEXT cycle. Be specific about shapes, positions, and next steps.`;
 
   } else if (myMarks.length < 30) {
     prompt += `═══ YOUR MISSION: GROWING ═══
@@ -443,7 +464,9 @@ REQUIRED (10-18 operations total):
 3. MOVE 1-2 marks OUTWARD if your composition is too centered
 
 DO NOT pull marks toward center. DO NOT "tighten." EXPAND.
-Stay within ~150px of your home.`;
+Stay within ~150px of your home.
+
+In your "vision" field, describe what you're building, what you did this cycle, and your SPECIFIC plan for the next cycle.`;
 
   } else {
     prompt += `═══ YOUR MISSION: EVOLVING ═══
@@ -462,10 +485,12 @@ REQUIRED (8-15 operations total):
 3. MOVE 1-3 marks to create new relationships (NOT toward center)
 
 FORBIDDEN: moving marks inward, "tightening," collapsing space, making the composition smaller. Your art should BREATHE and GROW.
-Stay within ~150px of your home.`;
+Stay within ~150px of your home.
+
+In your "vision" field, describe what you're building, what you changed this cycle, and your SPECIFIC plan for the next cycle. Be concrete — name coordinates, shapes, words you'll use.`;
   }
 
-  prompt += `\n\nOutput ONLY a JSON array of operations. No markdown, no explanation.`;
+  prompt += `\n\nOutput ONLY a JSON object: {"vision": "your plan...", "ops": [...]}. No markdown, no explanation.`;
   
   return prompt;
 }
@@ -487,33 +512,62 @@ async function evolveAgent(agent, allAgents) {
     text: m.text, meta: m.meta,
   }));
   
+  // Fetch current artistic vision
+  const visionData = await api('GET', `/api/agents/${agent.id}/vision`).catch(() => ({}));
+  agent._vision = visionData.vision || null;
+  
   // Build the prompt
   const prompt = buildPrompt(agent, myMarks, allMarks, allAgents, timelapse);
   const response = await callLLM(prompt, SYSTEM_PROMPT);
   
-  // Parse response
+  // Parse response — expect {vision, ops} object or fallback to plain array
   let operations;
+  let newVision = null;
   try {
     let cleaned = response.trim();
     if (cleaned.startsWith('```')) {
       cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
     }
-    // Handle potential leading/trailing text around the JSON
+    
+    // Try parsing as {vision, ops} object first
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
     const firstBracket = cleaned.indexOf('[');
     const lastBracket = cleaned.lastIndexOf(']');
-    if (firstBracket >= 0 && lastBracket > firstBracket) {
-      cleaned = cleaned.slice(firstBracket, lastBracket + 1);
+    
+    if (firstBrace >= 0 && firstBrace < (firstBracket >= 0 ? firstBracket : Infinity)) {
+      // Looks like an object
+      const obj = JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+      if (obj.ops && Array.isArray(obj.ops)) {
+        operations = obj.ops;
+        newVision = obj.vision || null;
+      } else if (Array.isArray(obj)) {
+        operations = obj;
+      } else {
+        // Maybe it returned ops at top level with vision
+        operations = [];
+        console.log(`  ⚠ ${agent.name}: Unexpected object format`);
+      }
+    } else if (firstBracket >= 0 && lastBracket > firstBracket) {
+      // Fallback: plain array
+      operations = JSON.parse(cleaned.slice(firstBracket, lastBracket + 1));
+    } else {
+      throw new Error('No JSON found');
     }
-    operations = JSON.parse(cleaned);
   } catch (e) {
     console.log(`  ⚠ ${agent.name}: Failed to parse LLM response`);
     console.log(`    Response: ${response.slice(0, 300)}`);
-    return { added: 0, removed: 0, moved: 0 };
+    return { added: 0, removed: 0, moved: 0, texts: 0 };
   }
   
   if (!Array.isArray(operations)) {
-    console.log(`  ⚠ ${agent.name}: Response was not an array`);
-    return { added: 0, removed: 0, moved: 0 };
+    console.log(`  ⚠ ${agent.name}: Operations was not an array`);
+    return { added: 0, removed: 0, moved: 0, texts: 0 };
+  }
+  
+  // Save the new vision
+  if (newVision && typeof newVision === 'string') {
+    await api('PUT', `/api/agents/${agent.id}/vision`, { vision: newVision.slice(0, 500) });
   }
   
   // Execute operations — removes first, then moves, then adds
