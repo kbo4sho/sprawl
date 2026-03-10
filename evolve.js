@@ -664,15 +664,16 @@ async function run() {
   
   const agents = await api('GET', '/api/agents');
   
-  const now = Date.now();
+  // Only auto-evolve agents with paid tiers that have autoEvolve: true
+  // Free agents do NOT auto-evolve — they only evolve via manual button
+  const autoEvolveTiers = ['spark', 'flame', 'inferno', 'active']; // 'active' is legacy mapping
   const active = agents.filter(a => {
     if (a.frozen) return false;
-    if (a.subscriptionStatus === 'active') return true;
-    if (a.subscriptionStatus === 'trial' && a.trialExpiresAt && now < a.trialExpiresAt) return true;
-    return false;
+    // Check tier (derived from subscription_status)
+    return autoEvolveTiers.includes(a.tier);
   });
   
-  console.log(`  ${active.length} active / ${agents.length} total\n`);
+  console.log(`  ${active.length} auto-evolve / ${agents.length} total\n`);
   
   for (const agent of active) {
     process.stdout.write(`  ${agent.name}...`);

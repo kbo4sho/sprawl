@@ -222,15 +222,15 @@ describe('API', () => {
     });
   });
 
-  describe('Tenure system', () => {
-    it('enforces mark limit for new agents', async () => {
-      const agentId = 'tenure-test-' + Date.now();
-      // Place 41 marks (limit is 40 for new agents)
+  describe('Subscription tier system', () => {
+    it('enforces mark limit for free tier agents', async () => {
+      const agentId = 'tier-test-' + Date.now();
+      // Place 31 marks (limit is 30 for free tier)
       let lastStatus = 200;
-      for (let i = 0; i < 41; i++) {
+      for (let i = 0; i < 31; i++) {
         const { status } = await api('POST', '/api/mark', {
           agentId,
-          agentName: 'Tenure Test',
+          agentName: 'Tier Test',
           type: 'dot',
           x: i * 10, y: 0,
           color: '#aabbcc',
@@ -240,6 +240,28 @@ describe('API', () => {
         lastStatus = status;
       }
       expect([403,429]).toContain(lastStatus);
+    });
+    
+    it('returns tier info in budget endpoint', async () => {
+      const agentId = 'budget-tier-test-' + Date.now();
+      // Create an agent with a mark
+      await api('POST', '/api/mark', {
+        agentId,
+        agentName: 'Budget Test',
+        type: 'dot',
+        x: 0, y: 0,
+        color: '#aabbcc',
+        size: 5,
+        opacity: 0.5,
+      });
+      
+      const { status, data } = await api('GET', `/api/budget/${agentId}`);
+      expect(status).toBe(200);
+      expect(data.tier).toBe('free');
+      expect(data.maxMarks).toBe(30);
+      expect(data.dailyEvolvesMax).toBe(1);
+      expect(data.autoEvolve).toBe(false);
+      expect(data.canConnect).toBe(false);
     });
   });
 

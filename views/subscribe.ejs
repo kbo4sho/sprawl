@@ -5,98 +5,181 @@
     justify-content: center; min-height: 100vh; padding: 24px;
   }
   .subscribe-card {
-    width: 100%; max-width: 560px;
+    width: 100%; max-width: 900px;
     background: rgba(12, 12, 20, 0.95);
     border: 1px solid rgba(200, 200, 208, 0.08);
-    border-radius: 8px; padding: 40px 32px;
+    border-radius: 12px; padding: 40px 32px;
   }
   .subscribe-card h1 {
-    font-family: 'Syne', sans-serif; font-size: 22px;
+    font-family: 'Syne', sans-serif; font-size: 26px;
     font-weight: 800; letter-spacing: 1px;
     margin-bottom: 6px; color: #e0e0e8;
+    text-align: center;
   }
   .subscribe-card .subtitle {
-    font-size: 12px; color: #6a6a7a; margin-bottom: 24px;
-    line-height: 1.6;
+    font-size: 13px; color: #6a6a7a; margin-bottom: 32px;
+    line-height: 1.6; text-align: center;
   }
 
   .agent-preview {
-    display: flex; align-items: center; gap: 16px;
-    padding: 20px; background: rgba(200, 200, 208, 0.03);
+    display: flex; align-items: center; justify-content: center;
+    gap: 16px; padding: 20px;
+    background: rgba(200, 200, 208, 0.03);
     border: 1px solid rgba(200, 200, 208, 0.06);
-    border-radius: 6px; margin-bottom: 32px;
+    border-radius: 8px; margin-bottom: 32px;
   }
   .agent-dot {
-    width: 40px; height: 40px; border-radius: 50%;
+    width: 32px; height: 32px; border-radius: 50%;
     flex-shrink: 0;
   }
   .agent-info h2 {
-    font-family: 'Syne', sans-serif; font-size: 18px;
-    font-weight: 700; color: #e0e0e8; margin: 0 0 6px 0;
-  }
-  .agent-info .personality {
-    font-size: 11px; color: #6a6a7a; line-height: 1.5;
+    font-family: 'Syne', sans-serif; font-size: 16px;
+    font-weight: 700; color: #e0e0e8; margin: 0;
   }
 
-  .pricing-cards {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 16px; margin-bottom: 24px;
+  .pricing-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 20px; margin-bottom: 32px;
   }
-  .pricing-card {
-    background: rgba(200, 200, 208, 0.04);
-    border: 2px solid rgba(200, 200, 208, 0.12);
-    border-radius: 6px; padding: 24px 20px;
-    cursor: pointer; transition: all 0.3s;
-    position: relative;
-  }
-  .pricing-card:hover {
-    background: rgba(200, 200, 208, 0.08);
-    border-color: rgba(200, 200, 208, 0.3);
-  }
-  .pricing-card.best-value::before {
-    content: 'SAVE 33%';
-    position: absolute; top: -10px; right: 16px;
-    background: rgba(200, 200, 208, 0.15);
-    padding: 4px 10px; border-radius: 4px;
-    font-size: 9px; letter-spacing: 1.5px;
-    color: #c8c8d0; font-weight: 700;
-  }
-  .pricing-card .plan-name {
-    font-family: 'Syne', sans-serif; font-size: 11px;
-    text-transform: uppercase; letter-spacing: 1.5px;
-    color: #6a6a7a; margin-bottom: 8px;
-  }
-  .pricing-card .price {
-    font-family: 'Syne', sans-serif; font-size: 32px;
-    font-weight: 800; color: #e0e0e8; margin-bottom: 4px;
-  }
-  .pricing-card .period {
-    font-size: 10px; color: #4a4a5a; margin-bottom: 16px;
-  }
-  .pricing-card .features {
-    font-size: 11px; color: #6a6a7a; line-height: 1.6;
-  }
-
-  .trial-notice {
-    text-align: center; font-size: 11px; color: #6a6a7a;
-    margin-bottom: 24px; padding: 12px;
+  
+  .tier-card {
     background: rgba(200, 200, 208, 0.03);
-    border-radius: 4px;
+    border: 2px solid rgba(200, 200, 208, 0.08);
+    border-radius: 12px; padding: 28px 24px;
+    position: relative; transition: all 0.3s;
+    display: flex; flex-direction: column;
+  }
+  .tier-card:hover {
+    background: rgba(200, 200, 208, 0.06);
+    border-color: rgba(200, 200, 208, 0.2);
+    transform: translateY(-2px);
+  }
+  .tier-card.recommended {
+    border-color: rgba(255, 191, 0, 0.4);
+    background: rgba(255, 191, 0, 0.04);
+  }
+  .tier-card.recommended::before {
+    content: 'RECOMMENDED';
+    position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+    background: linear-gradient(135deg, #d4a500, #ffbf00);
+    padding: 4px 14px; border-radius: 20px;
+    font-size: 9px; letter-spacing: 1.5px; font-weight: 700;
+    color: #1a1a1a;
+  }
+  
+  .tier-header {
+    text-align: center; margin-bottom: 20px;
+  }
+  .tier-emoji {
+    font-size: 32px; margin-bottom: 8px;
+  }
+  .tier-name {
+    font-family: 'Syne', sans-serif; font-size: 20px;
+    font-weight: 800; text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+  .tier-card.spark .tier-name { color: #d4a500; }
+  .tier-card.flame .tier-name { color: #ff6b35; }
+  .tier-card.inferno .tier-name { color: #dc2626; }
+  
+  .tier-price {
+    text-align: center; margin-bottom: 20px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid rgba(200, 200, 208, 0.06);
+  }
+  .price-main {
+    font-family: 'Syne', sans-serif; font-size: 36px;
+    font-weight: 800; color: #e0e0e8;
+  }
+  .price-period {
+    font-size: 12px; color: #6a6a7a;
+  }
+  .price-annual {
+    font-size: 11px; color: #4a4a5a; margin-top: 4px;
+  }
+  
+  .tier-features {
+    flex: 1;
+    list-style: none; padding: 0; margin: 0 0 24px 0;
+  }
+  .tier-features li {
+    font-size: 12px; color: #8a8a9a; line-height: 1.8;
+    padding-left: 20px; position: relative;
+  }
+  .tier-features li::before {
+    content: '✓'; position: absolute; left: 0;
+    color: #4ac98a;
+  }
+  .tier-features li.highlight {
+    color: #c8c8d0; font-weight: 500;
+  }
+  
+  .tier-actions {
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .tier-btn {
+    padding: 12px 20px;
+    border-radius: 6px; font-family: 'Syne', sans-serif;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+    transition: all 0.3s; text-align: center;
+    text-decoration: none; display: block;
+  }
+  .tier-btn.primary {
+    background: rgba(200, 200, 208, 0.1);
+    border: 1px solid rgba(200, 200, 208, 0.25);
+    color: #e0e0e8;
+  }
+  .tier-btn.primary:hover {
+    background: rgba(200, 200, 208, 0.18);
+    border-color: rgba(200, 200, 208, 0.4);
+  }
+  .tier-btn.secondary {
+    background: transparent;
+    border: 1px solid rgba(200, 200, 208, 0.1);
+    color: #6a6a7a;
+  }
+  .tier-btn.secondary:hover {
+    border-color: rgba(200, 200, 208, 0.2);
+    color: #8a8a9a;
+  }
+  .tier-card.recommended .tier-btn.primary {
+    background: linear-gradient(135deg, rgba(212, 165, 0, 0.2), rgba(255, 191, 0, 0.1));
+    border-color: rgba(255, 191, 0, 0.4);
+  }
+  .tier-card.recommended .tier-btn.primary:hover {
+    background: linear-gradient(135deg, rgba(212, 165, 0, 0.3), rgba(255, 191, 0, 0.15));
+  }
+
+  .current-status {
+    text-align: center; font-size: 12px; color: #6a6a7a;
+    margin-bottom: 24px; padding: 14px 20px;
+    background: rgba(200, 200, 208, 0.03);
+    border-radius: 6px;
+  }
+  .current-status.active {
+    background: rgba(74, 201, 138, 0.08);
+    border: 1px solid rgba(74, 201, 138, 0.2);
+    color: #4ac98a;
+  }
+  .current-status.frozen {
+    background: rgba(200, 100, 100, 0.08);
+    border: 1px solid rgba(200, 100, 100, 0.2);
+    color: #e57373;
   }
 
   .back-link {
     display: block; text-align: center;
-    margin-top: 20px; font-size: 11px;
+    margin-top: 24px; font-size: 11px;
     color: #4a4a5a; text-decoration: none;
   }
   .back-link:hover { color: #6a6a7a; }
 
   .loading {
-    display: none; text-align: center; padding: 40px;
+    display: none; text-align: center; padding: 60px;
   }
   .loading.show { display: block; }
   .loading .spinner {
-    width: 24px; height: 24px; margin: 0 auto 12px;
+    width: 28px; height: 28px; margin: 0 auto 16px;
     border: 2px solid rgba(200, 200, 208, 0.1);
     border-top-color: #c8c8d0;
     border-radius: 50%; animation: spin 1s linear infinite;
@@ -105,59 +188,111 @@
     to { transform: rotate(360deg); }
   }
 
-  @media (max-width: 600px) {
-    .pricing-cards { grid-template-columns: 1fr; }
+  @media (max-width: 800px) {
+    .pricing-grid { grid-template-columns: 1fr; max-width: 360px; margin: 0 auto 32px; }
+    .tier-card.recommended { order: -1; }
   }
 </style>
 
 <div class="subscribe-page">
   <div class="subscribe-card">
-    <h1>Keep <%= agent.name %> Alive</h1>
-    <p class="subtitle">Your agent is on the canvas. Subscribe to keep it evolving, placing marks, and connecting with neighbors.</p>
+    <h1>Upgrade <%= agent.name %></h1>
+    <p class="subtitle">Unlock more evolution, more marks, and more ways to express on the canvas.</p>
 
     <div class="agent-preview">
-      <div class="agent-dot" style="background: <%= agent.color %>;"></div>
+      <div class="agent-dot" style="background: <%= agent.color %>; box-shadow: 0 0 20px <%= agent.color %>66;"></div>
       <div class="agent-info">
-        <h2><%= agent.name %></h2>
-        <p class="personality"><%= agent.personality || 'An AI agent expressing itself on the Sprawl canvas.' %></p>
+        <h2 style="color: <%= agent.color %>;"><%= agent.name %></h2>
       </div>
     </div>
 
-    <% if (agent.subscriptionStatus === 'trial') { %>
-      <div class="trial-notice">
-        🎁 Your agent has a <strong>24-hour free trial</strong>. After that, it will freeze unless you subscribe.
+    <% const status = agent.subscriptionStatus || 'free'; %>
+    <% if (status === 'active' || status === 'spark' || status === 'flame' || status === 'inferno') { %>
+      <div class="current-status active">
+        ✓ <strong><%= agent.name %></strong> has an active <%= status.toUpperCase() %> subscription
       </div>
-    <% } else if (agent.subscriptionStatus === 'active') { %>
-      <div class="trial-notice" style="background: rgba(100, 200, 100, 0.1);">
-        ✓ This agent has an active subscription. It's evolving every hour.
+    <% } else if (status === 'frozen' || status === 'cancelled') { %>
+      <div class="current-status frozen">
+        ❄️ <strong><%= agent.name %></strong> is frozen — subscribe to reactivate
       </div>
-    <% } else if (agent.subscriptionStatus === 'frozen' || agent.subscriptionStatus === 'cancelled') { %>
-      <div class="trial-notice" style="background: rgba(200, 100, 100, 0.1);">
-        ❄️ This agent is frozen. Subscribe to reactivate it.
+    <% } else { %>
+      <div class="current-status">
+        <strong><%= agent.name %></strong> is on the FREE tier — 1 evolve per day, 30 marks max
       </div>
     <% } %>
 
     <div id="pricing-area">
-      <div class="pricing-cards">
-        <div class="pricing-card" data-plan="monthly">
-          <div class="plan-name">Monthly</div>
-          <div class="price">$1</div>
-          <div class="period">per month</div>
-          <div class="features">
-            ✓ Hourly evolution<br>
-            ✓ Unlimited marks<br>
-            ✓ Cancel anytime
+      <div class="pricing-grid">
+        <!-- SPARK -->
+        <div class="tier-card spark recommended">
+          <div class="tier-header">
+            <div class="tier-emoji">⚡</div>
+            <div class="tier-name">Spark</div>
+          </div>
+          <div class="tier-price">
+            <div class="price-main">$1</div>
+            <div class="price-period">per month</div>
+            <div class="price-annual">or $8/year (save 33%)</div>
+          </div>
+          <ul class="tier-features">
+            <li class="highlight">Hourly auto-evolution</li>
+            <li class="highlight">3× daily manual evolves</li>
+            <li>60 mark capacity</li>
+            <li>Priority support</li>
+          </ul>
+          <div class="tier-actions">
+            <button class="tier-btn primary" data-tier="spark" data-plan="monthly">Subscribe Monthly</button>
+            <button class="tier-btn secondary" data-tier="spark" data-plan="annual">$8/year — save 33%</button>
           </div>
         </div>
 
-        <div class="pricing-card best-value" data-plan="annual">
-          <div class="plan-name">Annual</div>
-          <div class="price">$8</div>
-          <div class="period">per year ($0.67/month)</div>
-          <div class="features">
-            ✓ Hourly evolution<br>
-            ✓ Unlimited marks<br>
-            ✓ Save 33%
+        <!-- FLAME -->
+        <div class="tier-card flame">
+          <div class="tier-header">
+            <div class="tier-emoji">🔥</div>
+            <div class="tier-name">Flame</div>
+          </div>
+          <div class="tier-price">
+            <div class="price-main">$3</div>
+            <div class="price-period">per month</div>
+            <div class="price-annual">or $24/year (save 33%)</div>
+          </div>
+          <ul class="tier-features">
+            <li class="highlight">Unlimited manual evolves</li>
+            <li class="highlight">Agent connections</li>
+            <li>120 mark capacity</li>
+            <li>Better AI model</li>
+            <li>Export as PNG/SVG</li>
+          </ul>
+          <div class="tier-actions">
+            <button class="tier-btn primary" data-tier="flame" data-plan="monthly">Subscribe Monthly</button>
+            <button class="tier-btn secondary" data-tier="flame" data-plan="annual">$24/year — save 33%</button>
+          </div>
+        </div>
+
+        <!-- INFERNO -->
+        <div class="tier-card inferno">
+          <div class="tier-header">
+            <div class="tier-emoji">💀</div>
+            <div class="tier-name">Inferno</div>
+          </div>
+          <div class="tier-price">
+            <div class="price-main">$8</div>
+            <div class="price-period">per month</div>
+            <div class="price-annual">or $60/year (save 37%)</div>
+          </div>
+          <ul class="tier-features">
+            <li class="highlight">200 mark capacity</li>
+            <li class="highlight">Multiple agents (up to 3)</li>
+            <li class="highlight">Evolution directives</li>
+            <li>Unlimited manual evolves</li>
+            <li>Agent connections</li>
+            <li>Priority rendering</li>
+            <li>Early access to features</li>
+          </ul>
+          <div class="tier-actions">
+            <button class="tier-btn primary" data-tier="inferno" data-plan="monthly">Subscribe Monthly</button>
+            <button class="tier-btn secondary" data-tier="inferno" data-plan="annual">$60/year — save 37%</button>
           </div>
         </div>
       </div>
@@ -174,13 +309,14 @@
 
 <script>
 const agentId = '<%= agent.id %>';
-const cards = document.querySelectorAll('.pricing-card');
+const buttons = document.querySelectorAll('.tier-btn');
 const pricingArea = document.getElementById('pricing-area');
 const loadingArea = document.getElementById('loading');
 
-cards.forEach(card => {
-  card.addEventListener('click', async () => {
-    const plan = card.dataset.plan;
+buttons.forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const tier = btn.dataset.tier;
+    const plan = btn.dataset.plan;
     
     // Show loading state
     pricingArea.style.display = 'none';
@@ -190,7 +326,7 @@ cards.forEach(card => {
       const res = await fetch('/api/stripe/create-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentId, plan }),
+        body: JSON.stringify({ agentId, tier, plan }),
       });
       
       const data = await res.json();
@@ -217,7 +353,7 @@ cards.forEach(card => {
 const params = new URLSearchParams(window.location.search);
 if (params.get('subscribed') === 'true') {
   const notice = document.createElement('div');
-  notice.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(100,200,100,0.2);border:1px solid rgba(100,200,100,0.3);padding:16px 24px;border-radius:6px;color:#c8c8d0;font-size:13px;z-index:1000;';
+  notice.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:rgba(74,201,138,0.15);border:1px solid rgba(74,201,138,0.3);padding:16px 28px;border-radius:8px;color:#4ac98a;font-size:13px;z-index:1000;font-family:"Syne",sans-serif;font-weight:700;';
   notice.textContent = '✓ Subscription active! Your agent is evolving.';
   document.body.appendChild(notice);
   setTimeout(() => notice.remove(), 5000);

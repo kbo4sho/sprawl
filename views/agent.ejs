@@ -41,14 +41,26 @@
     font-size: 10px; text-transform: uppercase;
     letter-spacing: 1.5px; color: #4a4a5a; margin-top: 2px;
   }
+  .badge-row {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px;
+  }
   .status-badge {
     display: inline-block; padding: 4px 10px;
     border-radius: 3px; font-size: 10px;
     text-transform: uppercase; letter-spacing: 1px;
-    margin-bottom: 24px;
   }
   .status-active { background: rgba(74, 201, 138, 0.15); color: #4ac98a; }
   .status-frozen { background: rgba(200, 200, 208, 0.08); color: #6a6a7a; }
+  .tier-badge {
+    display: inline-block; padding: 4px 10px;
+    border-radius: 3px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 1px;
+    font-weight: 700;
+  }
+  .tier-free { background: rgba(100, 100, 120, 0.1); color: #5a5a6a; }
+  .tier-spark { background: rgba(212, 165, 0, 0.15); color: #d4a500; }
+  .tier-flame { background: rgba(255, 107, 53, 0.15); color: #ff6b35; }
+  .tier-inferno { background: rgba(220, 38, 38, 0.15); color: #dc2626; }
   .timelapse-canvas {
     width: 100%; height: 300px;
     border: 1px solid rgba(200, 200, 208, 0.06);
@@ -81,11 +93,16 @@
       <h1 style="color: <%= agent.color %>"><%= agent.name %></h1>
     </div>
 
-    <% if (agent.frozen) { %>
-      <span class="status-badge status-frozen">frozen</span>
-    <% } else { %>
-      <span class="status-badge status-active">alive</span>
-    <% } %>
+    <div class="badge-row">
+      <% if (agent.frozen) { %>
+        <span class="status-badge status-frozen">frozen</span>
+      <% } else { %>
+        <span class="status-badge status-active">alive</span>
+      <% } %>
+      <% const tier = budget.tier || 'free'; %>
+      <% const tierLabels = { free: 'FREE', spark: '⚡ SPARK', flame: '🔥 FLAME', inferno: '💀 INFERNO' }; %>
+      <span class="tier-badge tier-<%= tier %>"><%= tierLabels[tier] || 'FREE' %></span>
+    </div>
 
     <% if (agent.personality) { %>
       <p class="agent-personality">"<%= agent.personality %>"</p>

@@ -117,6 +117,19 @@ try {
     db.exec('ALTER TABLE agents ADD COLUMN email TEXT DEFAULT NULL');
     console.log('Migration: Added email column to agents table');
   }
+  
+  // Daily evolve tracking columns
+  const hasDailyEvolvesUsed = columns.some(c => c.name === 'daily_evolves_used');
+  const hasDailyEvolvesResetAt = columns.some(c => c.name === 'daily_evolves_reset_at');
+  
+  if (!hasDailyEvolvesUsed) {
+    db.exec('ALTER TABLE agents ADD COLUMN daily_evolves_used INTEGER DEFAULT 0');
+    console.log('Migration: Added daily_evolves_used column to agents table');
+  }
+  if (!hasDailyEvolvesResetAt) {
+    db.exec('ALTER TABLE agents ADD COLUMN daily_evolves_reset_at INTEGER DEFAULT 0');
+    console.log('Migration: Added daily_evolves_reset_at column to agents table');
+  }
 } catch (e) {
   console.error('Migration error:', e);
 }
@@ -300,39 +313,84 @@ function assignHomeCoordinates(agentId) {
   };
 }
 
-// --- Tenure System ---
-// Mark allowance grows with membership duration
-const TENURE_TIERS = [
-  { days: 0,   marks: 40,  canReposition: true,  canConnect: false },
-  { days: 7,   marks: 50,  canReposition: true,  canConnect: false },
-  { days: 30,  marks: 65,  canReposition: true,  canConnect: true },
-  { days: 90,  marks: 80,  canReposition: true,  canConnect: true },
-  { days: 180, marks: 100, canReposition: true,  canConnect: true },
-  { days: 365, marks: 200, canReposition: true,  canConnect: true },
-];
+// --- Subscription Tier System ---
+// Free-to-create, pay-to-grow model
+const SUBSCRIPTION_TIERS = {
+  free:    { marks: 30,  autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' },
+  trial:   { marks: 30,  autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' }, // legacy, treated as free
+  spark:   { marks: 60,  autoEvolve: true,  dailyEvolves: 3,  canConnect: false, model: 'fast' },
+  flame:   { marks: 120, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' }, // -1 = unlimited
+  inferno: { marks: 200, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' },
+  active:  { marks: 60,  autoEvolve: true,  dailyEvolves: 3,  canConnect: false, model: 'fast' }, // legacy active = spark
+};
 
-function getAgentTenure(agentId) {
+function getAgentTier(agentId) {
   const agent = stmts.getAgent.get(agentId);
-  if (!agent) return TENURE_TIERS[0];
-  const days = (Date.now() - agent.joined_at) / 86400000;
-  let tier = TENURE_TIERS[0];
-  for (const t of TENURE_TIERS) {
-    if (days >= t.days) tier = t;
+  if (!agent) return { tier: 'free', ...SUBSCRIPTION_TIERS.free, memberDays: 0, frozen: false };
+  
+  const days = Math.floor((Date.now() - agent.joined_at) / 86400000);
+  let status = agent.subscription_status || 'free';
+  
+  // Map legacy/unknown statuses to valid tiers
+  if (!SUBSCRIPTION_TIERS[status]) status = 'free';
+  
+  const tierConfig = SUBSCRIPTION_TIERS[status];
+  return {
+    tier: status === 'trial' || status === 'active' ? (status === 'active' ? 'spark' : 'free') : status,
+    ...tierConfig,
+    memberDays: days,
+    frozen: !!agent.frozen,
+  };
+}
+
+// Check and reset daily evolve counter if needed
+function checkAndResetDailyEvolves(agentId) {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return { used: 0, resetAt: Date.now() };
+  
+  const now = Date.now();
+  // Calculate midnight today in local time
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const midnightToday = today.getTime();
+  const midnightTomorrow = midnightToday + 86400000;
+  
+  // Reset if we're past the reset time
+  if (!agent.daily_evolves_reset_at || agent.daily_evolves_reset_at < midnightToday) {
+    db.prepare('UPDATE agents SET daily_evolves_used = 0, daily_evolves_reset_at = ? WHERE id = ?')
+      .run(midnightTomorrow, agentId);
+    return { used: 0, resetAt: midnightTomorrow };
   }
-  return { ...tier, memberDays: Math.floor(days), frozen: !!agent.frozen };
+  
+  return { used: agent.daily_evolves_used || 0, resetAt: agent.daily_evolves_reset_at };
 }
 
 function getBudget(agentId) {
-  const tenure = getAgentTenure(agentId);
+  const tierInfo = getAgentTier(agentId);
   const totalMarks = stmts.countAgentMarks.get(agentId).count;
+  const dailyEvolves = checkAndResetDailyEvolves(agentId);
+  
+  // Calculate remaining daily evolves
+  const dailyEvolvesMax = tierInfo.dailyEvolves;
+  const dailyEvolvesUsed = dailyEvolves.used;
+  const dailyEvolvesLeft = dailyEvolvesMax === -1 ? -1 : Math.max(0, dailyEvolvesMax - dailyEvolvesUsed);
+  const nextResetIn = dailyEvolves.resetAt - Date.now();
+  
   return {
     totalMarks,
-    maxMarks: tenure.marks,
-    marksRemaining: Math.max(0, tenure.marks - totalMarks),
-    canReposition: tenure.canReposition,
-    canConnect: tenure.canConnect,
-    memberDays: tenure.memberDays,
-    frozen: tenure.frozen,
+    maxMarks: tierInfo.marks,
+    marksRemaining: Math.max(0, tierInfo.marks - totalMarks),
+    tier: tierInfo.tier,
+    dailyEvolvesUsed,
+    dailyEvolvesMax,
+    dailyEvolvesLeft,
+    nextResetIn: Math.max(0, nextResetIn),
+    canConnect: tierInfo.canConnect,
+    autoEvolve: tierInfo.autoEvolve,
+    memberDays: tierInfo.memberDays,
+    frozen: tierInfo.frozen,
+    // Legacy compat
+    canReposition: true,
   };
 }
 
@@ -529,17 +587,16 @@ app.post('/api/agents/create', rateLimit, async (req, res) => {
   const existing = stmts.getAgent.get(id);
   if (existing) return res.status(409).json({ error: 'Agent ID already taken' });
   
-  // Create the agent with 24-hour trial
+  // Create the agent with free tier (no trial, lives forever)
   const homeCoords = assignHomeCoordinates(id);
   const processedColor = snapToPalette(color || '#ffffff');
   const now = Date.now();
-  const trialExpiresAt = now + (24 * 60 * 60 * 1000); // 24 hours from now
   
   db.prepare(`
     INSERT INTO agents (id, name, color, joined_at, last_seen, shader_code, frozen, home_x, home_y, personality, 
-                        subscription_status, trial_expires_at, email)
-    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'trial', ?, ?)
-  `).run(id, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality, trialExpiresAt, email || null);
+                        subscription_status, trial_expires_at, email, daily_evolves_used, daily_evolves_reset_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'free', NULL, ?, 0, 0)
+  `).run(id, name, processedColor, now, now, null, homeCoords.home_x, homeCoords.home_y, personality, email || null);
   
   // LLM-driven first composition — the agent's BIRTH
   // Instead of generic seed dots, the LLM creates the entire initial piece
@@ -726,18 +783,22 @@ Output ONLY a JSON array. No markdown, no explanation.
 
 // --- Agents ---
 app.get('/api/agents', (req, res) => {
-  res.json(stmts.listAgents.all().map(r => ({
-    id: r.id, name: r.name, color: r.color,
-    markCount: r.mark_count, lastActive: r.last_active || r.last_seen,
-    joinedAt: r.joined_at, hasShader: !!r.shader_code,
-    shaderCode: r.shader_code || null,
-    homeX: r.home_x, homeY: r.home_y,
-    personality: r.personality || null,
-    frozen: !!r.frozen,
-    vision: r.vision || null,
-    subscriptionStatus: r.subscription_status || 'trial',
-    trialExpiresAt: r.trial_expires_at || null,
-  })));
+  res.json(stmts.listAgents.all().map(r => {
+    const tierInfo = getAgentTier(r.id);
+    return {
+      id: r.id, name: r.name, color: r.color,
+      markCount: r.mark_count, lastActive: r.last_active || r.last_seen,
+      joinedAt: r.joined_at, hasShader: !!r.shader_code,
+      shaderCode: r.shader_code || null,
+      homeX: r.home_x, homeY: r.home_y,
+      personality: r.personality || null,
+      frozen: !!r.frozen,
+      vision: r.vision || null,
+      tier: tierInfo.tier,
+      subscriptionStatus: r.subscription_status || 'free',
+      trialExpiresAt: r.trial_expires_at || null,
+    };
+  }));
 });
 
 // --- Personality ---
@@ -1059,12 +1120,17 @@ app.get('/api/canvas/state', (req, res) => {
 // ============================================================
 
 // Create Stripe Checkout Session
+// Tier price environment variables:
+// STRIPE_PRICE_SPARK_MONTHLY, STRIPE_PRICE_SPARK_ANNUAL
+// STRIPE_PRICE_FLAME_MONTHLY, STRIPE_PRICE_FLAME_ANNUAL
+// STRIPE_PRICE_INFERNO_MONTHLY, STRIPE_PRICE_INFERNO_ANNUAL
+// Legacy: STRIPE_PRICE_MONTHLY (= spark monthly), STRIPE_PRICE_ANNUAL (= spark annual)
 app.post('/api/stripe/create-checkout', rateLimit, async (req, res) => {
   if (!stripe) {
     return res.status(500).json({ error: 'Stripe not configured. Set STRIPE_SECRET_KEY.' });
   }
   
-  const { agentId, plan } = req.body;
+  const { agentId, plan, tier } = req.body;
   if (!agentId || !plan) {
     return res.status(400).json({ error: 'agentId and plan required' });
   }
@@ -1072,18 +1138,30 @@ app.post('/api/stripe/create-checkout', rateLimit, async (req, res) => {
     return res.status(400).json({ error: 'plan must be "monthly" or "annual"' });
   }
   
+  const selectedTier = tier || 'spark'; // default to spark for backward compat
+  if (!['spark', 'flame', 'inferno'].includes(selectedTier)) {
+    return res.status(400).json({ error: 'tier must be spark, flame, or inferno' });
+  }
+  
   const agent = stmts.getAgent.get(agentId);
   if (!agent) {
     return res.status(404).json({ error: 'Agent not found' });
   }
   
-  const priceId = plan === 'monthly' 
-    ? process.env.STRIPE_PRICE_MONTHLY 
-    : process.env.STRIPE_PRICE_ANNUAL;
+  // Get price ID for the selected tier and plan
+  // Try tier-specific first, fall back to legacy env vars for spark
+  const tierUpper = selectedTier.toUpperCase();
+  const planUpper = plan.toUpperCase();
+  let priceId = process.env[`STRIPE_PRICE_${tierUpper}_${planUpper}`];
+  
+  // Legacy fallback for spark tier
+  if (!priceId && selectedTier === 'spark') {
+    priceId = plan === 'monthly' ? process.env.STRIPE_PRICE_MONTHLY : process.env.STRIPE_PRICE_ANNUAL;
+  }
   
   if (!priceId) {
     return res.status(500).json({ 
-      error: `Stripe price ID not configured. Set STRIPE_PRICE_${plan.toUpperCase()}.` 
+      error: `Stripe price ID not configured. Set STRIPE_PRICE_${tierUpper}_${planUpper}.` 
     });
   }
   
@@ -1104,6 +1182,7 @@ app.post('/api/stripe/create-checkout', rateLimit, async (req, res) => {
       metadata: {
         agentId: agentId,
         agentName: agent.name,
+        tier: selectedTier,
         plan: plan,
       },
     });
@@ -1155,23 +1234,29 @@ app.post('/api/stripe/webhook', async (req, res) => {
           break;
         }
         
-        // Activate the agent's subscription
+        // Determine subscription tier from metadata (default to spark for legacy)
+        const tier = session.metadata?.tier || 'spark';
+        const validTiers = ['spark', 'flame', 'inferno'];
+        const subscriptionStatus = validTiers.includes(tier) ? tier : 'spark';
+        
+        // Activate the agent's subscription with the correct tier
         db.prepare(`
           UPDATE agents 
           SET stripe_customer_id = ?, 
               stripe_subscription_id = ?, 
-              subscription_status = 'active',
+              subscription_status = ?,
               email = COALESCE(?, email),
               frozen = 0
           WHERE id = ?
         `).run(
           session.customer,
           session.subscription,
+          subscriptionStatus,
           session.customer_email,
           agentId
         );
         
-        console.log(`✓ Activated subscription for ${agent.name} (${agentId})`);
+        console.log(`✓ Activated ${subscriptionStatus.toUpperCase()} subscription for ${agent.name} (${agentId})`);
         break;
       }
       
@@ -1356,6 +1441,22 @@ app.post('/api/evolve/agent/:agentId', async (req, res) => {
   const agentRow = stmts.getAgent.get(agentId);
   if (!agentRow) return res.status(404).json({ error: 'Agent not found' });
   
+  // Check daily evolve limit
+  const budget = getBudget(agentId);
+  
+  // -1 means unlimited
+  if (budget.dailyEvolvesMax !== -1 && budget.dailyEvolvesLeft <= 0) {
+    const nextTier = budget.tier === 'free' ? 'spark' : (budget.tier === 'spark' ? 'flame' : null);
+    return res.status(429).json({
+      error: 'Daily evolve limit reached',
+      dailyEvolvesLeft: 0,
+      dailyEvolvesMax: budget.dailyEvolvesMax,
+      nextResetIn: budget.nextResetIn,
+      tier: budget.tier,
+      upgradeTo: nextTier,
+    });
+  }
+  
   if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
     return res.status(500).json({ error: 'No LLM API key configured' });
   }
@@ -1382,7 +1483,20 @@ app.post('/api/evolve/agent/:agentId', async (req, res) => {
     
     const match = stdout.match(/\+(\d+) -(\d+) ~(\d+)/);
     if (match) {
-      res.json({ added: +match[1], removed: +match[2], moved: +match[3] });
+      // Increment daily evolve counter on success
+      db.prepare('UPDATE agents SET daily_evolves_used = daily_evolves_used + 1 WHERE id = ?').run(agentId);
+      
+      // Get updated budget for response
+      const updatedBudget = getBudget(agentId);
+      
+      res.json({
+        added: +match[1],
+        removed: +match[2],
+        moved: +match[3],
+        dailyEvolvesLeft: updatedBudget.dailyEvolvesLeft,
+        dailyEvolvesMax: updatedBudget.dailyEvolvesMax,
+        tier: updatedBudget.tier,
+      });
     } else {
       res.json({ added: 0, removed: 0, moved: 0, note: (stdout + stderr).slice(0, 200) });
     }
