@@ -3,7 +3,13 @@
  * Server-side rendering using node-canvas
  */
 
-const { createCanvas } = require('canvas');
+let createCanvas;
+try {
+  createCanvas = require('canvas').createCanvas;
+} catch (e) {
+  // canvas package not available (missing native deps) — snapshots disabled
+  createCanvas = null;
+}
 const fs = require('fs');
 const path = require('path');
 
@@ -17,6 +23,10 @@ const BG_COLOR = '#030306';
  * @returns {Promise<string>} Path to snapshot file
  */
 async function generateSnapshot(db, canvasId) {
+  if (!createCanvas) {
+    console.warn('Snapshot skipped: canvas package not available');
+    return null;
+  }
   // Get canvas
   const canvas = db.prepare('SELECT * FROM canvases WHERE id = ?').get(canvasId);
   if (!canvas) {
