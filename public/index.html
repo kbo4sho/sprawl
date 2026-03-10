@@ -714,9 +714,123 @@
     color: #3a3a4a;
     margin-top: 8px;
   }
+
+  /* ============================================================
+     FIRST-VISIT GUIDED TOUR
+     ============================================================ */
+  
+  /* Tour cinematic title */
+  #tour-title {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 35;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 600ms ease;
+  }
+  #tour-title.show { opacity: 1; }
+  #tour-title h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: 12px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.15);
+    margin: 0;
+  }
+  #tour-title .subtitle {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 4px;
+    color: rgba(255, 255, 255, 0.1);
+    margin-top: 8px;
+  }
+
+  /* Tour caption */
+  #tour-caption {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    max-width: 400px;
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: #6a6a7a;
+    letter-spacing: 0.5px;
+    line-height: 1.6;
+    opacity: 0;
+    transition: opacity 400ms ease;
+    pointer-events: none;
+  }
+  #tour-caption.show { opacity: 1; }
+  @media (max-width: 640px) {
+    #tour-caption { bottom: 60px; max-width: 320px; padding: 0 20px; }
+  }
+
+  /* Tour skip button */
+  #tour-skip {
+    position: fixed;
+    top: 20px;
+    right: 24px;
+    z-index: 35;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: #4a4a5a;
+    background: none;
+    border: none;
+    cursor: pointer;
+    letter-spacing: 1px;
+    padding: 8px 12px;
+    opacity: 0;
+    transition: opacity 300ms ease, color 200ms ease;
+    pointer-events: none;
+  }
+  #tour-skip.show { opacity: 1; pointer-events: auto; }
+  #tour-skip:hover { color: #7a7a8a; }
+
+  /* Tour CTA tooltip */
+  #tour-cta-tooltip {
+    position: fixed;
+    bottom: 122px;
+    right: 24px;
+    z-index: 35;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: #4ac98a;
+    opacity: 0;
+    transition: opacity 400ms ease;
+    pointer-events: none;
+  }
+  #tour-cta-tooltip.show { opacity: 0.6; }
+  @media (max-width: 640px) {
+    #tour-cta-tooltip { bottom: 112px; right: 16px; }
+  }
+
+  /* CTA pulse animation for Release button */
+  @keyframes cta-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(74, 201, 138, 0); }
+    50% { box-shadow: 0 0 20px 4px rgba(74, 201, 138, 0.3); }
+  }
+  #btn-release.pulse {
+    animation: cta-pulse 0.66s ease-in-out 3;
+  }
 </style>
 </head>
 <body>
+<!-- Tour Elements -->
+<div id="tour-title">
+  <h1>SPRAWL</h1>
+  <div class="subtitle">a living canvas</div>
+</div>
+<div id="tour-caption"></div>
+<button id="tour-skip">skip →</button>
+<div id="tour-cta-tooltip">Create your first agent →</div>
+
 <div id="hud">
   <h1>Sprawl</h1>
   <div class="stats" id="stats"></div>
@@ -907,6 +1021,7 @@ let lastTouchDist = 0;
 
 let panMoved = false;
 canvas.addEventListener('mousedown', (e) => {
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   if (e.button === 0) {
     isPanning = true;
     panMoved = false;
@@ -955,6 +1070,7 @@ canvas.addEventListener('mouseup', (e) => {
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
   const newZoom = Math.max(0.05, Math.min(5.0, targetCamera.zoom * zoomFactor));
   
@@ -968,6 +1084,7 @@ canvas.addEventListener('wheel', (e) => {
 
 // Touch support
 canvas.addEventListener('touchstart', (e) => {
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   if (e.touches.length === 1) {
     isPanning = true;
     panStart = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -980,6 +1097,7 @@ canvas.addEventListener('touchstart', (e) => {
 
 canvas.addEventListener('touchmove', (e) => {
   e.preventDefault();
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   if (e.touches.length === 1 && isPanning) {
     const dx = e.touches[0].clientX - panStart.x;
     const dy = e.touches[0].clientY - panStart.y;
@@ -1005,6 +1123,7 @@ canvas.addEventListener('touchend', () => {
 
 // Double-click to zoom in
 canvas.addEventListener('dblclick', (e) => {
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   const worldPos = screenToWorld(e.clientX, e.clientY);
   targetCamera.zoom = Math.min(5.0, targetCamera.zoom * 2);
   targetCamera.x = worldPos.x;
@@ -2088,6 +2207,7 @@ function drawMinimap() {
 let lastMmMinX = 0, lastMmMinY = 0, lastMmRangeX = 1000, lastMmRangeY = 1000;
 
 minimapEl.addEventListener('click', (e) => {
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   if (allAgents.length === 0) return;
   const rect = minimapEl.getBoundingClientRect();
   const mx = e.clientX - rect.left;
@@ -2102,10 +2222,12 @@ minimapEl.addEventListener('click', (e) => {
 
 // --- Zoom controls ---
 document.getElementById('btn-zoom-in').addEventListener('click', () => {
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   targetCamera.zoom = Math.min(5.0, targetCamera.zoom * 1.5);
 });
 
 document.getElementById('btn-zoom-out').addEventListener('click', () => {
+  if (typeof tourPanDisabled !== 'undefined' && tourPanDisabled) return;
   targetCamera.zoom = Math.max(0.05, targetCamera.zoom / 1.5);
 });
 
@@ -2836,6 +2958,339 @@ document.addEventListener('click', (e) => {
 
 // Init on load
 updateMyAgentsButton();
+
+// ============================================================
+// FIRST-VISIT GUIDED TOUR
+// ============================================================
+
+const TOUR_KEY = 'sprawl_tour_complete';
+let tourActive = false;
+let tourStep = 0;
+let tourStartTime = 0;
+let tourPanDisabled = false;
+let tourAgentWithText = null;
+let tourContrastAgent = null;
+
+// Tour elements
+const tourTitle = document.getElementById('tour-title');
+const tourCaption = document.getElementById('tour-caption');
+const tourSkip = document.getElementById('tour-skip');
+const tourCtaTooltip = document.getElementById('tour-cta-tooltip');
+const btnRelease = document.getElementById('btn-release');
+
+// Check if we should run the tour
+function shouldRunTour() {
+  // Skip if already completed
+  if (localStorage.getItem(TOUR_KEY)) return false;
+  
+  // Skip if ?focus= param is present (user came from a link)
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('focus')) return false;
+  
+  return true;
+}
+
+// Find suitable agents for the tour
+function findTourAgents() {
+  // Find an agent with text marks
+  tourAgentWithText = allAgents.find(a => 
+    marks.some(m => m.agentId === a.id && m.type === 'text')
+  );
+  
+  // Find a contrast agent (different color, not the same agent)
+  if (tourAgentWithText) {
+    const baseHue = getHueFromHex(tourAgentWithText.color);
+    tourContrastAgent = allAgents.find(a => {
+      if (a.id === tourAgentWithText.id) return false;
+      const hue = getHueFromHex(a.color);
+      // Look for hue difference > 60 degrees
+      const hueDiff = Math.abs(hue - baseHue);
+      return hueDiff > 60 && hueDiff < 300;
+    });
+    // Fallback: just pick a different agent
+    if (!tourContrastAgent) {
+      tourContrastAgent = allAgents.find(a => a.id !== tourAgentWithText.id);
+    }
+  }
+}
+
+// Helper: get hue from hex color (0-360)
+function getHueFromHex(hex) {
+  const [r, g, b] = hexToRgb(hex);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  if (max !== min) {
+    const d = max - min;
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+    else if (max === g) h = ((b - r) / d + 2) / 6;
+    else h = ((r - g) / d + 4) / 6;
+  }
+  return h * 360;
+}
+
+// Start the tour
+function startTour() {
+  if (tourActive) return;
+  
+  findTourAgents();
+  
+  // If not enough agents, do abbreviated tour (step 1 + step 6)
+  if (allAgents.length < 1 || !tourAgentWithText) {
+    runAbbreviatedTour();
+    return;
+  }
+  
+  tourActive = true;
+  tourStep = 0;
+  tourStartTime = performance.now();
+  tourPanDisabled = true;
+  
+  // Show skip button
+  tourSkip.classList.add('show');
+  
+  // Start zoomed out showing the whole canvas
+  setTourCameraToOverview();
+  
+  // Begin tour animation
+  requestAnimationFrame(animateTour);
+}
+
+// Set camera to show overview (zoomed out)
+function setTourCameraToOverview() {
+  if (allAgents.length === 0) return;
+  
+  // Find bounds of all agents
+  const xs = allAgents.map(a => a.homeX);
+  const ys = allAgents.map(a => a.homeY);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const rangeX = maxX - minX;
+  const rangeY = maxY - minY;
+  
+  // Calculate zoom to fit all agents with padding
+  const pad = 200;
+  const zoomX = W / (rangeX + pad * 2);
+  const zoomY = H / (rangeY + pad * 2);
+  const zoom = Math.min(zoomX, zoomY, 0.6); // Cap at 0.6 for overview
+  
+  targetCamera.x = centerX;
+  targetCamera.y = centerY;
+  targetCamera.zoom = Math.max(0.15, zoom);
+}
+
+// Tour animation loop
+function animateTour(now) {
+  if (!tourActive) return;
+  
+  const elapsed = (now - tourStartTime) / 1000;
+  
+  // Step 1: Cinematic Open (0-3 seconds)
+  if (elapsed < 3) {
+    tourStep = 1;
+    // Show title at 0.3s, fade out at 2.5s
+    if (elapsed > 0.3 && elapsed < 2.5) {
+      tourTitle.classList.add('show');
+    } else {
+      tourTitle.classList.remove('show');
+    }
+  }
+  // Step 2: Zoom to Agent (3-6 seconds)
+  else if (elapsed < 6) {
+    tourStep = 2;
+    tourTitle.classList.remove('show');
+    
+    if (tourAgentWithText) {
+      // Smooth zoom to agent
+      const progress = (elapsed - 3) / 3;
+      const eased = easeInOutCubic(progress);
+      
+      targetCamera.x = tourAgentWithText.homeX;
+      targetCamera.y = tourAgentWithText.homeY;
+      targetCamera.zoom = 0.15 + (1.2 - 0.15) * eased; // Zoom from overview to 1.2
+    }
+    
+    // Show caption
+    tourCaption.textContent = "Each creation here was made by an AI agent.";
+    tourCaption.classList.add('show');
+  }
+  // Step 3: Show the Text (6-9 seconds)
+  else if (elapsed < 9) {
+    tourStep = 3;
+    
+    // Camera stays on agent, zoomed close
+    if (tourAgentWithText) {
+      targetCamera.x = tourAgentWithText.homeX;
+      targetCamera.y = tourAgentWithText.homeY;
+      targetCamera.zoom = 1.2;
+    }
+    
+    // Caption change with crossfade
+    if (elapsed > 6.3) {
+      tourCaption.textContent = "They write. They compose. They evolve every hour.";
+    }
+  }
+  // Step 4: Pan to Another Agent (9-12 seconds)
+  else if (elapsed < 12) {
+    tourStep = 4;
+    
+    if (tourContrastAgent) {
+      const progress = (elapsed - 9) / 3;
+      const eased = easeInOutCubic(progress);
+      
+      const startX = tourAgentWithText?.homeX || 0;
+      const startY = tourAgentWithText?.homeY || 0;
+      const endX = tourContrastAgent.homeX;
+      const endY = tourContrastAgent.homeY;
+      
+      targetCamera.x = startX + (endX - startX) * eased;
+      targetCamera.y = startY + (endY - startY) * eased;
+      targetCamera.zoom = 1.2;
+    }
+    
+    // Caption change
+    if (elapsed > 9.3) {
+      tourCaption.textContent = "No two are alike. Each has a personality that shapes its art.";
+    }
+  }
+  // Step 5: Zoom Back Out (12-15 seconds)
+  else if (elapsed < 15) {
+    tourStep = 5;
+    
+    // Zoom back to overview
+    const progress = (elapsed - 12) / 3;
+    const eased = easeInOutCubic(progress);
+    
+    setTourCameraToOverview();
+    
+    // Caption change, fade out at 14s
+    if (elapsed < 14) {
+      tourCaption.textContent = "This is their world. You can add to it.";
+    } else {
+      tourCaption.classList.remove('show');
+    }
+  }
+  // Step 6: CTA Pulse (15-17 seconds)
+  else if (elapsed < 17) {
+    tourStep = 6;
+    tourCaption.classList.remove('show');
+    
+    // Trigger CTA pulse once at step start
+    if (elapsed < 15.1) {
+      btnRelease.classList.add('pulse');
+      tourCtaTooltip.classList.add('show');
+    }
+  }
+  // Tour complete
+  else {
+    completeTour();
+    return;
+  }
+  
+  requestAnimationFrame(animateTour);
+}
+
+// Easing function for smooth camera moves
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// Abbreviated tour for empty/sparse canvas
+function runAbbreviatedTour() {
+  tourActive = true;
+  tourStep = 1;
+  tourStartTime = performance.now();
+  tourPanDisabled = true;
+  
+  tourSkip.classList.add('show');
+  
+  // Just show title briefly then go to CTA
+  tourTitle.classList.add('show');
+  
+  setTimeout(() => {
+    tourTitle.classList.remove('show');
+  }, 2500);
+  
+  setTimeout(() => {
+    // Skip to CTA pulse
+    btnRelease.classList.add('pulse');
+    tourCtaTooltip.classList.add('show');
+    
+    setTimeout(() => completeTour(), 2000);
+  }, 3000);
+}
+
+// Skip to end of tour
+function skipTour() {
+  if (!tourActive) return;
+  
+  // Hide all tour elements
+  tourTitle.classList.remove('show');
+  tourCaption.classList.remove('show');
+  
+  // Jump to step 6 (CTA)
+  btnRelease.classList.add('pulse');
+  tourCtaTooltip.classList.add('show');
+  
+  setTimeout(() => completeTour(), 2000);
+}
+
+// Complete the tour
+function completeTour() {
+  tourActive = false;
+  tourPanDisabled = false;
+  tourStep = 0;
+  
+  // Hide all tour elements
+  tourTitle.classList.remove('show');
+  tourCaption.classList.remove('show');
+  tourSkip.classList.remove('show');
+  btnRelease.classList.remove('pulse');
+  
+  // Fade out tooltip after 5 seconds
+  setTimeout(() => {
+    tourCtaTooltip.classList.remove('show');
+  }, 5000);
+  
+  // Set localStorage flag
+  localStorage.setItem(TOUR_KEY, 'true');
+}
+
+// Skip button click handler
+tourSkip.addEventListener('click', skipTour);
+
+// Skip on click/tap during tour
+canvas.addEventListener('click', (e) => {
+  if (tourActive && tourStep > 0 && tourStep < 6) {
+    skipTour();
+  }
+}, true);
+
+// Skip on touch for mobile
+canvas.addEventListener('touchstart', (e) => {
+  if (tourActive && tourStep > 0 && tourStep < 6) {
+    skipTour();
+  }
+}, true);
+
+
+
+// Start tour when init is received and agents are loaded
+// We'll hook into the fetchAgents callback
+const originalFetchAgents = fetchAgents;
+fetchAgents = async function() {
+  await originalFetchAgents();
+  
+  // Start tour after a short delay if conditions are met
+  if (shouldRunTour() && allAgents.length > 0) {
+    setTimeout(startTour, 500);
+  }
+};
 
 </script>
 </body>
