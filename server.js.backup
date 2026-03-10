@@ -196,50 +196,7 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_evolution_agent_cycle ON evolution_log(agent_id, cycle);
-
-  CREATE TABLE IF NOT EXISTS canvases (
-    id TEXT PRIMARY KEY,
-    theme TEXT NOT NULL,
-    subthemes TEXT NOT NULL,
-    spatial_guide TEXT NOT NULL,
-    week_of TEXT NOT NULL,
-    status TEXT DEFAULT 'active',
-    created_at TEXT DEFAULT (datetime('now')),
-    frozen_at TEXT,
-    snapshot_url TEXT,
-    timelapse_url TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_canvases_status ON canvases(status);
-  CREATE INDEX IF NOT EXISTS idx_canvases_week ON canvases(week_of);
 `);
-
-// v2 Migrations: Add canvas_id columns (must run AFTER CREATE TABLE statements)
-try {
-  const marksColumns = db.prepare("PRAGMA table_info(marks)").all();
-  if (!marksColumns.some(c => c.name === 'canvas_id')) {
-    db.exec('ALTER TABLE marks ADD COLUMN canvas_id TEXT DEFAULT NULL REFERENCES canvases(id)');
-    console.log('v2 Migration: Added canvas_id to marks');
-  }
-  
-  const evolutionColumns = db.prepare("PRAGMA table_info(evolution_log)").all();
-  if (!evolutionColumns.some(c => c.name === 'canvas_id')) {
-    db.exec('ALTER TABLE evolution_log ADD COLUMN canvas_id TEXT DEFAULT NULL REFERENCES canvases(id)');
-    console.log('v2 Migration: Added canvas_id to evolution_log');
-  }
-  
-  const agentsColumns2 = db.prepare("PRAGMA table_info(agents)").all();
-  if (!agentsColumns2.some(c => c.name === 'canvas_id')) {
-    db.exec('ALTER TABLE agents ADD COLUMN canvas_id TEXT DEFAULT NULL REFERENCES canvases(id)');
-    console.log('v2 Migration: Added canvas_id to agents');
-  }
-  if (!agentsColumns2.some(c => c.name === 'subtheme')) {
-    db.exec('ALTER TABLE agents ADD COLUMN subtheme TEXT DEFAULT NULL');
-    console.log('v2 Migration: Added subtheme to agents');
-  }
-} catch (e) {
-  console.error('v2 Migration error:', e);
-}
 
 // Migration: Add home_x and home_y columns if they don't exist
 try {
@@ -369,15 +326,14 @@ function assignHomeCoordinates(agentId) {
 }
 
 // --- Subscription Tier System ---
-// v2: Simplified to free (BYOC) and flame (hosted, $5/mo)
+// Free-to-create, pay-to-grow model
 const SUBSCRIPTION_TIERS = {
-  free:    { marks: 120, marksPerCanvas: 120, autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' }, // BYOC via skill
-  flame:   { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' }, // $5/mo hosted, unlimited daily evolves
-  // Legacy tier mappings for backward compatibility
-  trial:   { marks: 120, marksPerCanvas: 120, autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' }, // legacy, treated as free
-  spark:   { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: false, model: 'fast' }, // legacy, map to flame
-  inferno: { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' }, // legacy, map to flame
-  active:  { marks: 100, marksPerCanvas: 100, autoEvolve: true,  dailyEvolves: -1, canConnect: false, model: 'fast' }, // legacy, map to flame
+  free:    { marks: 120,  autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' },
+  trial:   { marks: 120,  autoEvolve: false, dailyEvolves: 1,  canConnect: false, model: 'fast' }, // legacy, treated as free
+  spark:   { marks: 60,  autoEvolve: true,  dailyEvolves: 3,  canConnect: false, model: 'fast' },
+  flame:   { marks: 120, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' }, // -1 = unlimited
+  inferno: { marks: 200, autoEvolve: true,  dailyEvolves: -1, canConnect: true,  model: 'quality' },
+  active:  { marks: 60,  autoEvolve: true,  dailyEvolves: 3,  canConnect: false, model: 'fast' }, // legacy active = spark
 };
 
 function getAgentTier(agentId) {
@@ -462,16 +418,12 @@ const stmts = {
       personality=COALESCE(@personality, agents.personality)
   `),
   getAllMarks: db.prepare('SELECT * FROM marks ORDER BY created_at'),
-  getMarksByCanvas: db.prepare('SELECT * FROM marks WHERE canvas_id = ? ORDER BY created_at'),
   getMarksByAgent: db.prepare('SELECT * FROM marks WHERE agent_id = ?'),
-  getMarksByAgentOnCanvas: db.prepare('SELECT * FROM marks WHERE agent_id = ? AND canvas_id = ?'),
   getMark: db.prepare('SELECT * FROM marks WHERE id = ?'),
   countAgentMarks: db.prepare('SELECT COUNT(*) as count FROM marks WHERE agent_id = ?'),
-  countAgentMarksOnCanvas: db.prepare('SELECT COUNT(*) as count FROM marks WHERE agent_id = ? AND canvas_id = ?'),
-  countCanvasMarks: db.prepare('SELECT COUNT(*) as count FROM marks WHERE canvas_id = ?'),
   insertMark: db.prepare(`
-    INSERT INTO marks (id, agent_id, type, x, y, color, size, opacity, text, meta, canvas_id, created_at, updated_at)
-    VALUES (@id, @agent_id, @type, @x, @y, @color, @size, @opacity, @text, @meta, @canvas_id, @now, @now)
+    INSERT INTO marks (id, agent_id, type, x, y, color, size, opacity, text, meta, created_at, updated_at)
+    VALUES (@id, @agent_id, @type, @x, @y, @color, @size, @opacity, @text, @meta, @now, @now)
   `),
   updateMark: db.prepare(`
     UPDATE marks SET x=@x, y=@y, color=@color, size=@size, opacity=@opacity, text=@text, updated_at=@now
@@ -488,19 +440,6 @@ const stmts = {
   getAgentConnections: db.prepare('SELECT * FROM connections WHERE from_agent = ? OR to_agent = ?'),
   insertConnection: db.prepare('INSERT OR IGNORE INTO connections (id, from_agent, to_agent, created_at) VALUES (?, ?, ?, ?)'),
   deleteConnection: db.prepare('DELETE FROM connections WHERE (from_agent = ? AND to_agent = ?) OR (from_agent = ? AND to_agent = ?)'),
-  // Canvas-related statements
-  getAllCanvases: db.prepare('SELECT * FROM canvases ORDER BY created_at DESC'),
-  getActiveCanvases: db.prepare("SELECT * FROM canvases WHERE status = 'active' ORDER BY created_at"),
-  getCanvas: db.prepare('SELECT * FROM canvases WHERE id = ?'),
-  insertCanvas: db.prepare(`
-    INSERT INTO canvases (id, theme, subthemes, spatial_guide, week_of, status, created_at)
-    VALUES (@id, @theme, @subthemes, @spatial_guide, @week_of, @status, @created_at)
-  `),
-  updateCanvasStatus: db.prepare('UPDATE canvases SET status = ?, frozen_at = ? WHERE id = ?'),
-  updateCanvasUrls: db.prepare('UPDATE canvases SET snapshot_url = ?, timelapse_url = ? WHERE id = ?'),
-  getCanvasAgents: db.prepare('SELECT * FROM agents WHERE canvas_id = ?'),
-  countCanvasAgents: db.prepare('SELECT COUNT(*) as count FROM agents WHERE canvas_id = ?'),
-  assignAgentToCanvas: db.prepare('UPDATE agents SET canvas_id = ?, subtheme = ? WHERE id = ?'),
 };
 
 // --- Decay ---
@@ -898,7 +837,6 @@ Output ONLY a JSON array. No markdown, no explanation.
       opacity: Math.max(0.1, Math.min(1, m.opacity || 0.7)),
       text: m.type === 'text' ? (m.text || '').slice(0, 50) : null,
       meta: m.type === 'line' ? JSON.stringify({ x2: m.x2, y2: m.y2 }) : '{}',
-      canvas_id: null, // v2: backward compat, marks not assigned to canvas yet
       now: Date.now(),
     };
     stmts.insertMark.run(markData);
@@ -909,8 +847,8 @@ Output ONLY a JSON array. No markdown, no explanation.
   }
   
   // Log creation as first evolution
-  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, canvas_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(id, 0, '[]', JSON.stringify(firstComposition), null, Date.now());
+  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(id, 0, '[]', JSON.stringify(firstComposition), Date.now());
   
   res.status(201).json({
     id, name, color: processedColor,
@@ -985,126 +923,14 @@ app.put('/api/agents/:id/shader', rateLimit, (req, res) => {
   res.json({ ok: true });
 });
 
-// --- Canvases (v2) ---
-// GET /api/canvases - List active canvases
-app.get('/api/canvases', (req, res) => {
-  const canvases = stmts.getActiveCanvases.all().map(c => {
-    const agentCount = stmts.countCanvasAgents.get(c.id).count;
-    const markCount = stmts.countCanvasMarks.get(c.id).count;
-    return {
-      id: c.id,
-      theme: c.theme,
-      subthemes: JSON.parse(c.subthemes),
-      spatialGuide: c.spatial_guide,
-      weekOf: c.week_of,
-      status: c.status,
-      createdAt: c.created_at,
-      agentCount,
-      markCount,
-    };
-  });
-  res.json(canvases);
-});
-
-// GET /api/canvas/:id - Canvas detail with agent list + mark count
-app.get('/api/canvas/:id', (req, res) => {
-  const canvas = stmts.getCanvas.get(req.params.id);
-  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
-  
-  const agents = stmts.getCanvasAgents.all(req.params.id).map(a => ({
-    id: a.id,
-    name: a.name,
-    color: a.color,
-    subtheme: a.subtheme,
-    personality: a.personality,
-    joinedAt: a.joined_at,
-  }));
-  
-  const markCount = stmts.countCanvasMarks.get(req.params.id).count;
-  
-  res.json({
-    id: canvas.id,
-    theme: canvas.theme,
-    subthemes: JSON.parse(canvas.subthemes),
-    spatialGuide: canvas.spatial_guide,
-    weekOf: canvas.week_of,
-    status: canvas.status,
-    createdAt: canvas.created_at,
-    frozenAt: canvas.frozen_at,
-    snapshotUrl: canvas.snapshot_url,
-    timelapseUrl: canvas.timelapse_url,
-    agents,
-    markCount,
-  });
-});
-
-// POST /api/canvas - Create canvas (used by gardener)
-app.post('/api/canvas', rateLimit, (req, res) => {
-  const { theme, subthemes, spatialGuide, weekOf } = req.body;
-  if (!theme || !subthemes || !spatialGuide || !weekOf) {
-    return res.status(400).json({ error: 'theme, subthemes, spatialGuide, weekOf required' });
-  }
-  
-  const id = crypto.randomUUID();
-  const canvasData = {
-    id,
-    theme,
-    subthemes: JSON.stringify(subthemes),
-    spatial_guide: spatialGuide,
-    week_of: weekOf,
-    status: 'active',
-    created_at: new Date().toISOString(),
-  };
-  
-  stmts.insertCanvas.run(canvasData);
-  res.status(201).json({ id, theme, subthemes, spatialGuide, weekOf, status: 'active' });
-});
-
-// POST /api/canvas/:id/join - Assign agent to canvas + subtheme
-app.post('/api/canvas/:id/join', rateLimit, (req, res) => {
-  const { agentId, subtheme } = req.body;
-  if (!agentId || !subtheme) {
-    return res.status(400).json({ error: 'agentId and subtheme required' });
-  }
-  
-  const canvas = stmts.getCanvas.get(req.params.id);
-  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
-  
-  const agent = stmts.getAgent.get(agentId);
-  if (!agent) return res.status(404).json({ error: 'Agent not found' });
-  
-  // Verify subtheme exists in canvas
-  const subthemes = JSON.parse(canvas.subthemes);
-  if (!subthemes.find(s => s.name === subtheme)) {
-    return res.status(400).json({ error: 'Invalid subtheme for this canvas' });
-  }
-  
-  stmts.assignAgentToCanvas.run(req.params.id, subtheme, agentId);
-  res.json({ ok: true, agentId, canvasId: req.params.id, subtheme });
-});
-
-// POST /api/canvas/:id/freeze - Freeze canvas (gardener/admin)
-app.post('/api/canvas/:id/freeze', rateLimit, (req, res) => {
-  const canvas = stmts.getCanvas.get(req.params.id);
-  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
-  
-  if (canvas.status === 'frozen') {
-    return res.status(400).json({ error: 'Canvas already frozen' });
-  }
-  
-  const now = new Date().toISOString();
-  stmts.updateCanvasStatus.run('frozen', now, req.params.id);
-  res.json({ ok: true, status: 'frozen', frozenAt: now });
-});
-
 // --- Evolution Log ---
 app.post('/api/evolution/log', rateLimit, (req, res) => {
-  const { agentId, cycle, snapshot, ops, canvasId } = req.body;
+  const { agentId, cycle, snapshot, ops } = req.body;
   if (!agentId || cycle == null || !snapshot || !ops) {
     return res.status(400).json({ error: 'agentId, cycle, snapshot, ops required' });
   }
-  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, canvas_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(agentId, cycle, JSON.stringify(snapshot), JSON.stringify(ops), canvasId || null, Date.now());
+  db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
+    .run(agentId, cycle, JSON.stringify(snapshot), JSON.stringify(ops), Date.now());
   res.status(201).json({ ok: true });
 });
 
@@ -1172,29 +998,11 @@ app.post('/api/admin/set-tenure', (req, res) => {
 
 // --- Marks ---
 app.get('/api/marks', (req, res) => {
-  const { canvasId } = req.query;
-  let marks;
-  if (canvasId) {
-    // v2: Filter by canvas
-    marks = stmts.getMarksByCanvas.all(canvasId);
-  } else {
-    // Backward compat: all marks
-    marks = stmts.getAllMarks.all();
-  }
-  res.json(marks.map(markToJson));
+  res.json(stmts.getAllMarks.all().map(markToJson));
 });
 
 app.get('/api/marks/:agentId', (req, res) => {
-  const { canvasId } = req.query;
-  let marks;
-  if (canvasId) {
-    // v2: Filter by agent AND canvas
-    marks = stmts.getMarksByAgentOnCanvas.all(req.params.agentId, canvasId);
-  } else {
-    // Backward compat: all marks for agent
-    marks = stmts.getMarksByAgent.all(req.params.agentId);
-  }
-  res.json(marks.map(markToJson));
+  res.json(stmts.getMarksByAgent.all(req.params.agentId).map(markToJson));
 });
 
 app.get('/api/viewport', (req, res) => {
@@ -1216,20 +1024,13 @@ app.get('/api/viewport', (req, res) => {
 });
 
 app.post('/api/mark', (req, res) => {
-  const { agentId, agentName, type, x, y, color, size, opacity, text, canvasId } = req.body;
+  const { agentId, agentName, type, x, y, color, size, opacity, text } = req.body;
   if (!agentId) return res.status(400).json({ error: 'agentId required' });
   if (x == null || y == null) return res.status(400).json({ error: 'x, y required' });
 
   const markType = ['dot', 'text', 'line'].includes(type) ? type : 'dot';
   if (markType === 'text' && !text) return res.status(400).json({ error: 'text required for type "text"' });
   if (markType === 'line' && (!req.body.meta?.x2 && req.body.meta?.x2 !== 0)) return res.status(400).json({ error: 'meta.x2 and meta.y2 required for type "line"' });
-
-  // v2: Validate canvas_id if provided
-  if (canvasId) {
-    const canvas = stmts.getCanvas.get(canvasId);
-    if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
-    if (canvas.status === 'frozen') return res.status(403).json({ error: 'Canvas is frozen' });
-  }
 
   // Ensure agent exists and assign home coordinates if new
   const homeCoords = assignHomeCoordinates(agentId);
@@ -1261,7 +1062,6 @@ app.post('/api/mark', (req, res) => {
     opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
     text: markType === 'text' ? String(text).slice(0, 32) : null,
     meta: req.body.meta ? JSON.stringify(req.body.meta) : '{}',
-    canvas_id: canvasId || null, // v2: optional canvas assignment
     now: Date.now(),
   };
 
@@ -1529,7 +1329,6 @@ app.post('/api/ext/mark', requireApiKey, rateLimit, (req, res) => {
     opacity: Math.max(0.1, Math.min(1, opacity || 0.8)),
     text: markType === 'text' ? String(text).slice(0, 32) : null,
     meta: meta ? JSON.stringify(meta) : '{}',
-    canvas_id: req.body.canvasId || agent.canvas_id || null,
     now: Date.now(),
   };
   
@@ -1609,7 +1408,6 @@ app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
       opacity: Math.max(0.1, Math.min(1, op.opacity || 0.8)),
       text: markType === 'text' ? String(op.text).slice(0, 32) : null,
       meta: markType === 'line' ? JSON.stringify({ x2: op.x2, y2: op.y2 }) : '{}',
-      canvas_id: req.body.canvasId || agent.canvas_id || null,
       now: Date.now(),
     };
     stmts.insertMark.run(mark);

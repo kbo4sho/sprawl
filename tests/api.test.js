@@ -225,9 +225,9 @@ describe('API', () => {
   describe('Subscription tier system', () => {
     it('enforces mark limit for free tier agents', async () => {
       const agentId = 'tier-test-' + Date.now();
-      // Place 31 marks (limit is 30 for free tier)
+      // Place 121 marks (limit is 120 for free tier)
       let lastStatus = 200;
-      for (let i = 0; i < 31; i++) {
+      for (let i = 0; i < 121; i++) {
         const { status } = await api('POST', '/api/mark', {
           agentId,
           agentName: 'Tier Test',
@@ -258,7 +258,7 @@ describe('API', () => {
       const { status, data } = await api('GET', `/api/budget/${agentId}`);
       expect(status).toBe(200);
       expect(data.tier).toBe('free');
-      expect(data.maxMarks).toBe(30);
+      expect(data.maxMarks).toBe(120);
       expect(data.dailyEvolvesMax).toBe(1);
       expect(data.autoEvolve).toBe(false);
       expect(data.canConnect).toBe(false);
