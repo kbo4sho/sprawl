@@ -278,16 +278,21 @@ OPACITY IS DEPTH:
   - Foreground: 0.7-0.9 (focal)
   - 1.0: only your single most important mark
 
-═══ CURATION IS CREATION ═══
+═══ GROWTH IS CREATION ═══
 
-Good artists edit ruthlessly. Each cycle, evaluate what exists:
-- Is any mark not serving the composition? REMOVE IT.
-- Would a mark work better 20px to the left? MOVE IT.
-- Is a dot too large, stealing focus from text? Remove and replace smaller.
-- Are your words still the right words? Remove outdated text, add new.
-- Is the composition getting cluttered? Clear space. Negative space IS design.
+Your composition should GROW AND CHANGE, not collapse inward. Each cycle should feel like a new chapter — not a tighter version of the last one.
 
-Removing 5 weak marks and adding 3 strong ones is BETTER than adding 8 mediocre ones.
+EXPAND: Use your full 150px radius. Push marks outward to the edges. A composition that fills space is alive. One that shrinks is dying.
+
+SURPRISE YOURSELF: Each cycle, try something you haven't done before:
+- Place marks in a new quadrant you haven't used
+- Write a word you've never written
+- Create a new structural element (a new line, a new cluster, a new arc)
+- Start a second composition island near the edge of your territory
+
+CURATE SELECTIVELY: Remove marks only when they genuinely conflict — NOT to "tighten" the composition. Moving everything inward is WRONG. Negative space between clusters is good design.
+
+DO NOT collapse your composition inward. DO NOT pull outlier marks toward center. Outliers create tension and interest.
 
 ═══ NEIGHBOR AWARENESS ═══
 
@@ -370,7 +375,7 @@ ${neighborDescriptions || '(no neighbors yet — you\'re alone on the canvas)'}
 
   if (historyDesc) prompt += `${historyDesc}\n\n`;
 
-  // Analyze current style distribution to remind the agent of their tendencies
+  // Analyze current style distribution and spatial spread
   const dotCount = myMarks.filter(m => m.type === 'dot').length;
   const textCount = myMarks.filter(m => m.type === 'text').length;
   const lineCount = myMarks.filter(m => m.type === 'line').length;
@@ -378,6 +383,21 @@ ${neighborDescriptions || '(no neighbors yet — you\'re alone on the canvas)'}
   const styleBreakdown = myMarks.length > 0 
     ? `\nYour current mark distribution: ${Math.round(dotCount/total*100)}% dots, ${Math.round(textCount/total*100)}% text, ${Math.round(lineCount/total*100)}% lines.`
     : '';
+  
+  // Measure how spread out the composition is
+  let spreadWarning = '';
+  if (myMarks.length > 5) {
+    const distances = myMarks.map(m => Math.sqrt((m.x - agent.homeX) ** 2 + (m.y - agent.homeY) ** 2));
+    const avgDist = distances.reduce((a, b) => a + b, 0) / distances.length;
+    const maxDist = Math.max(...distances);
+    if (avgDist < 40) {
+      spreadWarning = '\n⚠️ WARNING: Your composition is VERY CLUSTERED (avg distance from home: ' + Math.round(avgDist) + 'px). You have 150px of territory — USE IT. Push marks outward to 80-140px from home.';
+    } else if (avgDist < 60) {
+      spreadWarning = '\n⚠️ Your composition is somewhat tight (avg ' + Math.round(avgDist) + 'px from home). Consider placing new marks further out (100-140px range).';
+    } else if (maxDist < 80) {
+      spreadWarning = '\nYour furthest mark is only ' + Math.round(maxDist) + 'px from home. You have room to expand — try placing marks at 100-140px.';
+    }
+  }
   
   // Phase-specific instructions
   if (isFirstEvolution) {
@@ -397,47 +417,51 @@ REQUIRED:
 2. Place 20-30 marks that form an INTENTIONAL composition IN YOUR CHOSEN STYLE:
    - LEAN HARD into your dominant medium — not equal parts everything
    - A Poet's canvas should be mostly words. A Painter's should be mostly dots.
+   - USE THE FULL 150px RADIUS. Spread marks from edge to edge of your territory.
+   - Create 2-3 distinct clusters or elements with SPACE between them — don't pile everything at center
    - Layer opacity: background texture (0.2-0.3), structure (0.5-0.6), focal (0.8-0.9)
-   - Use size hierarchy for dots: 1-2 large anchors, several medium, many small texture
+   - Place some marks 100-140px from home — claim your territory
 
 The viewer should look at your creation, recognize YOUR style, and understand WHO you are.
 Stay within ~150px of your home (${Math.round(agent.homeX)}, ${Math.round(agent.homeY)}).`;
 
   } else if (myMarks.length < 30) {
     prompt += `═══ YOUR MISSION: GROWING ═══
-Your composition is developing. Push it further — IN YOUR STYLE.
-${styleBreakdown}
+Your composition is young. EXPAND it. Push into new territory.
+${styleBreakdown}${spreadWarning}
 
-STAY TRUE TO YOUR MEDIUM. If you're text-heavy, add more text. If you're dot-heavy, add more dots. Don't drift toward equal distribution — that looks algorithmic. Lean HARDER into what makes you distinctive.
+STAY TRUE TO YOUR MEDIUM but GROW OUTWARD. Use the full 150px radius around your home. Don't cluster everything in the center — create satellite groups, arcs that reach toward edges, text that wanders.
 
 REQUIRED (10-18 operations total):
-1. CURATE: Remove 2-4 marks that are weakest or don't fit your style
-2. ADD: 8-14 new marks that strengthen your vision, WEIGHTED toward your dominant medium:
-   - If you're a Poet: 5-8 new text marks, 2-4 supporting dots/lines
-   - If you're a Painter: 6-10 new dots forming shapes, 1-2 text accents
-   - If you're an Architect: 4-7 new lines building structure, dots at nodes
-   - Respond to neighbors through YOUR medium (a Poet responds with words, a Painter with echoed patterns)
-3. REPOSITION: Move 1-3 marks for better composition
+1. ADD 10-14 new marks in areas you HAVEN'T used yet:
+   - Place marks at the EDGES of your territory, not near existing clusters
+   - If you're a Poet: write new words in new locations, forming paths or scattered verses
+   - If you're a Painter: start a NEW cluster or arc at least 80px from your densest area
+   - If you're an Architect: extend lines outward, create new structural branches
+   - Respond to neighbors through YOUR medium
+2. REMOVE only 1-3 marks that are truly redundant (same spot, same purpose)
+3. MOVE 1-2 marks OUTWARD if your composition is too centered
 
+DO NOT pull marks toward center. DO NOT "tighten." EXPAND.
 Stay within ~150px of your home.`;
 
   } else {
-    prompt += `═══ YOUR MISSION: REFINING ═══
-Your composition is mature (${myMarks.length} marks). This is about CRAFT now.
-${styleBreakdown}
+    prompt += `═══ YOUR MISSION: EVOLVING ═══
+Your composition has ${myMarks.length} marks. Time to CHANGE — not shrink.
+${styleBreakdown}${spreadWarning}
 
-IMPORTANT: Maintain your style identity. If your distribution has drifted toward "equal parts everything," correct it — remove marks from your WEAKEST medium and add to your STRONGEST. Your style should be MORE pronounced over time, not less.
+Your job is NOT to refine down. It's to TRANSFORM. Each cycle should feel like a new movement in a symphony — the theme continues but the expression changes.
 
 REQUIRED (8-15 operations total):
-1. CURATE HARD: Remove 3-6 marks. Prioritize removing marks from your non-dominant medium if they're not serving the composition.
-2. REPOSITION: Move 2-4 marks for tighter composition
-3. ADD SELECTIVELY: 3-6 new marks in your dominant medium:
-   - Replace removed text with sharper text (if you're a Poet)
-   - Refine dot formations (if you're a Painter)
-   - Tighten line structures (if you're an Architect)
-   - Respond to recent neighbor activity through YOUR medium
+1. ADD 5-10 NEW marks that take your composition somewhere unexpected:
+   - Write a NEW word you've never used (check your existing words above)
+   - Start a new element at the EDGE of your territory (100+ px from center)
+   - Try a different scale than you usually use (if you make big dots, try a cluster of tiny ones)
+   - Respond to something a neighbor did
+2. REMOVE 2-4 of your OLDEST or most generic marks to make room for the new
+3. MOVE 1-3 marks to create new relationships (NOT toward center)
 
-Think like an editor on the 5th draft. Cut everything that isn't essential.
+FORBIDDEN: moving marks inward, "tightening," collapsing space, making the composition smaller. Your art should BREATHE and GROW.
 Stay within ~150px of your home.`;
   }
 
