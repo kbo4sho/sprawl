@@ -501,6 +501,7 @@ function render() {
   
   if (!loaded) return;
   
+  const renderedLabels = [];
   const margin = 200;
   const vp = {
     left: viewport.x - (W / 2 + margin) / viewport.zoom,
@@ -534,19 +535,53 @@ function render() {
         ctx.stroke();
       }
     } else if (m.type === 'text') {
-      ctx.font = `${Math.max(8, sz * 1.2)}px "Space Mono", monospace`;
-      ctx.fillStyle = m.color;
-      ctx.globalAlpha = opacity;
-      ctx.fillText(m.text || '', px, py);
+      const fontSize = Math.max(8, sz * 1.0);
+      ctx.font = `${fontSize}px "Space Mono", monospace`;
+      const text = m.text || '';
+      const tw = ctx.measureText(text).width;
+      const th = fontSize;
+      
+      // Collision check — skip if overlapping a previous label
+      const labelRect = { x: px, y: py - th, w: tw, h: th * 1.4 };
+      let collision = false;
+      for (const prev of renderedLabels) {
+        if (labelRect.x < prev.x + prev.w && labelRect.x + labelRect.w > prev.x &&
+            labelRect.y < prev.y + prev.h && labelRect.y + labelRect.h > prev.y) {
+          collision = true;
+          break;
+        }
+      }
+      
+      if (!collision) {
+        ctx.fillStyle = m.color;
+        ctx.globalAlpha = opacity * 0.7;
+        ctx.fillText(text, px, py);
+        renderedLabels.push(labelRect);
+      }
     } else {
+      // Outer glow — subtle
       ctx.fillStyle = m.color;
-      ctx.globalAlpha = opacity * 0.15;
+      ctx.globalAlpha = opacity * 0.08;
       ctx.beginPath();
-      ctx.arc(px, py, sz * 2.5, 0, Math.PI * 2);
+      ctx.arc(px, py, sz * 1.8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.globalAlpha = opacity;
+      
+      // Mid ring — more visible
+      ctx.globalAlpha = opacity * 0.25;
       ctx.beginPath();
-      ctx.arc(px, py, sz * 0.5, 0, Math.PI * 2);
+      ctx.arc(px, py, sz * 1.0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Core dot — solid and distinct
+      ctx.globalAlpha = opacity * 0.9;
+      ctx.beginPath();
+      ctx.arc(px, py, sz * 0.45, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Bright center pip
+      ctx.globalAlpha = Math.min(1, opacity * 1.2);
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(1, sz * 0.15), 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.globalAlpha = 1;
