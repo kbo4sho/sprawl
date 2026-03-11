@@ -289,15 +289,23 @@ async function renderPreviews() {
         ctx.globalAlpha = opacity;
         ctx.fillText((m.text || '').slice(0, 20), px, py);
       } else {
-        // Dot with glow
+        // Match canvas view: 4-layer dot rendering
         ctx.fillStyle = m.color;
-        ctx.globalAlpha = opacity * 0.15;
+        ctx.globalAlpha = opacity * 0.08;
         ctx.beginPath();
-        ctx.arc(px, py, sz * 2, 0, Math.PI * 2);
+        ctx.arc(px, py, sz * 1.8, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = opacity;
+        ctx.globalAlpha = opacity * 0.25;
         ctx.beginPath();
-        ctx.arc(px, py, sz * 0.4, 0, Math.PI * 2);
+        ctx.arc(px, py, sz * 1.0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = opacity * 0.9;
+        ctx.beginPath();
+        ctx.arc(px, py, sz * 0.45, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = Math.min(1, opacity * 1.2);
+        ctx.beginPath();
+        ctx.arc(px, py, Math.max(0.5, sz * 0.15), 0, Math.PI * 2);
         ctx.fill();
       }
       ctx.globalAlpha = 1;
