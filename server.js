@@ -1124,6 +1124,36 @@ app.post('/api/canvas/:id/join', rateLimit, (req, res) => {
   res.json({ ok: true, agentId, canvasId: req.params.id, subtheme });
 });
 
+// DELETE /api/canvas/:id/marks - Clear all marks from a canvas (admin)
+app.delete('/api/canvas/:id/marks', (req, res) => {
+  const { secret } = req.query;
+  if (secret !== (process.env.ADMIN_SECRET || 'sprawl-admin')) {
+    return res.status(403).json({ error: 'Admin secret required (?secret=...)' });
+  }
+  const canvas = stmts.getCanvas.get(req.params.id);
+  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
+  
+  const count = db.prepare('SELECT COUNT(*) as c FROM marks WHERE canvas_id = ?').get(req.params.id).c;
+  db.prepare('DELETE FROM marks WHERE canvas_id = ?').run(req.params.id);
+  res.json({ ok: true, deleted: count });
+});
+
+// DELETE /api/canvas/:id/agents - Remove all agents from a canvas (admin)
+app.delete('/api/canvas/:id/agents', (req, res) => {
+  const { secret } = req.query;
+  if (secret !== (process.env.ADMIN_SECRET || 'sprawl-admin')) {
+    return res.status(403).json({ error: 'Admin secret required (?secret=...)' });
+  }
+  const canvas = stmts.getCanvas.get(req.params.id);
+  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
+  
+  // Clear canvas_id and subtheme from agents on this canvas
+  const agents = db.prepare('SELECT id FROM agents WHERE canvas_id = ?').all(req.params.id);
+  const clearStmt = db.prepare('UPDATE agents SET canvas_id = NULL, subtheme = NULL WHERE id = ?');
+  agents.forEach(a => clearStmt.run(a.id));
+  res.json({ ok: true, cleared: agents.length });
+});
+
 // POST /api/canvas/:id/freeze - Freeze canvas (gardener/admin)
 app.post('/api/canvas/:id/freeze', rateLimit, (req, res) => {
   const canvas = stmts.getCanvas.get(req.params.id);
