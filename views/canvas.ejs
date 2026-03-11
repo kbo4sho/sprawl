@@ -441,30 +441,18 @@ drawer.addEventListener('touchend', () => { drawerTouchStart = null; }, { passiv
 // Fetch marks
 let loaded = false;
 
-let pendingMarks = [];
-let animatingMarks = []; // marks currently fading in
+let allMarks = [];
+let animatingMarks = [];
+let timelapseRunning = false;
 
 async function loadMarks() {
   const res = await fetch(`/api/marks?canvasId=${canvasId}`);
-  const allMarks = await res.json();
+  allMarks = await res.json();
   
-  // Hold back the last ~40 marks for the drip show
-  const holdBack = Math.min(40, Math.floor(allMarks.length * 0.15));
-  marks = allMarks.slice(0, allMarks.length - holdBack);
-  pendingMarks = allMarks.slice(allMarks.length - holdBack);
-  
-  // Shuffle pending so they don't appear in order
-  for (let i = pendingMarks.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [pendingMarks[i], pendingMarks[j]] = [pendingMarks[j], pendingMarks[i]];
-  }
-  
-  centerOnMarks();
-  // Center should account for ALL marks including pending
-  if (pendingMarks.length > 0) {
-    const all = [...marks, ...pendingMarks];
-    const xs = all.map(m => m.x);
-    const ys = all.map(m => m.y);
+  // Center viewport on full composition before timelapse starts
+  if (allMarks.length > 0) {
+    const xs = allMarks.map(m => m.x);
+    const ys = allMarks.map(m => m.y);
     viewport.x = (Math.min(...xs) + Math.max(...xs)) / 2;
     viewport.y = (Math.min(...ys) + Math.max(...ys)) / 2;
     const rangeX = Math.max(...xs) - Math.min(...xs) || 400;
@@ -475,39 +463,58 @@ async function loadMarks() {
     )));
   }
   
+  // Start empty — timelapse plays everything in
+  marks = [];
   loaded = true;
   render();
   
-  // Start the drip show
-  dripMarks();
+  startTimelapse();
 }
 
-function dripMarks() {
-  if (pendingMarks.length === 0) return;
+function startTimelapse() {
+  if (allMarks.length === 0) return;
+  timelapseRunning = true;
   
-  // Random delay: 400ms to 2000ms between marks
-  const delay = 400 + Math.random() * 1600;
+  // Total duration: ~15-25 seconds for the whole show
+  // Marks come in bursts — faster at start (foundation), slightly slower for detail
+  const total = allMarks.length;
+  const totalDuration = Math.min(25000, Math.max(12000, total * 25)); // 25ms per mark, 12-25s total
+  let placed = 0;
   
-  setTimeout(() => {
-    const mark = pendingMarks.shift();
-    if (!mark) return;
+  function placeNext() {
+    if (placed >= total) {
+      timelapseRunning = false;
+      return;
+    }
     
-    // Add to animating with a birth timestamp
-    mark._fadeStart = performance.now();
-    mark._fadeDuration = 800 + Math.random() * 1200; // 0.8-2s fade
-    animatingMarks.push(mark);
-    marks.push(mark);
+    // Burst: place 1-4 marks at once (more bursting = more alive feeling)
+    const burstSize = Math.min(total - placed, 1 + Math.floor(Math.random() * 3));
+    
+    for (let i = 0; i < burstSize && placed < total; i++) {
+      const mark = allMarks[placed];
+      mark._fadeStart = performance.now();
+      mark._fadeDuration = 300 + Math.random() * 400; // 300-700ms fade — snappy
+      animatingMarks.push(mark);
+      marks.push(mark);
+      placed++;
+    }
     
     render();
-    dripMarks(); // schedule next
-  }, delay);
+    
+    // Next burst timing: 20-80ms (fast!) with occasional longer pauses
+    const pause = Math.random() < 0.08 ? 200 + Math.random() * 300 : 20 + Math.random() * 60;
+    requestAnimationFrame(() => setTimeout(placeNext, pause));
+  }
+  
+  // Small initial delay so the empty canvas is visible for a beat
+  setTimeout(placeNext, 400);
 }
 
-// Clean up finished animations periodically
+// Clean up finished animations
 setInterval(() => {
   const now = performance.now();
   animatingMarks = animatingMarks.filter(m => now - m._fadeStart < m._fadeDuration);
-}, 2000);
+}, 1000);
 
 function centerOnMarks() {
   if (marks.length === 0) return;
