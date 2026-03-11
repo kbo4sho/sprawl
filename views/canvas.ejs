@@ -441,15 +441,73 @@ drawer.addEventListener('touchend', () => { drawerTouchStart = null; }, { passiv
 // Fetch marks
 let loaded = false;
 
+let pendingMarks = [];
+let animatingMarks = []; // marks currently fading in
+
 async function loadMarks() {
   const res = await fetch(`/api/marks?canvasId=${canvasId}`);
-  marks = await res.json();
+  const allMarks = await res.json();
   
-  // Auto-center on content
+  // Hold back the last ~40 marks for the drip show
+  const holdBack = Math.min(40, Math.floor(allMarks.length * 0.15));
+  marks = allMarks.slice(0, allMarks.length - holdBack);
+  pendingMarks = allMarks.slice(allMarks.length - holdBack);
+  
+  // Shuffle pending so they don't appear in order
+  for (let i = pendingMarks.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pendingMarks[i], pendingMarks[j]] = [pendingMarks[j], pendingMarks[i]];
+  }
+  
   centerOnMarks();
+  // Center should account for ALL marks including pending
+  if (pendingMarks.length > 0) {
+    const all = [...marks, ...pendingMarks];
+    const xs = all.map(m => m.x);
+    const ys = all.map(m => m.y);
+    viewport.x = (Math.min(...xs) + Math.max(...xs)) / 2;
+    viewport.y = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const rangeX = Math.max(...xs) - Math.min(...xs) || 400;
+    const rangeY = Math.max(...ys) - Math.min(...ys) || 400;
+    viewport.zoom = Math.max(0.3, Math.min(2, Math.min(
+      (window.innerWidth * 0.7) / rangeX,
+      (window.innerHeight * 0.6) / rangeY
+    )));
+  }
+  
   loaded = true;
   render();
+  
+  // Start the drip show
+  dripMarks();
 }
+
+function dripMarks() {
+  if (pendingMarks.length === 0) return;
+  
+  // Random delay: 400ms to 2000ms between marks
+  const delay = 400 + Math.random() * 1600;
+  
+  setTimeout(() => {
+    const mark = pendingMarks.shift();
+    if (!mark) return;
+    
+    // Add to animating with a birth timestamp
+    mark._fadeStart = performance.now();
+    mark._fadeDuration = 800 + Math.random() * 1200; // 0.8-2s fade
+    animatingMarks.push(mark);
+    marks.push(mark);
+    
+    render();
+    dripMarks(); // schedule next
+  }, delay);
+}
+
+// Clean up finished animations periodically
+setInterval(() => {
+  const now = performance.now();
+  animatingMarks = animatingMarks.filter(m => now - m._fadeStart < m._fadeDuration);
+}, 2000);
 
 function centerOnMarks() {
   if (marks.length === 0) return;
@@ -501,6 +559,7 @@ function render() {
   
   if (!loaded) return;
   
+  let needsAnim = false;
   const renderedLabels = [];
   const margin = 200;
   const vp = {
@@ -520,7 +579,17 @@ function render() {
     const px = screen.x;
     const py = screen.y;
     const sz = (m.size || 8) * viewport.zoom;
-    const opacity = m.effectiveOpacity || m.opacity || 0.8;
+    let opacity = m.effectiveOpacity || m.opacity || 0.8;
+    
+    // Fade in animation
+    if (m._fadeStart) {
+      const elapsed = performance.now() - m._fadeStart;
+      const progress = Math.min(1, elapsed / m._fadeDuration);
+      // Ease out cubic for smooth fade
+      const ease = 1 - Math.pow(1 - progress, 3);
+      opacity *= ease;
+      if (progress < 1) needsAnim = true;
+    }
     
     if (m.type === 'line') {
       const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : (m.meta || {});
@@ -588,6 +657,9 @@ function render() {
   }
   
   renderMinimap();
+  
+  // Keep animating if marks are fading in
+  if (needsAnim) requestAnimationFrame(render);
 }
 
 function renderMinimap() {
