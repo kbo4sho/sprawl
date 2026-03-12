@@ -40,6 +40,7 @@ const THEME_CONFIGS = {
   // Each theme defines subthemes + agent templates + spatial guides
   'city': {
     subthemes: ['towers', 'windows', 'sky', 'ground', 'atmosphere'],
+    spatialGuide: 'City skyline centered at (0,0). Ground level y=100. Sky above (negative y). Spans x=-250 to x=250.',
     agents: [
       { role: 'Steel',    color: '#4a6a8a', subtheme: 'towers',     personality: 'Structural and cold. Tallest skyscrapers — geometric, sharp, monolithic.' },
       { role: 'Concrete', color: '#6a6a72', subtheme: 'towers',     personality: 'Brutalist and heavy. Shorter, wider buildings. Concrete slabs.' },
@@ -68,6 +69,7 @@ Streetlights at y=8-15. Traffic streaks at y=25-45. Fades past y=180.`,
   },
   'flower': {
     subthemes: ['petals', 'center', 'stem', 'atmosphere'],
+    spatialGuide: 'Flower centered at (0,0). Positive Y = down. 400x500px composition area.',
     agents: [
       { role: 'Warmth', color: '#c45e78', subtheme: 'petals', personality: 'Bold, dense petals with rich pink. Upper petals.' },
       { role: 'Blush',  color: '#d4849a', subtheme: 'petals', personality: 'Soft, lighter translucent petals. Lower and sides.' },
@@ -88,6 +90,7 @@ Streetlights at y=8-15. Traffic streaks at y=25-45. Fades past y=180.`,
   },
   'jungle': {
     subthemes: ['canopy', 'trunks', 'floor', 'life'],
+    spatialGuide: 'Canopy fills upper third (y: -250 to -50), trunks span middle (y: -80 to 250), floor at bottom (y: 200 to 380). Life scattered throughout.',
     agents: [
       { role: 'Canopy',      color: '#2d5a27', subtheme: 'canopy', personality: 'Dense and towering. Broad leaf clusters, layered greens, heavy coverage overhead.' },
       { role: 'Verdant',     color: '#4a8a3a', subtheme: 'canopy', personality: 'Bright and lively. Lighter green highlights — sunlit leaves, new growth, dappled light.' },
@@ -115,6 +118,40 @@ BUTTERFLIES: tiny bright dots 3-6 in mid-air (y: -50 to 200). FLOWERS: small bri
 MIST: extremely faint dots (opacity 0.05-0.2) throughout mid-air. Creates depth.
 LIGHT RAYS: faint lines (opacity 0.1-0.25, size 1-3) angling from canopy gaps to floor.
 Text: "breathe", "listen", "alive", "ancient", "hush" — size 12-18, opacity 0.15-0.35.`,
+    },
+  },
+  'portrait': {
+    subthemes: ['face', 'features', 'hair', 'shadow', 'atmosphere'],
+    spatialGuide: 'Head centered at (0,-50). Face oval spans roughly x=-80..80, y=-180..40. Shoulders hint below y=60. Shadow wraps from right side.',
+    agents: [
+      { role: 'Skin',     color: '#c4956a', subtheme: 'face',       personality: 'Warm and smooth. Builds the face shape — forehead, cheeks, jawline. Dense warm dots forming an oval.' },
+      { role: 'Contour',  color: '#8a6a4a', subtheme: 'face',       personality: 'Sculptural depth. Defines cheekbones, nose bridge, brow ridge. Darker tones that give the face dimension.' },
+      { role: 'Gaze',     color: '#3a4a5a', subtheme: 'features',   personality: 'Intense and precise. Builds the eyes — dark irises, bright highlights, defined lash lines. The soul of the portrait.' },
+      { role: 'Whisper',  color: '#a86a6a', subtheme: 'features',   personality: 'Soft and expressive. Lips, nose tip, ear hints. Warm pinks and subtle shapes.' },
+      { role: 'Mane',     color: '#2a2a3a', subtheme: 'hair',       personality: 'Dark and flowing. Hair cascading from the top of the head. Thick strokes, sweeping lines.' },
+      { role: 'Strand',   color: '#4a4a5a', subtheme: 'hair',       personality: 'Individual highlights and texture in the hair. Lighter wisps, flyaways, shine streaks.' },
+      { role: 'Absence',  color: '#0a0a14', subtheme: 'shadow',     personality: 'Pure darkness. The shadow the face emerges FROM. Deep black, very low opacity on edges, solid in corners.' },
+      { role: 'Ember',    color: '#6a4a3a', subtheme: 'atmosphere', personality: 'Warm ambient glow. Rim light on the lit side. Faint warmth radiating from the face into darkness.' },
+    ],
+    guides: {
+      face: `Face shape centered at (0,-50). Oval of tightly packed dots: x=-70..70, y=-170..30.
+Forehead: upper region y=-170 to y=-100, wider. Cheeks: y=-80 to y=-20, widest. Jaw: narrows to chin at (0,30).
+Dots size 8-18 for mass, 3-6 for texture. High opacity (0.6-0.9) on lit side (left), lower on shadow side (right).`,
+      features: `EYES at y=-90, centered at x=-28 (left eye) and x=28 (right eye). Each eye: 8-12 dots.
+Dark iris (size 6-10), bright highlight dot (size 3-4, high opacity), surrounding socket shadow.
+NOSE: vertical ridge from y=-80 to y=-30, center. Tip highlight at (0,-30). 5-8 dots.
+LIPS at y=0 to y=15, x=-25..25. Upper lip darker, lower lip lighter with highlight. 8-12 dots.`,
+      hair: `Flows from top of head (y=-200 to y=-160) outward and down. Left side more visible (lit).
+Lines size 2-5 sweeping downward. Dense dot clusters at crown. Hair extends past face edges.
+Right side hair blends into shadow. Some strands cross forehead (y=-150 to y=-130).`,
+      shadow: `Everything RIGHT of the face and the background. The darkness the portrait emerges from.
+Large dots (size 30-60, opacity 0.15-0.5) filling x=80..300 and corners. Deepest in upper-right.
+Shadow creeps onto right side of face (x=40..70) with medium opacity. Gradient from face to void.
+A few very large, very faint marks (size 50-80, opacity 0.05-0.12) in far corners.`,
+      atmosphere: `Rim light on the LEFT edge of face/hair. Warm dots (size 4-10, opacity 0.3-0.6) tracing the profile.
+Faint warm glow radiating outward from face into dark (large dots, low opacity).
+Text words barely visible: "here", "seen", "emerge", "still" — size 10-16, opacity 0.1-0.25.
+Less is more. This layer is about mood, not structure.`,
     },
   },
   // Generic fallback — LLM figures out the composition
@@ -145,6 +182,7 @@ function detectThemeConfig(theme) {
   if (lower.includes('city') || lower.includes('skyline') || lower.includes('urban')) return THEME_CONFIGS.city;
   if (lower.includes('flower') || lower.includes('bloom') || lower.includes('petal')) return THEME_CONFIGS.flower;
   if (lower.includes('jungle') || lower.includes('forest') || lower.includes('rainforest') || lower.includes('lush')) return THEME_CONFIGS.jungle;
+  if (lower.includes('portrait') || lower.includes('face') || lower.includes('person')) return THEME_CONFIGS.portrait;
   return THEME_CONFIGS._generic;
 }
 
@@ -317,10 +355,18 @@ async function main() {
   let theme;
   
   if (flags.new) {
-    // Create new canvas
+    // Create new canvas with full config from theme
     theme = flags.new;
-    const res = await apiPost('/api/canvas', { theme });
+    const config = detectThemeConfig(theme);
+    const weekOf = new Date().toISOString().split('T')[0];
+    const spatialGuide = config.spatialGuide || `Composition centered at (0,0). Positive Y = down. 600x600px area.`;
+    const subthemeData = config.subthemes.map(name => {
+      const guide = config.guides?.[name] || '';
+      return typeof name === 'object' ? name : { name, spatial_guide: guide.split('\n')[0], agent_cap: config.agents.filter(a => a.subtheme === name).length + 1 };
+    });
+    const res = await apiPost('/api/canvas', { theme, subthemes: subthemeData, spatialGuide, weekOf });
     canvasId = res.id;
+    if (!canvasId) { console.log('Canvas creation failed:', JSON.stringify(res)); process.exit(1); }
     console.log(`Created canvas: ${canvasId}`);
   }
   
