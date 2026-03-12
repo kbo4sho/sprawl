@@ -445,21 +445,30 @@ let allMarks = [];
 let animatingMarks = [];
 let timelapseRunning = false;
 
+// Fixed bounds computed once from all marks — prevents bounce during timelapse
+let fixedBounds = null;
+
 async function loadMarks() {
   const res = await fetch(`/api/marks?canvasId=${canvasId}`);
   allMarks = await res.json();
   
-  // Center viewport on full composition before timelapse starts
+  // Compute bounds ONCE from all marks — used for viewport and minimap throughout timelapse
   if (allMarks.length > 0) {
     const xs = allMarks.map(m => m.x);
     const ys = allMarks.map(m => m.y);
-    viewport.x = (Math.min(...xs) + Math.max(...xs)) / 2;
-    viewport.y = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const rangeX = Math.max(...xs) - Math.min(...xs) || 400;
-    const rangeY = Math.max(...ys) - Math.min(...ys) || 400;
+    fixedBounds = {
+      minX: Math.min(...xs), maxX: Math.max(...xs),
+      minY: Math.min(...ys), maxY: Math.max(...ys),
+      cx: (Math.min(...xs) + Math.max(...xs)) / 2,
+      cy: (Math.min(...ys) + Math.max(...ys)) / 2,
+      rangeX: Math.max(...xs) - Math.min(...xs) || 400,
+      rangeY: Math.max(...ys) - Math.min(...ys) || 400,
+    };
+    viewport.x = fixedBounds.cx;
+    viewport.y = fixedBounds.cy;
     viewport.zoom = Math.max(0.3, Math.min(2, Math.min(
-      (window.innerWidth * 0.7) / rangeX,
-      (window.innerHeight * 0.6) / rangeY
+      (window.innerWidth * 0.7) / fixedBounds.rangeX,
+      (window.innerHeight * 0.6) / fixedBounds.rangeY
     )));
   }
   
@@ -678,16 +687,10 @@ function renderMinimap() {
   mmCtx.fillStyle = '#030306';
   mmCtx.fillRect(0, 0, W, H);
   
-  if (marks.length === 0) return;
+  if (marks.length === 0 || !fixedBounds) return;
   
-  const xs = marks.map(m => m.x);
-  const ys = marks.map(m => m.y);
-  const minX = Math.min(...xs), maxX = Math.max(...xs);
-  const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
-  const rangeX = maxX - minX || 400;
-  const rangeY = maxY - minY || 400;
+  // Use fixedBounds (computed once from allMarks) to prevent jitter during timelapse
+  const { cx, cy, rangeX, rangeY } = fixedBounds;
   const scale = Math.min((W - 10) / rangeX, (H - 10) / rangeY) * 0.8;
   
   for (const m of marks) {
@@ -798,16 +801,11 @@ document.getElementById('zoom-reset').addEventListener('click', () => {
 // Minimap click
 if (minimap) {
   minimap.addEventListener('click', e => {
-    if (marks.length === 0) return;
+    if (marks.length === 0 || !fixedBounds) return;
     const rect = minimap.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const xs = marks.map(m => m.x);
-    const ys = marks.map(m => m.y);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const rangeX = Math.max(...xs) - Math.min(...xs) || 400;
-    const rangeY = Math.max(...ys) - Math.min(...ys) || 400;
+    const { cx, cy, rangeX, rangeY } = fixedBounds;
     const scale = Math.min((minimap.offsetWidth - 10) / rangeX, (minimap.offsetHeight - 10) / rangeY) * 0.8;
     viewport.x = (mx - minimap.offsetWidth / 2) / scale + cx;
     viewport.y = (my - minimap.offsetHeight / 2) / scale + cy;
