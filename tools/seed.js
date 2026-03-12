@@ -86,6 +86,37 @@ Streetlights at y=8-15. Traffic streaks at y=25-45. Fades past y=180.`,
       atmosphere: `Tiny faint marks around the edges. Text words whispered. Barely visible.`,
     },
   },
+  'jungle': {
+    subthemes: ['canopy', 'trunks', 'floor', 'life'],
+    agents: [
+      { role: 'Canopy',      color: '#2d5a27', subtheme: 'canopy', personality: 'Dense and towering. Broad leaf clusters, layered greens, heavy coverage overhead.' },
+      { role: 'Verdant',     color: '#4a8a3a', subtheme: 'canopy', personality: 'Bright and lively. Lighter green highlights — sunlit leaves, new growth, dappled light.' },
+      { role: 'Ancient',     color: '#5a3a28', subtheme: 'trunks', personality: 'Massive and textured. Thick tree trunks with bark texture. Buttress roots. Structural.' },
+      { role: 'Vine',        color: '#6a7a38', subtheme: 'trunks', personality: 'Climbing and winding. Vines wrapping trunks, hanging lianas, aerial roots.' },
+      { role: 'Undergrowth', color: '#3a6a30', subtheme: 'floor',  personality: 'Low and dense. Ferns, moss, fallen leaves. Small detailed marks, rich texture.' },
+      { role: 'Decay',       color: '#8a7a48', subtheme: 'floor',  personality: 'Earthy and warm. Decomposing leaves, mushrooms, soil tones. The cycle of life.' },
+      { role: 'Parrot',      color: '#c43a3a', subtheme: 'life',   personality: 'Vivid and bold. Bright splashes — tropical birds, flowers, butterflies. Pops of color.' },
+      { role: 'Mist',        color: '#8aaaba', subtheme: 'life',   personality: 'Ethereal and soft. Morning mist, light rays through canopy, water droplets. Dreamlike.' },
+    ],
+    guides: {
+      canopy: `Dense jungle canopy (y: -250 to -50). Broad leaf clusters: 10-15 dots per cluster.
+Mix dark (#2d5a27) and light (#4a8a3a) greens. DENSE tropical coverage, overlap heavily.
+Small light gaps for sunbeams. Leaf sizes: large clusters 15-25, individual 6-12, texture 2-5.
+Lines for branches: size 3-8, connecting trunk tops to leaf clusters.`,
+      trunks: `Vertical structure (y: -80 to 250). 2-3 major trunks: main at x=-60, secondary x=80, smaller x=30.
+Trunk width: dots size 10-20 packed tight, bark texture with small dots 3-6.
+Buttress roots: triangular flaring at base (y: 180-250). Vines: sinuous lines wrapping trunks (size 2-4).
+Hanging lianas as vertical lines from canopy. Aerial roots: thin lines size 1-3, low opacity.`,
+      floor: `Ground layer (y: 200 to 380). Ferns (fan-shaped, 8-12 dots each), moss (tiny dots 1-4, very dense).
+Fallen leaves: scattered medium dots 6-10 in browns/yellows. Mushrooms: small clusters near trunk bases.
+Text words: "grow", "rot", "feed", "roots", "soil", "life" — size 6-10, opacity 0.2-0.4. ALIVE with texture.`,
+      life: `Wildlife + atmosphere. BIRDS: 1-2 bright red/orange/yellow splashes (size 8-16) in canopy. 3-5 dots per bird.
+BUTTERFLIES: tiny bright dots 3-6 in mid-air (y: -50 to 200). FLOWERS: small bright clusters at ground/vines.
+MIST: extremely faint dots (opacity 0.05-0.2) throughout mid-air. Creates depth.
+LIGHT RAYS: faint lines (opacity 0.1-0.25, size 1-3) angling from canopy gaps to floor.
+Text: "breathe", "listen", "alive", "ancient", "hush" — size 12-18, opacity 0.15-0.35.`,
+    },
+  },
   // Generic fallback — LLM figures out the composition
   '_generic': {
     subthemes: ['foreground', 'midground', 'background', 'detail', 'atmosphere'],
@@ -113,6 +144,7 @@ function detectThemeConfig(theme) {
   const lower = theme.toLowerCase();
   if (lower.includes('city') || lower.includes('skyline') || lower.includes('urban')) return THEME_CONFIGS.city;
   if (lower.includes('flower') || lower.includes('bloom') || lower.includes('petal')) return THEME_CONFIGS.flower;
+  if (lower.includes('jungle') || lower.includes('forest') || lower.includes('rainforest') || lower.includes('lush')) return THEME_CONFIGS.jungle;
   return THEME_CONFIGS._generic;
 }
 
