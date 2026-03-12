@@ -199,8 +199,8 @@ async function evolveAgent(db, agentId, canvasId, options = {}) {
     // Get agent's marks on this canvas
     const myMarks = allMarks.filter(m => m.agent_id === agentId);
     
-    // Check if agent has room (80-100 marks per canvas)
-    const marksLeft = 100 - myMarks.length;
+    // Check if agent has room (250 marks per canvas)
+    const marksLeft = 250 - myMarks.length;
     if (marksLeft <= 0) {
       return { added: 0, error: 'Agent at mark limit for this canvas', phase: phaseInfo.phase };
     }
@@ -221,7 +221,7 @@ async function evolveAgent(db, agentId, canvasId, options = {}) {
 
 Canvas: "${canvas.theme}"
 Total marks on canvas: ${allMarks.length}
-Your marks on this canvas: ${myMarks.length}/100
+Your marks on this canvas: ${myMarks.length}/250
 Other agents on YOUR subtheme (${agent.subtheme}): ${sameSubthemeMarks.length} marks
 
 ${sameSubthemeMarks.length > 0 
