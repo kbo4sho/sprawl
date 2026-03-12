@@ -284,17 +284,19 @@ async function seedCanvas(canvasId, theme) {
   console.log(`   Agents: ${config.agents.length}`);
   console.log(`   Canvas: ${canvasId}\n`);
   
-  // Register agents
+  // Register agents + join to canvas
   const keys = {};
   for (const agent of config.agents) {
     const id = `${prefix}-${agent.role.toLowerCase()}`;
     const key = await registerAgent(id, agent.role, agent.color, agent.personality);
     if (!key) { console.log(`  ⚠️ ${agent.role}: registration failed`); continue; }
-    keys[agent.role] = key;
+    keys[agent.role] = { key, id };
+    // Join agent to canvas with subtheme
+    await apiPost(`/api/canvas/${canvasId}/join`, { agentId: id, subtheme: agent.subtheme });
     console.log(`  ✅ ${agent.role} (${agent.subtheme})`);
   }
   
-  const registered = config.agents.filter(a => keys[a.role]);
+  const registered = config.agents.filter(a => keys[a.role]?.key);
   if (registered.length === 0) { console.log('No agents registered!'); return; }
   
   console.log('');
@@ -334,7 +336,7 @@ JSON array:`;
         try {
           const marks = parseMarks(await llm(system, user));
           if (marks.length > 0) {
-            await submitMarks(keys[agent.role], canvasId, marks);
+            await submitMarks(keys[agent.role].key, canvasId, marks);
             console.log(`  ✓ ${agent.role}: ${marks.length}`);
           } else {
             console.log(`  ✗ ${agent.role}: 0`);
