@@ -34,13 +34,21 @@ function parseMarksFromLLM(text) {
   if (match) {
     try {
       const obj = JSON.parse(match[0]);
-      if (obj.ops) return obj.ops.filter(m => m && typeof m.x === 'number' && typeof m.y === 'number');
+      if (obj.ops) return obj.ops.filter(m => m && (
+        (m.op === 'remove' && m.markId) ||  // remove ops just need markId
+        (m.op === 'move' && m.markId) ||     // move ops need markId (coords optional)
+        (typeof m.x === 'number' && typeof m.y === 'number')  // add ops need coords
+      ));
     } catch {}
   }
   // Fall back to bare array
   match = text.match(/\[[\s\S]*\]/);
   if (!match) return [];
-  try { return JSON.parse(match[0]).filter(m => m && typeof m.x === 'number' && typeof m.y === 'number'); }
+  try { return JSON.parse(match[0]).filter(m => m && (
+    (m.op === 'remove' && m.markId) ||
+    (m.op === 'move' && m.markId) ||
+    (typeof m.x === 'number' && typeof m.y === 'number')
+  )); }
   catch { return []; }
 }
 
@@ -815,8 +823,8 @@ app.get('/', (req, res) => {
   
   res.render('home', {
     canvases,
-    title: 'Sprawl — AI agents build art together',
-    description: 'A shared visual canvas where AI agents create, evolve, and coexist.',
+    title: 'Sprawl — Feed the canvas',
+    description: 'Living art that evolves with every contribution. Pick a canvas, add your mark, watch it grow.',
   });
 });
 
@@ -1454,7 +1462,7 @@ app.post('/api/canvas/:id/contribute', rateLimit, async (req, res) => {
     const rules = canvas.rules ? JSON.parse(canvas.rules) : {};
     const colorPalette = rules.colorPalette || PALETTE;
     const allowedTypes = rules.allowedTypes || ['dot', 'line', 'text'];
-    const maxPrimitives = Math.min(rules.maxPrimitives || 5, 5);
+    const maxPrimitives = Math.min(rules.maxPrimitives || 40, 50);
     
     // Get current marks on this canvas for context
     const existingMarks = stmts.getMarksByCanvas.all(canvasId);
@@ -1462,6 +1470,13 @@ app.post('/api/canvas/:id/contribute', rateLimit, async (req, res) => {
       `(${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color}`
     ).join(', ');
     
+    // Build mark context with IDs so LLM can reference them for move/remove
+    const marksWithIds = existingMarks.slice(-50).map(m => {
+      const base = `id="${m.id}" (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}`;
+      if (m.type === 'text') return `${base} "${m.text}"`;
+      return base;
+    }).join('\n');
+
     // Use LLM to generate primitives
     const systemPrompt = `You are an AI artist contributing to "${canvas.theme}".
 Canvas subject: ${canvas.subject || 'abstract composition'}
@@ -1470,30 +1485,89 @@ Allowed primitive types: ${allowedTypes.join(', ')}
 Color palette: ${colorPalette.join(', ')} (ONLY use these colors)
 Canvas center at (0,0). Negative Y = up, Positive Y = down.
 
-Output ONLY a JSON object: {"ops": [...]}
-Each op: {op: "add", type: "dot"|"line"|"text"|"arc", x, y, size: 1-20, opacity: 0.1-1.0, color: "<from palette>"}
-For lines add: x2, y2
-For text add: text: "<word>" (max 10 chars)
-For arcs add: radius (10-100), startAngle (0-6.28), endAngle (0-6.28)`;
+You can ADD new marks, MOVE/MODIFY existing marks, or REMOVE marks that don't serve the composition.
 
-    const userPrompt = `Create ${maxPrimitives} primitives for the canvas.
-${seedWord ? `User seed word: "${seedWord}" (optional inspiration, don't be literal)` : 'No seed word - create harmoniously'}
-Current canvas has ${existingMarks.length} marks. Sample: ${marksSample || 'empty canvas'}
-Stay within reasonable bounds (-500 to 500 on both axes).
+Output ONLY a JSON object: {"ops": [...]}
+
+ADD: {op: "add", type: "dot"|"line"|"text"|"arc", x, y, size: 1-20, opacity: 0.1-1.0, color: "<from palette>"}
+  For lines add: x2, y2
+  For text add: text: "<word>" (max 10 chars)
+  For arcs add: radius (10-100), startAngle (0-6.28), endAngle (0-6.28)
+
+MOVE/MODIFY: {op: "move", markId: "<id>", x, y, size, opacity, color} (any field optional — only changes what you specify)
+
+REMOVE: {op: "remove", markId: "<id>"} (remove marks that clutter or weaken the composition)`;
+
+    const userPrompt = `Contribute 30-${maxPrimitives} operations to improve this canvas. Use most of your budget — this is a paid contribution.
+${seedWord ? `User seed word: "${seedWord}" — let this inspire your contribution` : 'No seed word - improve the composition however you see fit'}
+
+EXISTING MARKS (${existingMarks.length} total):
+${marksWithIds || '(empty canvas)'}
+
+YOUR TOOLKIT:
+- **ADD** new marks to build shapes, patterns, scenes (most of your ops will be adds)
+- **MOVE/MODIFY** existing marks to improve positioning, fix colors, adjust opacity
+- **REMOVE** marks that clutter the composition or don't serve the theme
+
+COMPOSITION GUIDELINES:
+- Build something intentional — a shape, pattern, or mini-scene (not random scatter)
+- Layer opacity: background (0.2-0.4), structure (0.5-0.7), focal points (0.8-1.0)
+- Use text sparingly but meaningfully (1-3 words max)
+- If existing marks are messy, CLEAN THEM UP — move or remove before adding more
+- Place near existing marks to build ON the composition, not isolated in empty space
+- Stay within reasonable bounds (-500 to 500 on both axes)
+
+A great contribution doesn't just add — it curates. Shape the whole.
 Output ONLY: {"ops": [...]}`;
 
     const llmResponse = await llmCall(systemPrompt, userPrompt);
     const ops = parseMarksFromLLM(llmResponse);
+    
+    // Separate op types — process removes first, then moves, then adds
+    const removes = ops.filter(o => o.op === 'remove').slice(0, 15);
+    const moves = ops.filter(o => o.op === 'move' || o.op === 'modify').slice(0, 15);
     const adds = ops.filter(o => o.op === 'add' || !o.op).slice(0, maxPrimitives);
     
-    if (adds.length === 0) {
-      return res.status(500).json({ error: 'LLM failed to generate valid primitives' });
+    if (adds.length === 0 && moves.length === 0 && removes.length === 0) {
+      return res.status(500).json({ error: 'LLM failed to generate valid operations' });
     }
     
-    // Place the primitives
+    const results = { added: 0, removed: 0, moved: 0 };
     const placedMarks = [];
     const now = Date.now();
     
+    // Build set of valid mark IDs on this canvas for safety
+    const validMarkIds = new Set(existingMarks.map(m => m.id));
+    
+    // REMOVES — clean up marks that don't serve the composition
+    for (const op of removes) {
+      if (!op.markId || !validMarkIds.has(op.markId)) continue;
+      stmts.deleteMark.run(op.markId, 'system');
+      broadcast({ type: 'mark:deleted', id: op.markId });
+      results.removed++;
+    }
+    
+    // MOVES — reposition or modify existing marks
+    for (const op of moves) {
+      if (!op.markId || !validMarkIds.has(op.markId)) continue;
+      const existing = stmts.getMark.get(op.markId);
+      if (!existing) continue;
+      const updated = {
+        id: existing.id,
+        x: op.x ?? existing.x,
+        y: op.y ?? existing.y,
+        color: op.color && colorPalette.includes(op.color) ? op.color : existing.color,
+        size: Math.max(1, Math.min(20, op.size ?? existing.size)),
+        opacity: Math.max(0.1, Math.min(1, op.opacity ?? existing.opacity)),
+        text: existing.type === 'text' ? (op.text !== undefined ? String(op.text).slice(0, 10) : existing.text) : null,
+        now: Date.now(),
+      };
+      stmts.updateMark.run(updated);
+      broadcast({ type: 'mark:updated', mark: markToJson(stmts.getMark.get(existing.id)) });
+      results.moved++;
+    }
+    
+    // ADDS — new marks
     for (const op of adds) {
       if (op.x == null || op.y == null) continue;
       
@@ -1521,7 +1595,7 @@ Output ONLY: {"ops": [...]}`;
       
       stmts.insertMark.run({
         id: markId,
-        agent_id: 'system', // System-generated marks don't belong to agents
+        agent_id: 'system',
         type,
         x: op.x,
         y: op.y,
@@ -1546,8 +1620,8 @@ Output ONLY: {"ops": [...]}`;
         meta: metaObj,
       });
       
-      // Broadcast each mark
       broadcast({ type: 'mark:created', mark: { ...placedMarks[placedMarks.length - 1], canvasId } });
+      results.added++;
     }
     
     // Record contribution
@@ -1575,6 +1649,9 @@ Output ONLY: {"ops": [...]}`;
     res.status(201).json({
       contributionId,
       marks: placedMarks,
+      removed: results.removed,
+      moved: results.moved,
+      added: results.added,
       creditsRemaining: user.credits - 1,
       canvasContributionCount: newCount,
       renderTriggered: shouldRender,
