@@ -232,6 +232,46 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_canvases_status ON canvases(status);
   CREATE INDEX IF NOT EXISTS idx_canvases_week ON canvases(week_of);
+
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    created_at INTEGER NOT NULL,
+    credits INTEGER DEFAULT 0,
+    stripe_customer_id TEXT DEFAULT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+  CREATE INDEX IF NOT EXISTS idx_users_stripe ON users(stripe_customer_id);
+
+  CREATE TABLE IF NOT EXISTS contributions (
+    id TEXT PRIMARY KEY,
+    canvas_id TEXT NOT NULL,
+    user_id TEXT,
+    seed_word TEXT,
+    primitives_count INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_contributions_canvas ON contributions(canvas_id);
+  CREATE INDEX IF NOT EXISTS idx_contributions_user ON contributions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_contributions_time ON contributions(created_at);
+
+  CREATE TABLE IF NOT EXISTS purchases (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    credits_granted INTEGER DEFAULT 0,
+    stripe_payment_id TEXT,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_purchases_user ON purchases(user_id);
+  CREATE INDEX IF NOT EXISTS idx_purchases_stripe ON purchases(stripe_payment_id);
 `);
 
 // v2 Migrations: Add canvas_id columns (must run AFTER CREATE TABLE statements)
@@ -277,6 +317,27 @@ try {
   }
 } catch (e) {
   console.error('Migration error:', e);
+}
+
+// Canvas Pivot Migrations: Extend canvases table
+try {
+  const canvasColumns = db.prepare("PRAGMA table_info(canvases)").all();
+  const ensureCanvas = (name, ddl) => {
+    if (!canvasColumns.some(c => c.name === name)) {
+      db.exec(`ALTER TABLE canvases ADD COLUMN ${ddl}`);
+      console.log(`Canvas Pivot Migration: Added ${name} to canvases`);
+    }
+  };
+  
+  ensureCanvas('slug', 'slug TEXT DEFAULT NULL');
+  ensureCanvas('subject', 'subject TEXT DEFAULT NULL');
+  ensureCanvas('style_prompt', 'style_prompt TEXT DEFAULT NULL');
+  ensureCanvas('rules', 'rules TEXT DEFAULT "{}"');
+  ensureCanvas('current_render_url', 'current_render_url TEXT DEFAULT NULL');
+  ensureCanvas('contribution_count', 'contribution_count INTEGER DEFAULT 0');
+  ensureCanvas('render_interval', 'render_interval INTEGER DEFAULT 25');
+} catch (e) {
+  console.error('Canvas Pivot Migration error:', e);
 }
 
 // --- Palette ---
@@ -504,6 +565,32 @@ const stmts = {
   getCanvasAgents: db.prepare('SELECT * FROM agents WHERE canvas_id = ?'),
   countCanvasAgents: db.prepare('SELECT COUNT(*) as count FROM agents WHERE canvas_id = ?'),
   assignAgentToCanvas: db.prepare('UPDATE agents SET canvas_id = ?, subtheme = ? WHERE id = ?'),
+  // Canvas Pivot: Users
+  getUser: db.prepare('SELECT * FROM users WHERE id = ?'),
+  getUserByEmail: db.prepare('SELECT * FROM users WHERE email = ?'),
+  insertUser: db.prepare(`
+    INSERT INTO users (id, email, created_at, credits, stripe_customer_id)
+    VALUES (?, ?, ?, ?, ?)
+  `),
+  updateUserCredits: db.prepare('UPDATE users SET credits = ? WHERE id = ?'),
+  updateUserStripeCustomer: db.prepare('UPDATE users SET stripe_customer_id = ? WHERE id = ?'),
+  // Canvas Pivot: Contributions
+  insertContribution: db.prepare(`
+    INSERT INTO contributions (id, canvas_id, user_id, seed_word, primitives_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `),
+  getContributionsByCanvas: db.prepare('SELECT * FROM contributions WHERE canvas_id = ? ORDER BY created_at DESC'),
+  getContributionsByUser: db.prepare('SELECT * FROM contributions WHERE user_id = ? ORDER BY created_at DESC'),
+  countContributionsByUserCanvas: db.prepare(`
+    SELECT COUNT(*) as count FROM contributions 
+    WHERE user_id = ? AND canvas_id = ? AND created_at > ?
+  `),
+  // Canvas Pivot: Purchases
+  insertPurchase: db.prepare(`
+    INSERT INTO purchases (id, user_id, type, amount_cents, credits_granted, stripe_payment_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
+  getPurchasesByUser: db.prepare('SELECT * FROM purchases WHERE user_id = ? ORDER BY created_at DESC'),
 };
 
 // --- Decay ---
