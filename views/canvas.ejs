@@ -205,6 +205,70 @@
     transform: scale(1.3);
   }
   
+  /* Evolve button */
+  #evolve-btn {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  #evolve-btn button {
+    background: rgba(74, 201, 138, 0.12);
+    border: 1px solid rgba(74, 201, 138, 0.3);
+    color: #4ac98a;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 12px 28px;
+    border-radius: 8px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    min-height: 48px;
+  }
+  
+  #evolve-btn button:hover {
+    background: rgba(74, 201, 138, 0.2);
+    border-color: rgba(74, 201, 138, 0.5);
+    box-shadow: 0 0 20px rgba(74, 201, 138, 0.15);
+  }
+  
+  #evolve-btn button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  
+  #evolve-btn button.evolving {
+    animation: pulse-glow 1.5s ease-in-out infinite;
+  }
+  
+  @keyframes pulse-glow {
+    0%, 100% { box-shadow: 0 0 8px rgba(74, 201, 138, 0.1); }
+    50% { box-shadow: 0 0 24px rgba(74, 201, 138, 0.3); }
+  }
+  
+  #evolve-status {
+    font-size: 9px;
+    color: #4ac98a;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    min-height: 14px;
+  }
+  
+  @media (max-width: 768px) {
+    #evolve-btn {
+      bottom: 74px;
+    }
+  }
+  
   /* Zoom controls */
   #zoom-controls {
     position: fixed;
@@ -383,6 +447,13 @@
 </div>
 
 <canvas id="minimap"></canvas>
+
+<% if (canvas.status === 'active') { %>
+<div id="evolve-btn">
+  <div id="evolve-status"></div>
+  <button id="evolve-trigger" onclick="triggerEvolve()">🌀 Evolve — $1.99</button>
+</div>
+<% } %>
 
 <div id="zoom-controls">
   <button id="zoom-in">+</button>
@@ -816,6 +887,86 @@ if (minimap) {
 window.addEventListener('resize', resize);
 resize();
 loadMarks();
+
+// --- Evolve ---
+const evolveBtn = document.getElementById('evolve-trigger');
+const evolveStatus = document.getElementById('evolve-status');
+
+async function triggerEvolve() {
+  if (evolveBtn.disabled) return;
+  evolveBtn.disabled = true;
+  evolveBtn.classList.add('evolving');
+  evolveBtn.textContent = '🌀 Evolving...';
+  evolveStatus.textContent = '';
+  
+  try {
+    const res = await fetch(`/api/canvas/${canvasId}/evolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tier: 'opus' }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      evolveStatus.textContent = data.error;
+      evolveBtn.disabled = false;
+      evolveBtn.classList.remove('evolving');
+      evolveBtn.textContent = '🌀 Evolve — $1.99';
+    }
+  } catch (e) {
+    evolveStatus.textContent = 'Error: ' + e.message;
+    evolveBtn.disabled = false;
+    evolveBtn.classList.remove('evolving');
+    evolveBtn.textContent = '🌀 Evolve — $1.99';
+  }
+}
+
+// --- WebSocket for live evolve updates ---
+const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(`${wsProto}//${location.host}?canvas=${canvasId}`);
+
+ws.onmessage = (event) => {
+  try {
+    const data = JSON.parse(event.data);
+    
+    if (data.type === 'evolve_start') {
+      evolveStatus.textContent = `Evolving ${data.agents} agents...`;
+    }
+    
+    if (data.type === 'evolve_marks' && data.marks) {
+      // Add new marks with fade-in animation
+      for (const m of data.marks) {
+        if (typeof m.meta === 'string') {
+          try { m.meta = JSON.parse(m.meta); } catch { m.meta = {}; }
+        }
+        m._fadeStart = performance.now();
+        m._fadeDuration = 500 + Math.random() * 500;
+        animatingMarks.push(m);
+        marks.push(m);
+        allMarks.push(m);
+      }
+      evolveStatus.textContent = `${data.agent}: +${data.added}`;
+      render();
+    }
+    
+    if (data.type === 'evolve_done') {
+      evolveBtn.disabled = false;
+      evolveBtn.classList.remove('evolving');
+      evolveBtn.textContent = '🌀 Evolve — $1.99';
+      evolveStatus.textContent = `Done! +${data.totalAdded} marks`;
+      
+      // Update drawer mark count
+      const countEl = document.querySelector('#drawer-summary .stat .value');
+      if (countEl) countEl.textContent = marks.length;
+      
+      setTimeout(() => { evolveStatus.textContent = ''; }, 5000);
+    }
+  } catch {}
+};
+
+ws.onclose = () => {
+  // Reconnect after 3s
+  setTimeout(() => { location.reload(); }, 3000);
+};
 </script>
 
 <%- include('partials/foot') %>

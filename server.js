@@ -8,6 +8,40 @@ const fs = require('fs');
 
 // Stripe removed — Sprawl is now free for everyone
 
+// LLM gateway for evolve
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
+const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
+
+async function llmCall(systemPrompt, userPrompt, model = 'anthropic/claude-sonnet-4-5') {
+  const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATEWAY_TOKEN}` },
+    body: JSON.stringify({ model, max_tokens: 4096, messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt },
+    ]}),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(JSON.stringify(data.error).slice(0, 200));
+  return data.choices?.[0]?.message?.content || '';
+}
+
+function parseMarksFromLLM(text) {
+  // Try {"ops": [...]} format first
+  let match = text.match(/\{[\s\S]*"ops"\s*:\s*\[[\s\S]*\][\s\S]*\}/);
+  if (match) {
+    try {
+      const obj = JSON.parse(match[0]);
+      if (obj.ops) return obj.ops.filter(m => m && typeof m.x === 'number' && typeof m.y === 'number');
+    } catch {}
+  }
+  // Fall back to bare array
+  match = text.match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  try { return JSON.parse(match[0]).filter(m => m && typeof m.x === 'number' && typeof m.y === 'number'); }
+  catch { return []; }
+}
+
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -356,7 +390,7 @@ function assignHomeCoordinates(agentId) {
 
 // --- Agent Configuration (Free for Everyone) ---
 const AGENT_CONFIG = {
-  marksPerCanvas: 250,
+  marksPerCanvas: 100,
   dailyEvolves: 1,
   autoEvolve: true,
 };
@@ -1805,10 +1839,21 @@ app.post('/api/ext/evolution/log', requireApiKey, rateLimit, (req, res) => {
 });
 
 // --- WebSocket ---
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  // Track which canvas this client is viewing (via ?canvas=id query param)
+  const url = new URL(req.url, `http://localhost:${PORT}`);
+  ws._canvasId = url.searchParams.get('canvas') || null;
+  
   const marks = stmts.getAllMarks.all().map(markToJson);
   const connections = stmts.getConnections.all().map(connToJson);
   ws.send(JSON.stringify({ type: 'init', marks, connections }));
+  
+  ws.on('message', (msg) => {
+    try {
+      const data = JSON.parse(msg);
+      if (data.type === 'subscribe_canvas') ws._canvasId = data.canvasId;
+    } catch {}
+  });
 });
 
 // --- Decay Cron ---
@@ -1996,6 +2041,130 @@ if (EVOLVE_ENABLED) {
   setInterval(() => runEvolutionCycle(), EVOLVE_INTERVAL);
 } else {
   console.log('💤 Evolution cron disabled (set EVOLVE_ENABLED=true to activate)');
+}
+
+// --- Canvas Evolve (paid action) ---
+const evolveInProgress = new Set(); // track canvasIds currently evolving
+
+app.post('/api/canvas/:canvasId/evolve', async (req, res) => {
+  const { canvasId } = req.params;
+  const tier = 'opus'; // Always use Opus — Sonnet can't do spatial composition
+  
+  const canvas = db.prepare('SELECT * FROM canvases WHERE id = ?').get(canvasId);
+  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
+  if (canvas.status !== 'active') return res.status(400).json({ error: 'Canvas is not active' });
+  if (evolveInProgress.has(canvasId)) return res.status(409).json({ error: 'Evolution already running on this canvas' });
+  
+  evolveInProgress.add(canvasId);
+  
+  const model = tier === 'opus' ? 'anthropic/claude-opus-4-6' : 'anthropic/claude-sonnet-4-5';
+  const subthemes = JSON.parse(canvas.subthemes);
+  const agents = db.prepare('SELECT * FROM agents WHERE canvas_id = ?').all(canvasId);
+  
+  if (agents.length === 0) {
+    evolveInProgress.delete(canvasId);
+    return res.status(400).json({ error: 'No agents on this canvas' });
+  }
+  
+  // Return immediately, evolve async
+  res.json({ status: 'evolving', tier, model: tier, agents: agents.length });
+  
+  // Broadcast start
+  broadcastToCanvas(canvasId, { type: 'evolve_start', tier, agents: agents.length });
+  
+  let totalAdded = 0;
+  
+  try {
+    const allMarks = db.prepare('SELECT * FROM marks WHERE canvas_id = ?').all(canvasId);
+    const targetMarks = 25; // per agent per evolve cycle
+    
+    for (const agent of agents) {
+      const myMarks = allMarks.filter(m => m.agent_id === agent.id);
+      const marksLeft = 250 - myMarks.length;
+      if (marksLeft <= 0) continue;
+      
+      const subtheme = subthemes.find(s => (typeof s === 'string' ? s : s.name) === agent.subtheme);
+      const subthemeGuide = typeof subtheme === 'object' ? (subtheme.spatial_guide || '') : '';
+      const target = Math.min(targetMarks, marksLeft);
+      
+      const systemPrompt = `You are "${agent.name}", an AI artist building "${canvas.theme}" on a shared canvas.
+YOUR SUBTHEME: ${agent.subtheme || 'general'}
+${subthemeGuide}
+YOUR PERSONALITY: ${agent.personality || 'A creative agent.'}
+YOUR COLOR: ${agent.color}
+Canvas center (0,0). Negative Y = up. Positive Y = down.
+Mark types: dot (default), line (type:"line", x2, y2), text (type:"text", text:"word")
+Size: 1-50. Opacity: 0.05-1.0. Use YOUR color.
+DENSITY — Pack marks close. Layer on existing work. Fill gaps. Add detail.
+Output ONLY: {"ops": [...]}`;
+
+      const neighborDesc = allMarks.slice(0, 30).map(n =>
+        `(${Math.round(n.x)},${Math.round(n.y)}) sz=${n.size} ${n.type || 'dot'}`).join(', ');
+
+      const userPrompt = `Evolve your contribution. Add density, fill gaps, layer depth.
+Your marks so far: ${myMarks.length}/250. Canvas total: ${allMarks.length}.
+Place ~${target} marks. Sample of existing: ${neighborDesc || 'empty'}
+Output ONLY: {"ops": [...]}`;
+
+      try {
+        const response = await llmCall(systemPrompt, userPrompt, model);
+        const ops = parseMarksFromLLM(response);
+        const adds = ops.filter(o => o.op === 'add' || !o.op).slice(0, target);
+        
+        const insertStmt = db.prepare(`
+          INSERT INTO marks (id, agent_id, canvas_id, type, x, y, color, size, opacity, text, meta, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        
+        let added = 0;
+        const newMarks = [];
+        for (const op of adds) {
+          if (op.x == null || op.y == null) continue;
+          const id = crypto.randomBytes(8).toString('hex');
+          const now = Date.now();
+          const type = op.type || 'dot';
+          const size = Math.max(1, Math.min(50, op.size || 10));
+          const opacity = Math.max(0.05, Math.min(1, op.opacity || 0.7));
+          const text = type === 'text' ? (op.text || '').slice(0, 32) : null;
+          const meta = type === 'line' ? JSON.stringify({ x2: op.x2, y2: op.y2 }) : '{}';
+          
+          try {
+            insertStmt.run(id, agent.id, canvasId, type, op.x, op.y, agent.color, size, opacity, text, meta, now, now);
+            newMarks.push({ id, agent_id: agent.id, type, x: op.x, y: op.y, color: agent.color, size, opacity, text, meta });
+            added++;
+          } catch (e) { /* skip dupes */ }
+        }
+        
+        totalAdded += added;
+        allMarks.push(...newMarks); // so next agent sees updated state
+        
+        // Broadcast each agent's marks as they land
+        if (newMarks.length > 0) {
+          broadcastToCanvas(canvasId, { type: 'evolve_marks', agent: agent.name, marks: newMarks, added });
+        }
+        
+        console.log(`  🌀 ${agent.name}: +${added}`);
+      } catch (e) {
+        console.log(`  ⚠ ${agent.name}: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    console.error('Evolve error:', e);
+  } finally {
+    evolveInProgress.delete(canvasId);
+    broadcastToCanvas(canvasId, { type: 'evolve_done', totalAdded });
+    console.log(`✨ Evolve done: +${totalAdded} marks on "${canvas.theme}"`);
+  }
+});
+
+// WebSocket helper — broadcast to clients viewing a specific canvas
+function broadcastToCanvas(canvasId, data) {
+  const msg = JSON.stringify(data);
+  wss.clients.forEach(client => {
+    if (client.readyState === 1 && client._canvasId === canvasId) {
+      client.send(msg);
+    }
+  });
 }
 
 // --- Health Check ---
