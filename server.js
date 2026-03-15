@@ -1322,6 +1322,254 @@ app.post('/api/canvas/:id/archive', rateLimit, async (req, res) => {
   }
 });
 
+// ============================================================
+// CANVAS PIVOT: USERS & CONTRIBUTIONS
+// ============================================================
+
+// POST /api/users - Create or get user by email
+app.post('/api/users', rateLimit, (req, res) => {
+  const { email } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Valid email required' });
+  }
+  
+  // Check if user exists
+  const existing = stmts.getUserByEmail.get(email);
+  if (existing) {
+    return res.json({
+      id: existing.id,
+      email: existing.email,
+      credits: existing.credits,
+      createdAt: existing.created_at,
+    });
+  }
+  
+  // Create new user
+  const userId = crypto.randomUUID();
+  const now = Date.now();
+  stmts.insertUser.run(userId, email, now, 0, null);
+  
+  res.status(201).json({
+    id: userId,
+    email,
+    credits: 0,
+    createdAt: now,
+  });
+});
+
+// POST /api/canvas/:id/contribute - Make a paid contribution to a canvas
+app.post('/api/canvas/:id/contribute', rateLimit, async (req, res) => {
+  const { userId, seedWord } = req.body;
+  const canvasId = req.params.id;
+  
+  if (!userId) {
+    return res.status(400).json({ error: 'userId required' });
+  }
+  
+  // Validate canvas
+  const canvas = stmts.getCanvas.get(canvasId);
+  if (!canvas) {
+    return res.status(404).json({ error: 'Canvas not found' });
+  }
+  if (canvas.status !== 'active') {
+    return res.status(400).json({ error: 'Canvas is not active' });
+  }
+  
+  // Validate user
+  const user = stmts.getUser.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  
+  // Check credits
+  if (user.credits < 1) {
+    return res.status(402).json({ error: 'Insufficient credits. Purchase more to contribute.' });
+  }
+  
+  // Rate limit: 1 contribution per hour per user per canvas
+  const oneHourAgo = Date.now() - 3600000;
+  const recentContributions = stmts.countContributionsByUserCanvas.get(userId, canvasId, oneHourAgo);
+  if (recentContributions.count > 0) {
+    return res.status(429).json({ error: 'Rate limited. You can contribute once per hour per canvas.' });
+  }
+  
+  try {
+    // Get canvas rules
+    const rules = canvas.rules ? JSON.parse(canvas.rules) : {};
+    const colorPalette = rules.colorPalette || PALETTE;
+    const allowedTypes = rules.allowedTypes || ['dot', 'line', 'text'];
+    const maxPrimitives = Math.min(rules.maxPrimitives || 5, 5);
+    
+    // Get current marks on this canvas for context
+    const existingMarks = stmts.getMarksByCanvas.all(canvasId);
+    const marksSample = existingMarks.slice(-30).map(m => 
+      `(${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color}`
+    ).join(', ');
+    
+    // Use LLM to generate primitives
+    const systemPrompt = `You are an AI artist contributing to "${canvas.theme}".
+Canvas subject: ${canvas.subject || 'abstract composition'}
+Style: ${canvas.style_prompt || 'minimalist'}
+Allowed primitive types: ${allowedTypes.join(', ')}
+Color palette: ${colorPalette.join(', ')} (ONLY use these colors)
+Canvas center at (0,0). Negative Y = up, Positive Y = down.
+
+Output ONLY a JSON object: {"ops": [...]}
+Each op: {op: "add", type: "dot"|"line"|"text", x, y, size: 1-20, opacity: 0.1-1.0, color: "<from palette>"}
+For lines add: x2, y2
+For text add: text: "<word>" (max 10 chars)`;
+
+    const userPrompt = `Create ${maxPrimitives} primitives for the canvas.
+${seedWord ? `User seed word: "${seedWord}" (optional inspiration, don't be literal)` : 'No seed word - create harmoniously'}
+Current canvas has ${existingMarks.length} marks. Sample: ${marksSample || 'empty canvas'}
+Stay within reasonable bounds (-500 to 500 on both axes).
+Output ONLY: {"ops": [...]}`;
+
+    const llmResponse = await llmCall(systemPrompt, userPrompt);
+    const ops = parseMarksFromLLM(llmResponse);
+    const adds = ops.filter(o => o.op === 'add' || !o.op).slice(0, maxPrimitives);
+    
+    if (adds.length === 0) {
+      return res.status(500).json({ error: 'LLM failed to generate valid primitives' });
+    }
+    
+    // Place the primitives
+    const placedMarks = [];
+    const now = Date.now();
+    
+    for (const op of adds) {
+      if (op.x == null || op.y == null) continue;
+      
+      const markId = crypto.randomUUID();
+      const type = allowedTypes.includes(op.type) ? op.type : 'dot';
+      const color = colorPalette.includes(op.color) ? op.color : colorPalette[0];
+      const size = Math.max(1, Math.min(20, op.size || 8));
+      const opacity = Math.max(0.1, Math.min(1, op.opacity || 0.7));
+      const text = type === 'text' ? (op.text || '').slice(0, 10) : null;
+      const meta = type === 'line' ? JSON.stringify({ x2: op.x2, y2: op.y2 }) : '{}';
+      
+      stmts.insertMark.run({
+        id: markId,
+        agent_id: 'system', // System-generated marks don't belong to agents
+        type,
+        x: op.x,
+        y: op.y,
+        color,
+        size,
+        opacity,
+        text,
+        meta,
+        canvas_id: canvasId,
+        now,
+      });
+      
+      placedMarks.push({
+        id: markId,
+        type,
+        x: op.x,
+        y: op.y,
+        color,
+        size,
+        opacity,
+        text,
+        meta: type === 'line' ? { x2: op.x2, y2: op.y2 } : {},
+      });
+      
+      // Broadcast each mark
+      broadcast({ type: 'mark:created', mark: { ...placedMarks[placedMarks.length - 1], canvasId } });
+    }
+    
+    // Record contribution
+    const contributionId = crypto.randomUUID();
+    stmts.insertContribution.run(
+      contributionId,
+      canvasId,
+      userId,
+      seedWord || null,
+      placedMarks.length,
+      now
+    );
+    
+    // Deduct credit
+    stmts.updateUserCredits.run(user.credits - 1, userId);
+    
+    // Increment canvas contribution_count
+    const newCount = (canvas.contribution_count || 0) + 1;
+    db.prepare('UPDATE canvases SET contribution_count = ? WHERE id = ?').run(newCount, canvasId);
+    
+    // Check if we need to trigger a render
+    const renderInterval = canvas.render_interval || 25;
+    const shouldRender = newCount % renderInterval === 0;
+    
+    res.status(201).json({
+      contributionId,
+      marks: placedMarks,
+      creditsRemaining: user.credits - 1,
+      canvasContributionCount: newCount,
+      renderTriggered: shouldRender,
+    });
+    
+    // TODO: If shouldRender === true, trigger async render job
+    if (shouldRender) {
+      console.log(`🎨 Render triggered for canvas ${canvasId} at ${newCount} contributions`);
+      // This will be implemented in the next phase (dual-layer rendering)
+    }
+    
+  } catch (e) {
+    console.error('Contribution error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/purchases - Record a purchase and grant credits
+app.post('/api/purchases', rateLimit, (req, res) => {
+  const { userId, type, amountCents, stripePaymentId } = req.body;
+  
+  if (!userId || !type || !amountCents) {
+    return res.status(400).json({ error: 'userId, type, amountCents required' });
+  }
+  
+  const user = stmts.getUser.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  
+  // Determine credits granted based on type
+  const creditMap = {
+    'single': 1,      // $2
+    'pack_10': 10,    // $16
+    'pack_50': 50,    // $70
+  };
+  
+  const creditsGranted = creditMap[type] || 0;
+  if (creditsGranted === 0) {
+    return res.status(400).json({ error: 'Invalid purchase type' });
+  }
+  
+  // Record purchase
+  const purchaseId = crypto.randomUUID();
+  const now = Date.now();
+  stmts.insertPurchase.run(
+    purchaseId,
+    userId,
+    type,
+    amountCents,
+    creditsGranted,
+    stripePaymentId || null,
+    now
+  );
+  
+  // Grant credits
+  const newCredits = user.credits + creditsGranted;
+  stmts.updateUserCredits.run(newCredits, userId);
+  
+  res.status(201).json({
+    purchaseId,
+    creditsGranted,
+    creditsTotal: newCredits,
+  });
+});
+
 // --- Evolution Log ---
 app.post('/api/evolution/log', rateLimit, (req, res) => {
   const { agentId, cycle, snapshot, ops, canvasId } = req.body;
