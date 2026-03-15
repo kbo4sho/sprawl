@@ -1415,9 +1415,10 @@ Color palette: ${colorPalette.join(', ')} (ONLY use these colors)
 Canvas center at (0,0). Negative Y = up, Positive Y = down.
 
 Output ONLY a JSON object: {"ops": [...]}
-Each op: {op: "add", type: "dot"|"line"|"text", x, y, size: 1-20, opacity: 0.1-1.0, color: "<from palette>"}
+Each op: {op: "add", type: "dot"|"line"|"text"|"arc", x, y, size: 1-20, opacity: 0.1-1.0, color: "<from palette>"}
 For lines add: x2, y2
-For text add: text: "<word>" (max 10 chars)`;
+For text add: text: "<word>" (max 10 chars)
+For arcs add: radius (10-100), startAngle (0-6.28), endAngle (0-6.28)`;
 
     const userPrompt = `Create ${maxPrimitives} primitives for the canvas.
 ${seedWord ? `User seed word: "${seedWord}" (optional inspiration, don't be literal)` : 'No seed word - create harmoniously'}
@@ -1446,7 +1447,21 @@ Output ONLY: {"ops": [...]}`;
       const size = Math.max(1, Math.min(20, op.size || 8));
       const opacity = Math.max(0.1, Math.min(1, op.opacity || 0.7));
       const text = type === 'text' ? (op.text || '').slice(0, 10) : null;
-      const meta = type === 'line' ? JSON.stringify({ x2: op.x2, y2: op.y2 }) : '{}';
+      
+      // Build meta based on type
+      let meta = '{}';
+      let metaObj = {};
+      if (type === 'line') {
+        metaObj = { x2: op.x2, y2: op.y2 };
+        meta = JSON.stringify(metaObj);
+      } else if (type === 'arc') {
+        metaObj = {
+          radius: Math.max(10, Math.min(100, op.radius || 30)),
+          startAngle: op.startAngle || 0,
+          endAngle: op.endAngle || Math.PI,
+        };
+        meta = JSON.stringify(metaObj);
+      }
       
       stmts.insertMark.run({
         id: markId,
@@ -1472,7 +1487,7 @@ Output ONLY: {"ops": [...]}`;
         size,
         opacity,
         text,
-        meta: type === 'line' ? { x2: op.x2, y2: op.y2 } : {},
+        meta: metaObj,
       });
       
       // Broadcast each mark
@@ -1567,6 +1582,57 @@ app.post('/api/purchases', rateLimit, (req, res) => {
     purchaseId,
     creditsGranted,
     creditsTotal: newCredits,
+  });
+});
+
+// POST /api/canvas/create - Admin endpoint to create a new canvas
+app.post('/api/canvas/create', rateLimit, (req, res) => {
+  const { secret, name, theme, subject, stylePrompt, rules, renderInterval } = req.body;
+  
+  // Admin secret check
+  if (secret !== (process.env.ADMIN_SECRET || 'sprawl-admin')) {
+    return res.status(403).json({ error: 'Admin secret required' });
+  }
+  
+  if (!name || !theme) {
+    return res.status(400).json({ error: 'name and theme required' });
+  }
+  
+  const canvasId = crypto.randomUUID();
+  const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  const now = new Date().toISOString();
+  
+  db.prepare(`
+    INSERT INTO canvases (
+      id, theme, subthemes, spatial_guide, week_of, status, created_at,
+      slug, subject, style_prompt, rules, contribution_count, render_interval
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    canvasId,
+    theme,
+    JSON.stringify([]), // subthemes (legacy field, empty for Canvas pivot)
+    '', // spatial_guide (legacy field, empty for Canvas pivot)
+    now, // week_of (legacy field, use created_at)
+    'active',
+    now,
+    slug,
+    subject || '',
+    stylePrompt || '',
+    JSON.stringify(rules || {}),
+    0,
+    renderInterval || 25
+  );
+  
+  res.status(201).json({
+    id: canvasId,
+    slug,
+    name,
+    theme,
+    subject,
+    stylePrompt,
+    rules,
+    renderInterval: renderInterval || 25,
+    status: 'active',
   });
 });
 
