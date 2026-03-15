@@ -5,8 +5,10 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
+const Stripe = require('stripe');
 
-// Stripe removed — Sprawl is now free for everyone
+// Stripe for Canvas Pivot (pay-per-contribution)
+const stripe = process.env.STRIPE_SECRET_KEY ? Stripe(process.env.STRIPE_SECRET_KEY) : null;
 
 // LLM gateway for evolve
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
@@ -1584,6 +1586,141 @@ app.post('/api/purchases', rateLimit, (req, res) => {
     creditsTotal: newCredits,
   });
 });
+
+// POST /api/stripe/create-checkout - Create a Stripe checkout session
+app.post('/api/stripe/create-checkout', rateLimit, async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Stripe not configured' });
+  }
+  
+  const { userId, type } = req.body;
+  
+  if (!userId || !type) {
+    return res.status(400).json({ error: 'userId and type required' });
+  }
+  
+  const user = stmts.getUser.get(userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+  
+  // Price mapping
+  const prices = {
+    'single': { amount: 200, name: 'Single Contribution' }, // $2.00
+    'pack_10': { amount: 1600, name: '10 Contributions' }, // $16.00
+    'pack_50': { amount: 7000, name: '50 Contributions' }, // $70.00
+  };
+  
+  const price = prices[type];
+  if (!price) {
+    return res.status(400).json({ error: 'Invalid purchase type' });
+  }
+  
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: price.name,
+              description: `Sprawl Canvas contribution credits`,
+            },
+            unit_amount: price.amount,
+          },
+          quantity: 1,
+        },
+      ],
+      mode: 'payment',
+      success_url: `${process.env.BASE_URL || 'http://localhost:3500'}/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.BASE_URL || 'http://localhost:3500'}/canvas`,
+      metadata: {
+        userId,
+        type,
+      },
+      customer_email: user.email,
+    });
+    
+    res.json({ sessionId: session.id, url: session.url });
+  } catch (err) {
+    console.error('Stripe checkout error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/stripe/webhook - Stripe webhook handler
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe) {
+    return res.status(503).json({ error: 'Stripe not configured' });
+  }
+  
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  
+  if (!webhookSecret) {
+    // For testing without webhook signature verification
+    const event = JSON.parse(req.body.toString());
+    await handleStripeEvent(event);
+    return res.json({ received: true });
+  }
+  
+  try {
+    const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    await handleStripeEvent(event);
+    res.json({ received: true });
+  } catch (err) {
+    console.error('Stripe webhook error:', err.message);
+    res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+});
+
+async function handleStripeEvent(event) {
+  if (event.type === 'checkout.session.completed') {
+    const session = event.data.object;
+    
+    // Extract metadata
+    const userId = session.metadata?.userId;
+    const purchaseType = session.metadata?.type; // 'single', 'pack_10', 'pack_50'
+    
+    if (!userId || !purchaseType) {
+      console.error('Missing userId or type in Stripe session metadata');
+      return;
+    }
+    
+    const user = stmts.getUser.get(userId);
+    if (!user) {
+      console.error(`User ${userId} not found for Stripe payment`);
+      return;
+    }
+    
+    // Determine credits granted
+    const creditMap = {
+      'single': 1,
+      'pack_10': 10,
+      'pack_50': 50,
+    };
+    const creditsGranted = creditMap[purchaseType] || 0;
+    
+    // Record purchase
+    const purchaseId = crypto.randomUUID();
+    stmts.insertPurchase.run(
+      purchaseId,
+      userId,
+      purchaseType,
+      session.amount_total || 0,
+      creditsGranted,
+      session.payment_intent,
+      Date.now()
+    );
+    
+    // Grant credits
+    const newCredits = user.credits + creditsGranted;
+    stmts.updateUserCredits.run(newCredits, userId);
+    
+    console.log(`✅ Granted ${creditsGranted} credits to ${user.email} (Stripe payment ${session.payment_intent})`);
+  }
+}
 
 // POST /api/canvas/create - Admin endpoint to create a new canvas
 app.post('/api/canvas/create', rateLimit, (req, res) => {
