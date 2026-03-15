@@ -1,971 +1,678 @@
 <%- include('partials/head') %>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body { 
-    width: 100%; height: 100%; overflow: hidden; 
-    background: #030306; color: #c8c8d0;
-    font-family: 'Space Mono', monospace;
-    touch-action: none;
+  body {
+    background: #0a0a0a;
+    color: #ffffff;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    min-height: 100vh;
   }
   
-  canvas#main-canvas { 
-    display: block; 
-    position: fixed;
-    top: 0; left: 0;
-    width: 100%; 
-    height: 100%; 
-    cursor: grab;
-    z-index: 1;
-  }
-  canvas#main-canvas:active { cursor: grabbing; }
-  
-  /* Header — slim bar */
-  #canvas-header {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 20;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    padding-top: max(12px, env(safe-area-inset-top, 12px));
-    background: rgba(3, 3, 6, 0.85);
-    backdrop-filter: blur(16px);
-    border-bottom: 1px solid rgba(200, 200, 208, 0.06);
+  .canvas-page {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
   }
   
-  #canvas-header .theme {
-    font-family: 'Syne', sans-serif;
-    font-weight: 700;
-    font-size: 14px;
-    color: rgba(255,255,255,0.25);
-    letter-spacing: 0.5px;
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  /* Header */
+  .page-header {
+    margin-bottom: 32px;
   }
   
-  #canvas-header .back-link {
-    font-size: 10px;
-    color: #5a5a6a;
-    text-decoration: none;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    padding: 10px 16px;
-    border-radius: 4px;
-    border: 1px solid rgba(200, 200, 208, 0.1);
-    transition: all 0.2s;
-    flex-shrink: 0;
-    margin-left: 12px;
-    touch-action: manipulation;
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-  }
-  
-  #canvas-header .back-link:hover {
-    color: #8b8ba0;
-    border-color: rgba(200, 200, 208, 0.15);
-  }
-  
-  /* Bottom drawer — mobile-first */
-  #drawer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    z-index: 20;
-    background: rgba(3, 3, 6, 0.95);
-    backdrop-filter: blur(20px);
-    border-top: 1px solid rgba(200, 200, 208, 0.08);
-    border-radius: 16px 16px 0 0;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    max-height: 70vh;
-    padding-bottom: max(8px, env(safe-area-inset-bottom, 8px));
-  }
-  
-  #drawer.collapsed {
-    transform: translateY(calc(100% - 64px));
-  }
-  
-  #drawer-handle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 14px 20px 10px;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-    min-height: 44px;
-  }
-  
-  #drawer-handle .grip {
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: rgba(200, 200, 208, 0.25);
-  }
-  
-  #drawer-summary {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 0 20px 12px;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  
-  #drawer-summary .stat {
-    display: flex;
-    flex-direction: column;
-  }
-  
-  #drawer-summary .value {
-    font-size: 16px;
-    font-weight: 700;
-    color: #c8c8d0;
-  }
-  
-  #drawer-summary .label {
-    font-size: 8px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #4a4a5a;
-  }
-  
-  .status-badge {
+  .back-link {
     display: inline-block;
-    padding: 3px 8px;
-    border-radius: 3px;
-    font-size: 8px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    background: rgba(74, 201, 138, 0.15);
-    color: #4ac98a;
+    font-size: 12px;
+    color: #666;
+    text-decoration: none;
+    margin-bottom: 16px;
+    transition: color 0.2s;
   }
   
-  .status-badge.frozen {
-    background: rgba(200, 200, 208, 0.08);
-    color: #6a6a7a;
+  .back-link:hover {
+    color: #999;
   }
   
-  #drawer-content {
-    padding: 0 20px 16px;
-    overflow-y: auto;
-    max-height: calc(70vh - 80px);
-    -webkit-overflow-scrolling: touch;
-  }
-  
-  #drawer-content h3 {
-    font-family: 'Syne', sans-serif;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: #5a5a6a;
-    margin-bottom: 10px;
-  }
-  
-  .subtheme-item {
-    margin-bottom: 10px;
-    padding: 10px 12px;
-    background: rgba(200, 200, 208, 0.03);
-    border-radius: 6px;
-    border: 1px solid rgba(200, 200, 208, 0.04);
-  }
-  
-  .subtheme-name {
+  .canvas-title {
+    font-size: 36px;
     font-weight: 700;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #8b8ba0;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
   
-  .agent-list {
+  .canvas-meta {
     display: flex;
-    flex-wrap: wrap;
+    gap: 24px;
+    font-size: 14px;
+    color: #888;
+  }
+  
+  .canvas-meta .stat {
+    display: flex;
     gap: 6px;
   }
   
-  .agent-dot {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
+  .canvas-meta .value {
+    color: #ccc;
+    font-weight: 600;
+  }
+  
+  /* Canvas view area */
+  .canvas-viewer {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 24px;
+    position: relative;
+  }
+  
+  .canvas-viewer .view-toggle {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    z-index: 10;
+    display: flex;
+    gap: 8px;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(10px);
+    padding: 4px;
+    border-radius: 6px;
+    border: 1px solid #333;
+  }
+  
+  .canvas-viewer .view-toggle button {
+    padding: 8px 16px;
+    font-size: 12px;
+    background: transparent;
+    color: #888;
+    border: none;
+    border-radius: 4px;
     cursor: pointer;
-    transition: transform 0.2s;
-    -webkit-tap-highlight-color: transparent;
+    transition: all 0.2s;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
   }
   
-  .agent-dot:hover, .agent-dot:active {
-    transform: scale(1.3);
+  .canvas-viewer .view-toggle button.active {
+    background: #2a2a2a;
+    color: #fff;
   }
   
-  /* Evolve button */
-  #evolve-btn {
-    position: fixed;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 30;
+  .canvas-viewer .view-toggle button:hover:not(.active) {
+    color: #aaa;
+  }
+  
+  .canvas-content {
+    aspect-ratio: 1;
+    max-height: 600px;
+    position: relative;
+  }
+  
+  #rendered-view {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: none;
+  }
+  
+  #rendered-view.active {
+    display: block;
+  }
+  
+  #live-view {
+    width: 100%;
+    height: 100%;
+    display: none;
+  }
+  
+  #live-view.active {
+    display: block;
+  }
+  
+  .no-render-message {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #666;
+    font-size: 14px;
+  }
+  
+  .no-render-message.active {
+    display: flex;
+  }
+  
+  /* Actions */
+  .canvas-actions {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+  
+  .contribute-card {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 24px;
+  }
+  
+  .contribute-card h3 {
+    font-size: 18px;
+    margin-bottom: 16px;
+  }
+  
+  .contribute-card p {
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+  
+  .contribute-form {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 4px;
+    gap: 12px;
   }
   
-  #evolve-btn button {
-    background: rgba(74, 201, 138, 0.12);
-    border: 1px solid rgba(74, 201, 138, 0.3);
-    color: #4ac98a;
-    font-family: 'Space Mono', monospace;
-    font-size: 13px;
+  .contribute-form input {
+    padding: 12px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    font-family: 'Inter', sans-serif;
+  }
+  
+  .contribute-form input::placeholder {
+    color: #555;
+  }
+  
+  .contribute-form button {
+    padding: 14px 24px;
+    background: #fff;
+    color: #000;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
     font-weight: 700;
-    padding: 12px 28px;
-    border-radius: 8px;
     cursor: pointer;
-    letter-spacing: 1px;
     transition: all 0.2s;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-    min-height: 48px;
+    font-family: 'Inter', sans-serif;
   }
   
-  #evolve-btn button:hover {
-    background: rgba(74, 201, 138, 0.2);
-    border-color: rgba(74, 201, 138, 0.5);
-    box-shadow: 0 0 20px rgba(74, 201, 138, 0.15);
+  .contribute-form button:hover {
+    background: #eee;
   }
   
-  #evolve-btn button:disabled {
-    opacity: 0.4;
+  .contribute-form button:disabled {
+    background: #333;
+    color: #666;
     cursor: not-allowed;
   }
   
-  #evolve-btn button.evolving {
-    animation: pulse-glow 1.5s ease-in-out infinite;
+  .progress-card {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 24px;
   }
   
-  @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 8px rgba(74, 201, 138, 0.1); }
-    50% { box-shadow: 0 0 24px rgba(74, 201, 138, 0.3); }
-  }
-  
-  #evolve-status {
-    font-size: 9px;
-    color: #4ac98a;
-    letter-spacing: 1px;
+  .progress-card h3 {
+    font-size: 14px;
+    color: #888;
+    margin-bottom: 12px;
     text-transform: uppercase;
-    min-height: 14px;
+    letter-spacing: 1px;
   }
   
-  @media (max-width: 768px) {
-    #evolve-btn {
-      bottom: 74px;
-    }
+  .progress-bar {
+    height: 8px;
+    background: #222;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 8px;
   }
   
-  /* Zoom controls */
-  #zoom-controls {
-    position: fixed;
-    bottom: 80px;
-    right: 16px;
-    z-index: 30;
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4a9eff, #6ab4ff);
+    transition: width 0.3s;
+  }
+  
+  .progress-label {
+    font-size: 12px;
+    color: #666;
+  }
+  
+  /* Contributors & Renders */
+  .canvas-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 48px;
+  }
+  
+  .info-section {
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 24px;
+  }
+  
+  .info-section h3 {
+    font-size: 16px;
+    margin-bottom: 16px;
+    color: #ccc;
+  }
+  
+  .contributor-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    pointer-events: auto;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
   }
   
-  #zoom-controls button {
-    background: rgba(8, 8, 16, 0.95);
-    border: 1px solid rgba(200, 200, 208, 0.12);
-    color: rgba(255, 255, 255, 0.4);
-    font-family: 'Space Mono', monospace;
-    font-size: 18px;
-    font-weight: bold;
-    width: 44px;
-    height: 44px;
-    border-radius: 6px;
-    cursor: pointer;
-    backdrop-filter: blur(12px);
-    transition: all 0.15s;
+  .contributor-item {
     display: flex;
+    justify-content: space-between;
     align-items: center;
-    justify-content: center;
-    -webkit-tap-highlight-color: transparent;
-    touch-action: manipulation;
-    pointer-events: auto;
-    position: relative;
-    z-index: 31;
+    padding: 8px 0;
+    border-bottom: 1px solid #1a1a1a;
+    font-size: 13px;
   }
   
-  #zoom-controls button:hover,
-  #zoom-controls button:active {
-    color: rgba(255, 255, 255, 0.7);
-    border-color: rgba(200, 200, 208, 0.25);
-    background: rgba(20, 20, 40, 0.95);
+  .contributor-item:last-child {
+    border-bottom: none;
   }
   
-  /* Minimap — desktop only */
-  #minimap {
-    position: fixed;
-    bottom: 80px;
-    left: 16px;
-    z-index: 15;
-    width: 120px;
-    height: 120px;
-    background: rgba(8, 8, 16, 0.9);
-    border: 1px solid rgba(200, 200, 208, 0.08);
-    border-radius: 3px;
-    backdrop-filter: blur(12px);
+  .contributor-email {
+    color: #aaa;
+  }
+  
+  .contributor-time {
+    color: #555;
+    font-size: 11px;
+  }
+  
+  .render-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 8px;
+  }
+  
+  .render-thumbnail {
+    aspect-ratio: 1;
+    border-radius: 4px;
+    overflow: hidden;
     cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.2s;
   }
   
-  /* Desktop: side panel instead of drawer */
-  @media (min-width: 769px) {
-    #drawer {
-      top: 60px;
-      bottom: auto;
-      left: 24px;
-      right: auto;
-      width: 280px;
-      max-height: calc(100vh - 100px);
-      border-radius: 10px;
-      padding-bottom: 0;
-    }
-    
-    #drawer.collapsed {
-      transform: none;
-    }
-    
-    #drawer-handle .grip {
-      display: none;
-    }
-    
-    #drawer-content {
-      max-height: calc(100vh - 200px);
-    }
-    
-    #zoom-controls {
-      bottom: 24px;
-      right: 24px;
-    }
-    
-    #minimap {
-      bottom: 24px;
-      left: 24px;
-    }
-    
-    #canvas-header {
-      padding: 16px 24px;
-    }
-    
-    #canvas-header .theme {
-      font-size: 16px;
-    }
+  .render-thumbnail:hover {
+    border-color: #4a9eff;
   }
   
-  /* Mobile: hide minimap, adjust controls */
+  .render-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
+  .empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: #555;
+    font-size: 13px;
+  }
+  
   @media (max-width: 768px) {
-    #minimap {
-      display: none;
+    .canvas-actions {
+      grid-template-columns: 1fr;
     }
     
-    #zoom-controls {
-      bottom: 80px;
-      right: 12px;
+    .canvas-info {
+      grid-template-columns: 1fr;
     }
     
-    #zoom-controls button {
-      width: 44px;
-      height: 44px;
-      font-size: 18px;
+    .canvas-title {
+      font-size: 24px;
     }
   }
 </style>
 
-<div id="canvas-header">
-  <div class="theme"><%= canvas.theme %></div>
-  <a href="/" class="back-link">← Back</a>
-</div>
-
-<canvas id="main-canvas"></canvas>
-
-<div id="drawer" class="collapsed">
-  <div id="drawer-handle">
-    <div class="grip"></div>
-  </div>
-  
-  <div id="drawer-summary">
-    <% if (canvas.status === 'frozen' || canvas.status === 'archived') { %>
-      <span class="status-badge frozen">Archived</span>
-    <% } else { %>
-      <span class="status-badge">Active</span>
-    <% } %>
-    <div class="stat">
-      <span class="value"><%= agents.length %></span>
-      <span class="label">agents</span>
-    </div>
-    <div class="stat">
-      <span class="value"><%= markCount %></span>
-      <span class="label">marks</span>
-    </div>
-    <% if (daysRemaining !== null) { %>
+<div class="canvas-page">
+  <div class="page-header">
+    <a href="/" class="back-link">← Back to home</a>
+    <h1 class="canvas-title"><%= canvas.theme %></h1>
+    <div class="canvas-meta">
       <div class="stat">
-        <span class="value"><%= daysRemaining %></span>
-        <span class="label">days left</span>
+        <span class="label">Contributions:</span>
+        <span class="value" id="contribution-count"><%= canvas.contributionCount %></span>
       </div>
-    <% } %>
-  </div>
-  
-  <div id="drawer-content">
-    <h3>Subthemes</h3>
-    <% subthemes.forEach(subtheme => { %>
-      <div class="subtheme-item">
-        <div class="subtheme-name"><%= subtheme.name %></div>
-        <div class="agent-list">
-          <% const subthemeAgents = agents.filter(a => a.subtheme === subtheme.name); %>
-          <% if (subthemeAgents.length === 0) { %>
-            <span style="font-size: 9px; color: #4a4a5a;">empty</span>
-          <% } else { %>
-            <% subthemeAgents.forEach(agent => { %>
-              <div class="agent-dot" 
-                   style="background: <%= agent.color %>; box-shadow: 0 0 8px <%= agent.color %>40;"
-                   title="<%= agent.name %>"
-                   onclick="window.location='/agent/<%= agent.id %>'"></div>
-            <% }); %>
-          <% } %>
+      <div class="stat">
+        <span class="label">Marks:</span>
+        <span class="value" id="mark-count"><%= markCount %></span>
+      </div>
+      <% if (canvas.status === 'active') { %>
+        <div class="stat">
+          <span class="label">Status:</span>
+          <span class="value" style="color: #4ade80;">Active</span>
         </div>
-      </div>
-    <% }); %>
+      <% } else { %>
+        <div class="stat">
+          <span class="label">Status:</span>
+          <span class="value" style="color: #888;">Archived</span>
+        </div>
+      <% } %>
+    </div>
   </div>
-</div>
 
-<canvas id="minimap"></canvas>
+  <!-- Canvas viewer -->
+  <div class="canvas-viewer">
+    <div class="view-toggle">
+      <button id="btn-live" class="active" onclick="switchView('live')">Live</button>
+      <button id="btn-rendered" onclick="switchView('rendered')">Rendered</button>
+    </div>
+    
+    <div class="canvas-content">
+      <!-- Rendered view -->
+      <% if (canvas.renderUrl) { %>
+        <img id="rendered-view" src="<%= canvas.renderUrl %>" alt="<%= canvas.theme %> - Rendered" />
+      <% } else { %>
+        <div id="rendered-view" class="no-render-message">
+          <p>No render yet. First render after 25 contributions.</p>
+        </div>
+      <% } %>
+      
+      <!-- Live primitive view -->
+      <canvas id="live-view" class="active"></canvas>
+    </div>
+  </div>
 
-<% if (canvas.status === 'active') { %>
-<div id="evolve-btn">
-  <div id="evolve-status"></div>
-  <button id="evolve-trigger" onclick="triggerEvolve()">🌀 Evolve — $1.99</button>
-</div>
-<% } %>
+  <!-- Contribute section -->
+  <% if (canvas.status === 'active') { %>
+    <div class="canvas-actions">
+      <div class="contribute-card">
+        <h3>Contribute to this Canvas — $2</h3>
+        <p>Your contribution adds 1-5 marks to the canvas, generated by AI based on your optional seed word. Watch your contribution appear live, then see it incorporated into the next rendered artwork.</p>
+        
+        <form class="contribute-form" id="contribute-form">
+          <input 
+            type="email" 
+            id="email-input" 
+            placeholder="Your email" 
+            required 
+          />
+          <input 
+            type="text" 
+            id="seed-word-input" 
+            placeholder="Optional seed word (max 1 word)" 
+            maxlength="20" 
+          />
+          <button type="submit">Contribute $2</button>
+        </form>
+      </div>
+      
+      <div class="progress-card">
+        <h3>Next Render</h3>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill" style="width: <%= ((canvas.contributionCount % 25) / 25 * 100) %>%;"></div>
+        </div>
+        <p class="progress-label"><span id="progress-text"><%= canvas.contributionCount % 25 %> / 25</span> contributions</p>
+        <p style="margin-top: 16px; font-size: 13px; color: #666; line-height: 1.5;">
+          Every 25 contributions, we generate a new AI-rendered artwork based on all the primitives. Your marks become part of the art.
+        </p>
+      </div>
+    </div>
+  <% } %>
 
-<div id="zoom-controls">
-  <button id="zoom-in">+</button>
-  <button id="zoom-out">−</button>
-  <button id="zoom-reset" style="font-size: 12px;">⊙</button>
+  <!-- Contributors & Renders -->
+  <div class="canvas-info">
+    <div class="info-section">
+      <h3>Recent Contributors</h3>
+      <div class="contributor-list" id="contributor-list">
+        <% if (contributors.length === 0) { %>
+          <div class="empty-state">No contributions yet. Be the first!</div>
+        <% } else { %>
+          <% contributors.slice(0, 20).forEach(c => { %>
+            <div class="contributor-item">
+              <span class="contributor-email"><%= c.user_email || 'Anonymous' %></span>
+              <span class="contributor-time"><%= new Date(c.created_at).toLocaleDateString() %></span>
+            </div>
+          <% }); %>
+        <% } %>
+      </div>
+    </div>
+    
+    <div class="info-section">
+      <h3>Render History</h3>
+      <div class="render-gallery" id="render-gallery">
+        <% if (renders.length === 0) { %>
+          <div class="empty-state">No renders yet. First at 25 contributions.</div>
+        <% } else { %>
+          <% renders.forEach(r => { %>
+            <div class="render-thumbnail" onclick="viewRender('<%= r.image_path %>')">
+              <img src="<%= r.image_path %>" alt="Render at <%= r.contribution_count_at %> contributions" />
+            </div>
+          <% }); %>
+        <% } %>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
-const canvas = document.getElementById('main-canvas');
-const ctx = canvas.getContext('2d');
-const minimap = document.getElementById('minimap');
-const mmCtx = minimap ? minimap.getContext('2d') : null;
-const drawer = document.getElementById('drawer');
-const drawerHandle = document.getElementById('drawer-handle');
-const drawerSummary = document.getElementById('drawer-summary');
-
 const canvasId = '<%= canvas.id %>';
-const isMobile = window.innerWidth <= 768;
+let currentView = 'live';
 
-// State
-let marks = [];
-let viewport = { x: 0, y: 0, zoom: 1 };
-let dragging = false;
-let dragStart = { x: 0, y: 0 };
-
-// Drawer toggle
-function toggleDrawer() {
-  drawer.classList.toggle('collapsed');
+// View toggle
+function switchView(view) {
+  currentView = view;
+  document.getElementById('btn-live').classList.toggle('active', view === 'live');
+  document.getElementById('btn-rendered').classList.toggle('active', view === 'rendered');
+  document.getElementById('live-view').classList.toggle('active', view === 'live');
+  document.getElementById('rendered-view').classList.toggle('active', view === 'rendered');
 }
 
-drawerHandle.addEventListener('click', toggleDrawer);
-drawerSummary.addEventListener('click', (e) => {
-  if (drawer.classList.contains('collapsed')) {
-    toggleDrawer();
-    e.stopPropagation();
-  }
-});
+// Render live primitive canvas
+const liveCanvas = document.getElementById('live-view');
+const ctx = liveCanvas.getContext('2d');
 
-// Swipe to dismiss drawer on mobile
-let drawerTouchStart = null;
-drawer.addEventListener('touchstart', e => {
-  drawerTouchStart = e.touches[0].clientY;
-}, { passive: true });
+function resizeCanvas() {
+  const container = liveCanvas.parentElement;
+  liveCanvas.width = container.offsetWidth;
+  liveCanvas.height = container.offsetHeight;
+  renderLiveView();
+}
 
-drawer.addEventListener('touchmove', e => {
-  if (!drawerTouchStart) return;
-  const dy = e.touches[0].clientY - drawerTouchStart;
-  if (dy > 50 && !drawer.classList.contains('collapsed')) {
-    drawer.classList.add('collapsed');
-    drawerTouchStart = null;
-  }
-}, { passive: true });
-
-drawer.addEventListener('touchend', () => { drawerTouchStart = null; }, { passive: true });
-
-// Fetch marks
-let loaded = false;
-
-let allMarks = [];
-let animatingMarks = [];
-let timelapseRunning = false;
-
-// Fixed bounds computed once from all marks — prevents bounce during timelapse
-let fixedBounds = null;
-
-async function loadMarks() {
+async function renderLiveView() {
   const res = await fetch(`/api/marks?canvasId=${canvasId}`);
-  allMarks = await res.json();
+  const marks = await res.json();
   
-  // Compute bounds ONCE from all marks — used for viewport and minimap throughout timelapse
-  if (allMarks.length > 0) {
-    const xs = allMarks.map(m => m.x);
-    const ys = allMarks.map(m => m.y);
-    fixedBounds = {
-      minX: Math.min(...xs), maxX: Math.max(...xs),
-      minY: Math.min(...ys), maxY: Math.max(...ys),
-      cx: (Math.min(...xs) + Math.max(...xs)) / 2,
-      cy: (Math.min(...ys) + Math.max(...ys)) / 2,
-      rangeX: Math.max(...xs) - Math.min(...xs) || 400,
-      rangeY: Math.max(...ys) - Math.min(...ys) || 400,
-    };
-    viewport.x = fixedBounds.cx;
-    viewport.y = fixedBounds.cy;
-    viewport.zoom = Math.max(0.3, Math.min(2, Math.min(
-      (window.innerWidth * 0.7) / fixedBounds.rangeX,
-      (window.innerHeight * 0.6) / fixedBounds.rangeY
-    )));
+  const W = liveCanvas.width;
+  const H = liveCanvas.height;
+  
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, W, H);
+  
+  if (marks.length === 0) {
+    ctx.fillStyle = '#333';
+    ctx.font = '14px Inter';
+    ctx.textAlign = 'center';
+    ctx.fillText('No marks yet', W/2, H/2);
+    return;
   }
   
-  // Start empty — timelapse plays everything in
-  marks = [];
-  loaded = true;
-  render();
+  // Map marks from [-500, 500] to canvas size
+  const scale = Math.min(W, H) / 1000;
+  const offsetX = W / 2;
+  const offsetY = H / 2;
   
-  startTimelapse();
+  const toX = (x) => x * scale + offsetX;
+  const toY = (y) => y * scale + offsetY;
+  
+  for (const m of marks) {
+    const x = toX(m.x);
+    const y = toY(m.y);
+    const size = m.size * scale;
+    const opacity = m.effectiveOpacity || m.opacity || 0.8;
+    
+    ctx.globalAlpha = opacity;
+    
+    switch (m.type) {
+      case 'dot':
+        ctx.fillStyle = m.color;
+        ctx.beginPath();
+        ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      
+      case 'line':
+        const meta = typeof m.meta === 'object' ? m.meta : JSON.parse(m.meta || '{}');
+        if (meta.x2 != null) {
+          ctx.strokeStyle = m.color;
+          ctx.lineWidth = size;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          ctx.lineTo(toX(meta.x2), toY(meta.y2));
+          ctx.stroke();
+        }
+        break;
+      
+      case 'text':
+        if (m.text) {
+          ctx.fillStyle = m.color;
+          ctx.font = `${size}px monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(m.text, x, y);
+        }
+        break;
+      
+      case 'arc':
+        const arcMeta = typeof m.meta === 'object' ? m.meta : JSON.parse(m.meta || '{}');
+        const radius = (arcMeta.radius || 30) * scale;
+        ctx.strokeStyle = m.color;
+        ctx.lineWidth = size;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.arc(x, y, radius, arcMeta.startAngle || 0, arcMeta.endAngle || Math.PI);
+        ctx.stroke();
+        break;
+    }
+  }
+  
+  ctx.globalAlpha = 1.0;
 }
 
-function startTimelapse() {
-  if (allMarks.length === 0) return;
-  timelapseRunning = true;
-  
-  // Total duration: ~15-25 seconds for the whole show
-  // Marks come in bursts — faster at start (foundation), slightly slower for detail
-  const total = allMarks.length;
-  const totalDuration = Math.min(25000, Math.max(12000, total * 25)); // 25ms per mark, 12-25s total
-  let placed = 0;
-  
-  function placeNext() {
-    if (placed >= total) {
-      timelapseRunning = false;
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// Contribute form
+const contributeForm = document.getElementById('contribute-form');
+if (contributeForm) {
+  contributeForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const email = document.getElementById('email-input').value;
+    const seedWord = document.getElementById('seed-word-input').value.trim().split(/\s+/)[0] || ''; // Take first word only
+    
+    if (!email) {
+      alert('Email required');
       return;
     }
     
-    // Burst: place 1-4 marks at once (more bursting = more alive feeling)
-    const burstSize = Math.min(total - placed, 1 + Math.floor(Math.random() * 3));
+    contributeForm.querySelector('button').disabled = true;
+    contributeForm.querySelector('button').textContent = 'Processing...';
     
-    for (let i = 0; i < burstSize && placed < total; i++) {
-      const mark = allMarks[placed];
-      mark._fadeStart = performance.now();
-      mark._fadeDuration = 300 + Math.random() * 400; // 300-700ms fade — snappy
-      animatingMarks.push(mark);
-      marks.push(mark);
-      placed++;
-    }
-    
-    render();
-    
-    // Next burst timing: 20-80ms (fast!) with occasional longer pauses
-    const pause = Math.random() < 0.08 ? 200 + Math.random() * 300 : 20 + Math.random() * 60;
-    requestAnimationFrame(() => setTimeout(placeNext, pause));
-  }
-  
-  // Small initial delay so the empty canvas is visible for a beat
-  setTimeout(placeNext, 400);
-}
-
-// Clean up finished animations
-setInterval(() => {
-  const now = performance.now();
-  animatingMarks = animatingMarks.filter(m => now - m._fadeStart < m._fadeDuration);
-}, 1000);
-
-function centerOnMarks() {
-  if (marks.length === 0) return;
-  const xs = marks.map(m => m.x);
-  const ys = marks.map(m => m.y);
-  viewport.x = (Math.min(...xs) + Math.max(...xs)) / 2;
-  viewport.y = (Math.min(...ys) + Math.max(...ys)) / 2;
-  
-  const rangeX = Math.max(...xs) - Math.min(...xs) || 400;
-  const rangeY = Math.max(...ys) - Math.min(...ys) || 400;
-  const fitZoom = Math.min(
-    (window.innerWidth * 0.7) / rangeX,
-    (window.innerHeight * 0.6) / rangeY
-  );
-  viewport.zoom = Math.max(0.3, Math.min(2, fitZoom));
-}
-
-// Resize
-function resize() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = window.innerWidth * dpr;
-  canvas.height = window.innerHeight * dpr;
-  canvas.style.width = window.innerWidth + 'px';
-  canvas.style.height = window.innerHeight + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  
-  if (minimap && minimap.offsetWidth > 0) {
-    minimap.width = minimap.offsetWidth * dpr;
-    minimap.height = minimap.offsetHeight * dpr;
-    mmCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  
-  render();
-}
-
-function worldToScreen(wx, wy) {
-  return {
-    x: (wx - viewport.x) * viewport.zoom + window.innerWidth / 2,
-    y: (wy - viewport.y) * viewport.zoom + window.innerHeight / 2
-  };
-}
-
-function render() {
-  const W = window.innerWidth;
-  const H = window.innerHeight;
-  
-  ctx.fillStyle = '#030306';
-  ctx.fillRect(0, 0, W, H);
-  
-  if (!loaded) return;
-  
-  let needsAnim = false;
-  const renderedLabels = [];
-  const margin = 200;
-  const vp = {
-    left: viewport.x - (W / 2 + margin) / viewport.zoom,
-    right: viewport.x + (W / 2 + margin) / viewport.zoom,
-    top: viewport.y - (H / 2 + margin) / viewport.zoom,
-    bottom: viewport.y + (H / 2 + margin) / viewport.zoom
-  };
-  
-  const visible = marks.filter(m => 
-    m.x >= vp.left && m.x <= vp.right && 
-    m.y >= vp.top && m.y <= vp.bottom
-  );
-  
-  for (const m of visible) {
-    const screen = worldToScreen(m.x, m.y);
-    const px = screen.x;
-    const py = screen.y;
-    const sz = (m.size || 8) * viewport.zoom;
-    let opacity = m.effectiveOpacity || m.opacity || 0.8;
-    
-    // Fade in animation
-    if (m._fadeStart) {
-      const elapsed = performance.now() - m._fadeStart;
-      const progress = Math.min(1, elapsed / m._fadeDuration);
-      // Ease out cubic for smooth fade
-      const ease = 1 - Math.pow(1 - progress, 3);
-      opacity *= ease;
-      if (progress < 1) needsAnim = true;
-    }
-    
-    if (m.type === 'line') {
-      const meta = typeof m.meta === 'string' ? JSON.parse(m.meta) : (m.meta || {});
-      if (meta.x2 != null) {
-        const end = worldToScreen(meta.x2, meta.y2);
-        ctx.strokeStyle = m.color;
-        ctx.globalAlpha = opacity * 0.7;
-        ctx.lineWidth = Math.max(0.5, sz * 0.25);
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(end.x, end.y);
-        ctx.stroke();
-      }
-    } else if (m.type === 'text') {
-      const fontSize = Math.max(8, sz * 1.0);
-      ctx.font = `${fontSize}px "Space Mono", monospace`;
-      const text = m.text || '';
-      const tw = ctx.measureText(text).width;
-      const th = fontSize;
+    try {
+      // Step 1: Create or get user
+      const userRes = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const user = await userRes.json();
       
-      // Collision check — skip if overlapping a previous label
-      const labelRect = { x: px, y: py - th, w: tw, h: th * 1.4 };
-      let collision = false;
-      for (const prev of renderedLabels) {
-        if (labelRect.x < prev.x + prev.w && labelRect.x + labelRect.w > prev.x &&
-            labelRect.y < prev.y + prev.h && labelRect.y + labelRect.h > prev.y) {
-          collision = true;
-          break;
+      // Step 2: Check credits — if 0, redirect to Stripe
+      if (user.credits < 1) {
+        // Create Stripe checkout session
+        const checkoutRes = await fetch('/api/stripe/create-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: user.id, type: 'single' }),
+        });
+        const checkout = await checkoutRes.json();
+        
+        if (checkout.url) {
+          // Redirect to Stripe
+          window.location.href = checkout.url;
+        } else {
+          alert('Payment setup failed. Please try again.');
         }
+        return;
       }
       
-      if (!collision) {
-        ctx.fillStyle = m.color;
-        ctx.globalAlpha = opacity * 0.7;
-        ctx.fillText(text, px, py);
-        renderedLabels.push(labelRect);
+      // Step 3: Make contribution
+      const contributeRes = await fetch(`/api/canvas/${canvasId}/contribute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, seedWord: seedWord || undefined }),
+      });
+      
+      if (!contributeRes.ok) {
+        const error = await contributeRes.json();
+        alert(error.error || 'Contribution failed');
+        return;
       }
-    } else {
-      // Outer glow — subtle
-      ctx.fillStyle = m.color;
-      ctx.globalAlpha = opacity * 0.08;
-      ctx.beginPath();
-      ctx.arc(px, py, sz * 1.8, 0, Math.PI * 2);
-      ctx.fill();
       
-      // Mid ring — more visible
-      ctx.globalAlpha = opacity * 0.25;
-      ctx.beginPath();
-      ctx.arc(px, py, sz * 1.0, 0, Math.PI * 2);
-      ctx.fill();
+      const result = await contributeRes.json();
       
-      // Core dot — solid and distinct
-      ctx.globalAlpha = opacity * 0.9;
-      ctx.beginPath();
-      ctx.arc(px, py, sz * 0.45, 0, Math.PI * 2);
-      ctx.fill();
+      // Success! Update UI
+      alert(`Contribution successful! ${result.creditsRemaining} credits remaining.`);
       
-      // Bright center pip
-      ctx.globalAlpha = Math.min(1, opacity * 1.2);
-      ctx.beginPath();
-      ctx.arc(px, py, Math.max(1, sz * 0.15), 0, Math.PI * 2);
-      ctx.fill();
+      // Reload to show new marks
+      window.location.reload();
+      
+    } catch (err) {
+      console.error(err);
+      alert('An error occurred. Please try again.');
+    } finally {
+      contributeForm.querySelector('button').disabled = false;
+      contributeForm.querySelector('button').textContent = 'Contribute $2';
     }
-    ctx.globalAlpha = 1;
-  }
-  
-  renderMinimap();
-  
-  // Keep animating if marks are fading in
-  if (needsAnim) requestAnimationFrame(render);
-}
-
-function renderMinimap() {
-  if (!mmCtx || !minimap || minimap.offsetWidth === 0) return;
-  
-  const W = minimap.offsetWidth;
-  const H = minimap.offsetHeight;
-  
-  mmCtx.fillStyle = '#030306';
-  mmCtx.fillRect(0, 0, W, H);
-  
-  if (marks.length === 0 || !fixedBounds) return;
-  
-  // Use fixedBounds (computed once from allMarks) to prevent jitter during timelapse
-  const { cx, cy, rangeX, rangeY } = fixedBounds;
-  const scale = Math.min((W - 10) / rangeX, (H - 10) / rangeY) * 0.8;
-  
-  for (const m of marks) {
-    const px = (m.x - cx) * scale + W / 2;
-    const py = (m.y - cy) * scale + H / 2;
-    mmCtx.fillStyle = m.color;
-    mmCtx.globalAlpha = (m.effectiveOpacity || m.opacity || 0.8) * 0.5;
-    mmCtx.beginPath();
-    mmCtx.arc(px, py, 1.5, 0, Math.PI * 2);
-    mmCtx.fill();
-  }
-  mmCtx.globalAlpha = 1;
-  
-  const vpW = window.innerWidth / viewport.zoom;
-  const vpH = window.innerHeight / viewport.zoom;
-  const vpX = (viewport.x - cx) * scale + W / 2;
-  const vpY = (viewport.y - cy) * scale + H / 2;
-  mmCtx.strokeStyle = '#ffffff30';
-  mmCtx.lineWidth = 1;
-  mmCtx.strokeRect(vpX - (vpW * scale) / 2, vpY - (vpH * scale) / 2, vpW * scale, vpH * scale);
-}
-
-// Mouse pan/zoom
-canvas.addEventListener('mousedown', e => {
-  dragging = true;
-  dragStart = { x: e.clientX, y: e.clientY };
-});
-canvas.addEventListener('mousemove', e => {
-  if (!dragging) return;
-  viewport.x -= (e.clientX - dragStart.x) / viewport.zoom;
-  viewport.y -= (e.clientY - dragStart.y) / viewport.zoom;
-  dragStart = { x: e.clientX, y: e.clientY };
-  render();
-});
-canvas.addEventListener('mouseup', () => { dragging = false; });
-canvas.addEventListener('mouseleave', () => { dragging = false; });
-canvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  viewport.zoom = Math.max(0.1, Math.min(5, viewport.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
-  render();
-}, { passive: false });
-
-// Touch pan + pinch zoom
-let touches = [];
-let lastPinchDist = 0;
-
-canvas.addEventListener('touchstart', e => {
-  e.preventDefault();
-  touches = [...e.touches];
-  if (touches.length === 2) {
-    lastPinchDist = Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY);
-  }
-}, { passive: false });
-
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  const newTouches = [...e.touches];
-  
-  if (newTouches.length === 1 && touches.length === 1) {
-    // Pan
-    const dx = newTouches[0].clientX - touches[0].clientX;
-    const dy = newTouches[0].clientY - touches[0].clientY;
-    viewport.x -= dx / viewport.zoom;
-    viewport.y -= dy / viewport.zoom;
-    render();
-  } else if (newTouches.length === 2) {
-    // Pinch zoom
-    const dist = Math.hypot(newTouches[1].clientX - newTouches[0].clientX, newTouches[1].clientY - newTouches[0].clientY);
-    if (lastPinchDist > 0) {
-      const scale = dist / lastPinchDist;
-      viewport.zoom = Math.max(0.1, Math.min(5, viewport.zoom * scale));
-      render();
-    }
-    lastPinchDist = dist;
-    
-    // Also pan with two fingers
-    const cx = (newTouches[0].clientX + newTouches[1].clientX) / 2;
-    const cy2 = (newTouches[0].clientY + newTouches[1].clientY) / 2;
-    const ocx = (touches[0].clientX + touches[1].clientX) / 2;
-    const ocy = (touches[0].clientY + touches[1].clientY) / 2;
-    viewport.x -= (cx - ocx) / viewport.zoom;
-    viewport.y -= (cy2 - ocy) / viewport.zoom;
-    render();
-  }
-  
-  touches = newTouches;
-}, { passive: false });
-
-canvas.addEventListener('touchend', e => {
-  touches = [...e.touches];
-  lastPinchDist = 0;
-}, { passive: true });
-
-// Zoom buttons
-document.getElementById('zoom-in').addEventListener('click', () => {
-  viewport.zoom = Math.min(5, viewport.zoom * 1.3);
-  render();
-});
-document.getElementById('zoom-out').addEventListener('click', () => {
-  viewport.zoom = Math.max(0.1, viewport.zoom / 1.3);
-  render();
-});
-document.getElementById('zoom-reset').addEventListener('click', () => {
-  centerOnMarks();
-  render();
-});
-
-// Minimap click
-if (minimap) {
-  minimap.addEventListener('click', e => {
-    if (marks.length === 0 || !fixedBounds) return;
-    const rect = minimap.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const { cx, cy, rangeX, rangeY } = fixedBounds;
-    const scale = Math.min((minimap.offsetWidth - 10) / rangeX, (minimap.offsetHeight - 10) / rangeY) * 0.8;
-    viewport.x = (mx - minimap.offsetWidth / 2) / scale + cx;
-    viewport.y = (my - minimap.offsetHeight / 2) / scale + cy;
-    render();
   });
 }
 
-window.addEventListener('resize', resize);
-resize();
-loadMarks();
-
-// --- Evolve ---
-const evolveBtn = document.getElementById('evolve-trigger');
-const evolveStatus = document.getElementById('evolve-status');
-
-async function triggerEvolve() {
-  if (evolveBtn.disabled) return;
-  evolveBtn.disabled = true;
-  evolveBtn.classList.add('evolving');
-  evolveBtn.textContent = '🌀 Evolving...';
-  evolveStatus.textContent = '';
-  
-  try {
-    const res = await fetch(`/api/canvas/${canvasId}/evolve`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tier: 'opus' }),
-    });
-    const data = await res.json();
-    if (data.error) {
-      evolveStatus.textContent = data.error;
-      evolveBtn.disabled = false;
-      evolveBtn.classList.remove('evolving');
-      evolveBtn.textContent = '🌀 Evolve — $1.99';
-    }
-  } catch (e) {
-    evolveStatus.textContent = 'Error: ' + e.message;
-    evolveBtn.disabled = false;
-    evolveBtn.classList.remove('evolving');
-    evolveBtn.textContent = '🌀 Evolve — $1.99';
-  }
+// View render in lightbox
+function viewRender(imagePath) {
+  // For now, just open in new tab — we can add a lightbox later
+  window.open(imagePath, '_blank');
 }
 
-// --- WebSocket for live evolve updates ---
-const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProto}//${location.host}?canvas=${canvasId}`);
+// WebSocket for live updates
+const ws = new WebSocket(`ws://${window.location.host}?canvas=${canvasId}`);
 
 ws.onmessage = (event) => {
-  try {
-    const data = JSON.parse(event.data);
+  const msg = JSON.parse(event.data);
+  
+  if (msg.type === 'mark:created' && msg.mark.canvasId === canvasId) {
+    // Re-render live view with new mark
+    renderLiveView();
     
-    if (data.type === 'evolve_start') {
-      evolveStatus.textContent = `Evolving ${data.agents} agents...`;
-    }
-    
-    if (data.type === 'evolve_marks' && data.marks) {
-      // Add new marks with fade-in animation
-      for (const m of data.marks) {
-        if (typeof m.meta === 'string') {
-          try { m.meta = JSON.parse(m.meta); } catch { m.meta = {}; }
-        }
-        m._fadeStart = performance.now();
-        m._fadeDuration = 500 + Math.random() * 500;
-        animatingMarks.push(m);
-        marks.push(m);
-        allMarks.push(m);
-      }
-      evolveStatus.textContent = `${data.agent}: +${data.added}`;
-      render();
-    }
-    
-    if (data.type === 'evolve_done') {
-      evolveBtn.disabled = false;
-      evolveBtn.classList.remove('evolving');
-      evolveBtn.textContent = '🌀 Evolve — $1.99';
-      evolveStatus.textContent = `Done! +${data.totalAdded} marks`;
-      
-      // Update drawer mark count
-      const countEl = document.querySelector('#drawer-summary .stat .value');
-      if (countEl) countEl.textContent = marks.length;
-      
-      setTimeout(() => { evolveStatus.textContent = ''; }, 5000);
-    }
-  } catch {}
-};
-
-ws.onclose = () => {
-  // Reconnect after 3s
-  setTimeout(() => { location.reload(); }, 3000);
+    // Update stats
+    const markCount = document.getElementById('mark-count');
+    if (markCount) markCount.textContent = parseInt(markCount.textContent) + 1;
+  }
+  
+  if (msg.type === 'render_complete' && msg.canvasId === canvasId) {
+    // New render is available — reload the page to show it
+    window.location.reload();
+  }
 };
 </script>
 

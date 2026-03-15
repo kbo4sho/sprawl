@@ -58,6 +58,7 @@ const DB_PATH = path.join(DATA_DIR, 'sprawl.db');
 // Import snapshot and gardener modules
 const { generateSnapshot } = require('./snapshot');
 const { archiveWeek } = require('./gardener');
+const { triggerRender } = require('./render');
 
 // --- Database ---
 const db = new Database(DB_PATH);
@@ -807,6 +808,8 @@ app.get('/', (req, res) => {
       agentCount,
       markCount,
       daysRemaining,
+      renderUrl: c.current_render_url, // Latest AI render
+      contributionCount: c.contribution_count || 0,
     };
   });
   
@@ -822,38 +825,53 @@ app.get('/canvas/:id', (req, res) => {
   const canvas = stmts.getCanvas.get(req.params.id);
   if (!canvas) return res.status(404).render('404', { title: 'Canvas not found' });
   
-  const agents = stmts.getCanvasAgents.all(req.params.id);
   const markCount = stmts.countCanvasMarks.get(req.params.id).count;
-  const subthemes = JSON.parse(canvas.subthemes);
   
-  // Calculate days remaining
-  let daysRemaining = null;
-  if (canvas.status === 'active') {
-    const weekOf = new Date(canvas.week_of);
-    const sunday = new Date(weekOf);
-    sunday.setDate(sunday.getDate() + 6);
-    sunday.setHours(23, 59, 59, 999);
-    const now = new Date();
-    daysRemaining = Math.max(0, Math.ceil((sunday - now) / (1000 * 60 * 60 * 24)));
-  }
+  // Get contributors
+  const contributionsQuery = db.prepare(`
+    SELECT c.*, u.email as user_email 
+    FROM contributions c 
+    LEFT JOIN users u ON c.user_id = u.id 
+    WHERE c.canvas_id = ? 
+    ORDER BY c.created_at DESC
+  `);
+  const contributors = contributionsQuery.all(req.params.id);
+  
+  // Get renders
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS renders (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      contribution_count_at INTEGER NOT NULL,
+      image_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE CASCADE
+    )
+  `);
+  
+  const rendersQuery = db.prepare(`
+    SELECT contribution_count_at, image_path, created_at 
+    FROM renders 
+    WHERE canvas_id = ? 
+    ORDER BY contribution_count_at ASC
+  `);
+  const renders = rendersQuery.all(req.params.id);
   
   res.render('canvas', {
     canvas: {
       id: canvas.id,
       theme: canvas.theme,
+      subject: canvas.subject,
+      stylePrompt: canvas.style_prompt,
       status: canvas.status,
+      contributionCount: canvas.contribution_count || 0,
+      renderUrl: canvas.current_render_url,
     },
-    agents: agents.map(a => ({
-      id: a.id,
-      name: a.name,
-      color: a.color,
-      subtheme: a.subtheme,
-    })),
-    subthemes,
     markCount,
-    daysRemaining,
+    contributors,
+    renders,
     title: `${canvas.theme} — Sprawl`,
-    description: `Canvas: ${canvas.theme}. ${agents.length} agents collaborating.`,
+    description: `Canvas: ${canvas.theme}. ${contributors.length} contributions, ${markCount} marks.`,
   });
 });
 
@@ -1324,6 +1342,42 @@ app.post('/api/canvas/:id/archive', rateLimit, async (req, res) => {
   }
 });
 
+// GET /api/canvas/:id/renders - List all renders for timelapse
+app.get('/api/canvas/:id/renders', (req, res) => {
+  const canvas = stmts.getCanvas.get(req.params.id);
+  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
+  
+  // Ensure renders table exists
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS renders (
+      id TEXT PRIMARY KEY,
+      canvas_id TEXT NOT NULL,
+      contribution_count_at INTEGER NOT NULL,
+      image_path TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (canvas_id) REFERENCES canvases(id) ON DELETE CASCADE
+    )
+  `);
+  
+  const renders = db.prepare(`
+    SELECT contribution_count_at, image_path, created_at 
+    FROM renders 
+    WHERE canvas_id = ? 
+    ORDER BY contribution_count_at ASC
+  `).all(req.params.id);
+  
+  res.json({
+    canvasId: req.params.id,
+    theme: canvas.theme,
+    totalRenders: renders.length,
+    renders: renders.map(r => ({
+      contributionCount: r.contribution_count_at,
+      imagePath: r.image_path,
+      createdAt: r.created_at,
+    })),
+  });
+});
+
 // ============================================================
 // CANVAS PIVOT: USERS & CONTRIBUTIONS
 // ============================================================
@@ -1526,10 +1580,13 @@ Output ONLY: {"ops": [...]}`;
       renderTriggered: shouldRender,
     });
     
-    // TODO: If shouldRender === true, trigger async render job
+    // Trigger async render if needed
     if (shouldRender) {
       console.log(`🎨 Render triggered for canvas ${canvasId} at ${newCount} contributions`);
-      // This will be implemented in the next phase (dual-layer rendering)
+      // Fire and forget - don't block the response
+      triggerRender(db, canvasId, broadcast).catch(err => {
+        console.error(`Render failed for canvas ${canvasId}:`, err.message);
+      });
     }
     
   } catch (e) {

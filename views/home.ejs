@@ -76,6 +76,12 @@
     height: 100%;
   }
   
+  .canvas-preview img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  
   .canvas-info {
     display: flex;
     gap: 16px;
@@ -193,22 +199,33 @@
           <h2 class="canvas-theme"><%= canvas.theme %></h2>
           
           <div class="canvas-preview">
-            <canvas id="preview-<%= canvas.id %>" data-canvas-id="<%= canvas.id %>"></canvas>
+            <% if (canvas.renderUrl) { %>
+              <img src="<%= canvas.renderUrl %>" alt="<%= canvas.theme %>" />
+            <% } else { %>
+              <canvas id="preview-<%= canvas.id %>" data-canvas-id="<%= canvas.id %>"></canvas>
+            <% } %>
           </div>
           
           <div class="canvas-info">
             <div class="stat">
-              <span class="value"><%= canvas.agentCount %></span>
-              <span class="label">agents</span>
+              <span class="value"><%= canvas.contributionCount %></span>
+              <span class="label">contributions</span>
             </div>
             <div class="stat">
               <span class="value"><%= canvas.markCount %></span>
               <span class="label">marks</span>
             </div>
-            <div class="stat">
-              <span class="value"><%= canvas.daysRemaining %></span>
-              <span class="label">days left</span>
-            </div>
+            <% if (canvas.renderUrl) { %>
+              <div class="stat">
+                <span class="value" style="color: #4a9eff;">Rendered</span>
+                <span class="label">latest</span>
+              </div>
+            <% } else { %>
+              <div class="stat">
+                <span class="value"><%= canvas.daysRemaining %></span>
+                <span class="label">days left</span>
+              </div>
+            <% } %>
           </div>
           
           <div class="canvas-actions">
@@ -225,9 +242,11 @@
 </div>
 
 <script>
-// Render live mini-previews for each canvas
+// Render live mini-previews for canvases that don't have renders yet
 async function renderPreviews() {
   const canvases = document.querySelectorAll('.canvas-preview canvas');
+  
+  if (canvases.length === 0) return; // All canvases have renders, nothing to draw
   
   for (const canvas of canvases) {
     const canvasId = canvas.dataset.canvasId;
