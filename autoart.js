@@ -159,6 +159,19 @@ async function pushMarksBatch(ops, apiKey) {
   return data; // { added, removed, moved, errors, budget }
 }
 
+async function checkBudget(apiKey) {
+  // Push an empty batch to check budget without side effects
+  try {
+    const r = await fetch(`${SPRAWL_API}/api/ext/marks/batch`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ops: [] }),
+    });
+    const data = await r.json();
+    return data.budget || null; // { remaining, total } or null
+  } catch { return null; }
+}
+
 async function callLLM(system, user, temp = 0.7) {
   const r = await fetch(GATEWAY_URL, {
     method: 'POST',
@@ -180,6 +193,14 @@ function parseJSON(text) {
   if (fb >= 0 && lb > fb) { try { return JSON.parse(s.slice(fb, lb + 1)); } catch {} }
   const ab = s.indexOf('['), alb = s.lastIndexOf(']');
   if (ab >= 0 && alb > ab) { try { return JSON.parse(s.slice(ab, alb + 1)); } catch {} }
+  // Try fixing common LLM JSON issues: trailing commas, unquoted keys
+  try {
+    const cleaned = s.replace(/,\s*([}\]])/g, '$1');
+    const fb2 = cleaned.indexOf('{'), lb2 = cleaned.lastIndexOf('}');
+    if (fb2 >= 0 && lb2 > fb2) return JSON.parse(cleaned.slice(fb2, lb2 + 1));
+    const ab2 = cleaned.indexOf('['), alb2 = cleaned.lastIndexOf(']');
+    if (ab2 >= 0 && alb2 > ab2) return JSON.parse(cleaned.slice(ab2, alb2 + 1));
+  } catch {}
   throw new Error('Failed to parse JSON');
 }
 
@@ -239,7 +260,7 @@ function sampleMarks(marks, count) {
 }
 
 // === Core ===
-async function generateStrategy(params, marks, canvas, goals) {
+async function generateStrategy(params, marks, canvas, goals, budget) {
   const bestColors = getBestColors(params);
   const winRate = params.totalIterations > 0 ? (params.keptIterations / params.totalIterations * 100).toFixed(0) : '?';
   const comp = summarizeComposition(marks);
@@ -247,7 +268,21 @@ async function generateStrategy(params, marks, canvas, goals) {
   // Force zone diversity — don't repeat the same zone 3x in a row
   const recentZones = params.winningPatterns.slice(-3).join(' ');
   
-  const system = `You are an art evolution strategist. Generate a DIFFERENT strategy each time. Never repeat the same zone 3 times in a row.`;
+  // Find weak marks (candidates for removal/moving)
+  const weakMarks = findWeakMarks(marks, comp);
+  
+  // Budget-aware op guidance
+  const remaining = budget?.marksRemaining ?? 999;
+  let opGuidance;
+  if (remaining <= 0) {
+    opGuidance = `BUDGET EXHAUSTED (0 marks remaining). You can ONLY use "move" and "remove" ops. No "add" ops allowed. Sculpt what exists.`;
+  } else if (remaining < 20) {
+    opGuidance = `LOW BUDGET (${remaining} marks remaining). Prefer remove+add combos (net zero) or move ops. Pure adds only if critical.`;
+  } else {
+    opGuidance = `Budget: ${remaining} marks remaining. Mix add/move/remove as needed.`;
+  }
+  
+  const system = `You are an art evolution strategist. You can ADD new marks, MOVE existing marks to better positions, or REMOVE weak marks. Generate a DIFFERENT strategy each time.`;
   
   const user = `Canvas: "${canvas.theme}"
 Spatial guide: ${canvas.spatialGuide || 'none'}
@@ -260,7 +295,12 @@ Text marks: ${comp.texts.join(', ') || 'none'}
 Bounds: x[${comp.bounds.minX},${comp.bounds.maxX}] y[${comp.bounds.minY},${comp.bounds.maxY}]
 
 Sample marks (spread across canvas):
-${comp.sample.map(m => `(${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}${m.text ? ` "${m.text}"` : ''}`).join('\n')}
+${comp.sample.map(m => `(${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}${m.text ? ` "${m.text}"` : ''}${m.id ? ` id=${m.id}` : ''}`).join('\n')}
+
+WEAK MARKS (candidates for remove/move — scattered, oversized, or misplaced):
+${weakMarks.slice(0, 15).map(m => `id=${m.id} (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity} — ${m.weakness}`).join('\n') || 'none identified'}
+
+${opGuidance}
 
 LEARNED (${params.totalIterations} iterations, ${winRate}% kept):
 Best size: ${params.bestSizeRange} | Best opacity: ${params.bestOpacityRange}
@@ -277,23 +317,80 @@ ${goals || 'Use creative judgment.'}
 
 Pick a DIFFERENT zone than recent ones. The sparsest zone is: ${Object.entries(comp.zones).sort((a,b) => a[1] - b[1])[0][0]} (${Object.entries(comp.zones).sort((a,b) => a[1] - b[1])[0][1]} marks).
 
-Output JSON: {"description":"specific plan","zone":"area with coords","colors":["#hex",...],"spatialApproach":"how to arrange","emphasis":"priority"}`;
+Output JSON: {"description":"specific plan","zone":"area with coords","colors":["#hex",...],"spatialApproach":"how to arrange","emphasis":"priority","ops":{"add":N,"move":N,"remove":N}}
+The ops field says how many of each operation type to generate.`;
 
   return parseJSON(await callLLM(system, user, 0.9));
+}
+
+function findWeakMarks(marks, comp) {
+  // Identify marks that are likely hurting the composition
+  const weak = [];
+  const avgSize = parseFloat(comp.avgSize);
+  
+  for (const m of marks) {
+    if (!m.id) continue; // Can't operate on marks without IDs
+    const reasons = [];
+    
+    // Oversized marks (> 2x average)
+    if (m.size > avgSize * 2.5 && m.size > 10) reasons.push(`oversized (${m.size})`);
+    
+    // Isolated marks (far from any cluster) — check distance to nearest neighbor
+    // Simple heuristic: marks in very sparse zones
+    const inCenter = Math.abs(m.x) < 100 && Math.abs(m.y) < 100;
+    if (!inCenter && m.opacity < 0.2) reasons.push('faint peripheral');
+    
+    // Very low opacity + large = visual noise
+    if (m.opacity < 0.1 && m.size > 5) reasons.push('noise (faint + large)');
+    
+    // Text marks that are generic
+    if (m.type === 'text' && m.text && m.size > 8) reasons.push('large text');
+    
+    if (reasons.length > 0) {
+      weak.push({ ...m, weakness: reasons.join(', ') });
+    }
+  }
+  
+  // Sort by most problematic
+  return weak.sort((a, b) => b.size - a.size).slice(0, 20);
 }
 
 async function generateMarks(params, strategy, marks, canvas) {
   const system = `You are an AI artist. Output ONLY a JSON array of mark ops. No explanation.`;
   
-  const numDots = Math.round(params.markCount * params.dotRatio);
-  const numLines = Math.round(params.markCount * params.lineRatio);
+  const plannedOps = strategy.ops || { add: params.markCount, move: 0, remove: 0 };
+  const numAdd = plannedOps.add || 0;
+  const numMove = plannedOps.move || 0;
+  const numRemove = plannedOps.remove || 0;
+  const totalOps = numAdd + numMove + numRemove;
+  
+  // Find existing marks with IDs for move/remove ops
+  const existingWithIds = marks.filter(m => m.id).slice(-200); // recent marks
+  const weakMarks = findWeakMarks(marks, summarizeComposition(marks));
+  
+  let moveRemoveContext = '';
+  if (numMove > 0 || numRemove > 0) {
+    moveRemoveContext = `\nEXISTING MARKS (use these IDs for move/remove ops):
+${weakMarks.slice(0, 20).map(m => `id="${m.id}" (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} — ${m.weakness}`).join('\n')}
+
+Additional marks you can move/remove:
+${existingWithIds.slice(0, 30).map(m => `id="${m.id}" (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}`).join('\n')}`;
+  }
+  
+  const numDots = Math.round(numAdd * params.dotRatio);
+  const numLines = Math.round(numAdd * params.lineRatio);
   
   const user = `Canvas: "${canvas.theme}"
 Strategy: ${strategy.description}
 Zone: ${strategy.zone}
 Colors: ${(strategy.colors || PALETTE.slice(0, 6)).join(', ')} (ONLY these)
 
-Generate ${params.markCount} marks: ~${numDots} dots, ~${numLines} lines, rest text
+Generate ${totalOps} operations:
+- ${numAdd} ADD ops: ~${numDots} dots, ~${numLines} lines, rest text
+- ${numMove} MOVE ops: reposition existing marks to better locations
+- ${numRemove} REMOVE ops: delete marks that hurt the composition
+${moveRemoveContext}
+
 Size: ${params.sizeRange[0]}-${params.sizeRange[1]}
 Opacity: ${params.opacityRange[0]}-${params.opacityRange[1]} (use 3 layers: bg/structure/focal)
 Cluster: pack within ${params.clusterTightness}px radius
@@ -304,24 +401,38 @@ RULES:
 - Lines for edges only
 - Text rare, size 3-5, low opacity
 - Canvas range: -400 to 400
+- For MOVE: use markId of existing mark + new x,y position
+- For REMOVE: use markId of mark to delete
 
-Output ONLY: [{"op":"add","type":"dot","x":0,"y":0,"size":5,"color":"#hex","opacity":0.7,"canvasId":"${canvas.id}"},...]`;
+Output ONLY a JSON array:
+ADD:    {"op":"add","type":"dot","x":0,"y":0,"size":5,"color":"#hex","opacity":0.7,"canvasId":"${canvas.id}"}
+MOVE:   {"op":"move","markId":"existing-id","x":10,"y":20}
+REMOVE: {"op":"remove","markId":"existing-id"}`;
 
   const raw = await callLLM(system, user, 0.9);
   const parsed = parseJSON(raw);
   const ops = Array.isArray(parsed) ? parsed : parsed.ops || [];
-  return ops.filter(o => typeof o.x === 'number').map(o => ({
-    op: 'add',
-    type: ['dot', 'line', 'text'].includes(o.type) ? o.type : 'dot',
-    x: o.x, y: o.y,
-    size: Math.max(1, Math.min(20, o.size || 5)),
-    color: o.color || strategy.colors?.[0] || '#ffeedd',
-    opacity: Math.max(0.05, Math.min(1, o.opacity || 0.5)),
-    text: o.type === 'text' ? (o.text || '').slice(0, 10) : undefined,
-    x2: o.type === 'line' ? o.x2 : undefined,
-    y2: o.type === 'line' ? o.y2 : undefined,
-    canvasId: canvas.id,
-  }));
+  
+  return ops.filter(o => {
+    if (o.op === 'remove') return !!o.markId;
+    if (o.op === 'move') return !!o.markId && typeof o.x === 'number';
+    return typeof o.x === 'number'; // add
+  }).map(o => {
+    if (o.op === 'remove') return { op: 'remove', markId: o.markId };
+    if (o.op === 'move') return { op: 'move', markId: o.markId, x: o.x, y: o.y };
+    return {
+      op: 'add',
+      type: ['dot', 'line', 'text'].includes(o.type) ? o.type : 'dot',
+      x: o.x, y: o.y,
+      size: Math.max(1, Math.min(20, o.size || 5)),
+      color: o.color || strategy.colors?.[0] || '#ffeedd',
+      opacity: Math.max(0.05, Math.min(1, o.opacity || 0.5)),
+      text: o.type === 'text' ? (o.text || '').slice(0, 10) : undefined,
+      x2: o.type === 'line' ? o.x2 : undefined,
+      y2: o.type === 'line' ? o.y2 : undefined,
+      canvasId: canvas.id,
+    };
+  });
 }
 
 async function scoreComposition(marks, canvas, goals) {
@@ -411,55 +522,128 @@ async function main() {
   console.log(`  ${currentScore.reasoning?.slice(0, 150)}`);
   console.log(`  💡 ${currentScore.suggestions?.slice(0, 150)}\n`);
 
+  let budgetExhausted = false;
+  let consecutiveErrors = 0;
+
   for (let i = 1; i <= config.maxIterations; i++) {
     console.log(`\n━━━ Iteration ${i}/${config.maxIterations} ━━━\n`);
     
     // Re-read goals each iteration (can be edited live)
     if (fs.existsSync(config.goalsFile)) goals = fs.readFileSync(config.goalsFile, 'utf8');
     
-    const iterParams = mutateParams(params);
-    console.log(`Params: size=${iterParams.sizeRange} opacity=${iterParams.opacityRange} marks=${iterParams.markCount} cluster=${iterParams.clusterTightness}px`);
+    // Pre-check budget before wasting LLM calls
+    let currentBudget = null;
+    if (!config.dryRun) {
+      currentBudget = await checkBudget(config.apiKey);
+      if (currentBudget && typeof currentBudget.marksRemaining === 'number') {
+        console.log(`Budget: ${currentBudget.marksRemaining}/${currentBudget.maxMarks} marks remaining`);
+        if (currentBudget.marksRemaining <= 0) {
+          console.log('  Budget exhausted — switching to sculpt mode (move/remove only)');
+        }
+      }
+    }
     
-    // Strategy
-    const strategy = await generateStrategy(iterParams, canvasMarks, canvas, goals);
-    console.log(`Strategy: ${strategy.description?.slice(0, 120)}`);
-    console.log(`Zone: ${strategy.zone} | Colors: ${(strategy.colors || []).slice(0, 4).join(', ')}`);
+    let iterParams, strategy, newOps;
     
-    // Generate marks
-    const newOps = await generateMarks(iterParams, strategy, canvasMarks, canvas);
-    console.log(`Generated ${newOps.length} marks`);
+    try {
+      iterParams = mutateParams(params);
+      console.log(`Params: size=${iterParams.sizeRange} opacity=${iterParams.opacityRange} marks=${iterParams.markCount} cluster=${iterParams.clusterTightness}px`);
+      
+      // Strategy
+      strategy = await generateStrategy(iterParams, canvasMarks, canvas, goals, currentBudget);
+      console.log(`Strategy: ${strategy.description?.slice(0, 120)}`);
+      console.log(`Zone: ${strategy.zone} | Colors: ${(strategy.colors || []).slice(0, 4).join(', ')}`);
+      
+      // Generate marks
+      newOps = await generateMarks(iterParams, strategy, canvasMarks, canvas);
+      console.log(`Generated ${newOps.length} marks`);
+    } catch (err) {
+      consecutiveErrors++;
+      console.log(`⚠️  LLM/parse error: ${err.message?.slice(0, 100)}`);
+      if (consecutiveErrors >= 3) {
+        console.log('🛑 3 consecutive errors — stopping to avoid burning credits.');
+        break;
+      }
+      console.log(`  Retrying next iteration (${consecutiveErrors}/3 errors)...`);
+      if (i < config.maxIterations) await new Promise(r => setTimeout(r, config.delay));
+      continue;
+    }
+    
+    // Reset error counter on successful generation
+    consecutiveErrors = 0;
     
     if (newOps.length === 0) { console.log('⚠️  No marks, skipping'); continue; }
     
+    // Categorize ops
+    const addOps = newOps.filter(o => o.op === 'add');
+    const moveOps = newOps.filter(o => o.op === 'move');
+    const removeOps = newOps.filter(o => o.op === 'remove');
+    console.log(`Ops: ${addOps.length} add, ${moveOps.length} move, ${removeOps.length} remove`);
+    
+    // Cache marks that will be moved/removed (for revert)
+    const revertCache = { removed: [], moved: [] };
+    if (!config.dryRun) {
+      for (const op of removeOps) {
+        const orig = canvasMarks.find(m => m.id === op.markId);
+        if (orig) revertCache.removed.push({ ...orig });
+      }
+      for (const op of moveOps) {
+        const orig = canvasMarks.find(m => m.id === op.markId);
+        if (orig) revertCache.moved.push({ id: orig.id, x: orig.x, y: orig.y });
+      }
+    }
+    
     // Push and CHECK the result
-    let actualAdded = 0;
     let pushResult = null;
+    let opsLanded = 0;
     if (!config.dryRun) {
       pushResult = await pushMarksBatch(newOps, config.apiKey);
-      actualAdded = pushResult.added || 0;
-      console.log(`Pushed: ${actualAdded}/${newOps.length} added`);
+      const added = pushResult.added || 0;
+      const removed = pushResult.removed || 0;
+      const moved = pushResult.moved || 0;
+      opsLanded = added + removed + moved;
+      console.log(`Pushed: +${added} -${removed} ~${moved}`);
       if (pushResult.errors?.length) console.log(`  Errors: ${pushResult.errors.slice(0, 3).join(', ')}`);
-      if (actualAdded === 0) {
-        console.log('⚠️  No marks landed! Budget exhausted or API error. Skipping.');
-        continue;
+      if (opsLanded === 0) {
+        const hasLimitError = pushResult.errors?.some(e => /limit|budget|exhausted/i.test(e));
+        // If budget exhausted but we have move/remove ops, that's still useful
+        if (hasLimitError && moveOps.length === 0 && removeOps.length === 0) {
+          console.log('🛑 Mark limit reached and no move/remove ops — stopping run.');
+          budgetExhausted = true;
+          break;
+        }
+        if (!hasLimitError) {
+          console.log('⚠️  No ops landed! Skipping.');
+          continue;
+        }
       }
     } else {
-      actualAdded = newOps.length;
-      console.log(`[DRY RUN] Would push ${newOps.length} marks`);
+      opsLanded = newOps.length;
+      console.log(`[DRY RUN] Would push ${newOps.length} ops`);
     }
     
     // Get updated marks + IDs for revert
     let newMarkIds = [];
     if (!config.dryRun) {
+      const numAdded = pushResult?.added || 0;
       allMarks = await fetchAllMarks();
       const updated = allMarks.filter(m => canvasAgents.includes(m.agentId) || m.agentId === 'system');
       if (updated.length === 0) canvasMarks = allMarks;
       else canvasMarks = updated;
-      newMarkIds = canvasMarks.slice(-actualAdded).map(m => m.id);
+      if (numAdded > 0) newMarkIds = canvasMarks.slice(-numAdded).map(m => m.id);
     }
     
     // Score FULL canvas
-    const newScore = await scoreComposition(canvasMarks, canvas, goals);
+    let newScore;
+    try {
+      newScore = await scoreComposition(canvasMarks, canvas, goals);
+    } catch (err) {
+      console.log(`⚠️  Scoring failed: ${err.message?.slice(0, 100)}`);
+      console.log('  Keeping marks (can\'t score, defaulting to keep)');
+      // Can't score — keep marks and move on rather than crash
+      if (i < config.maxIterations) await new Promise(r => setTimeout(r, config.delay));
+      continue;
+    }
     const improvement = newScore.average - currentScore.average;
     console.log(`Score: ${newScore.average.toFixed(2)}/10 (${improvement >= 0 ? '+' : ''}${improvement.toFixed(2)})`);
     console.log(`  ${newScore.reasoning?.slice(0, 120)}`);
@@ -478,10 +662,36 @@ async function main() {
       params.textRatio = iterParams.textRatio;
     } else {
       console.log(`❌ REVERT (${improvement.toFixed(2)})`);
-      if (!config.dryRun && newMarkIds.length > 0) {
-        const revertOps = newMarkIds.map(id => ({ op: 'remove', markId: id }));
-        const revertResult = await pushMarksBatch(revertOps, config.apiKey);
-        console.log(`  Reverted ${revertResult.removed || 0} marks`);
+      if (!config.dryRun) {
+        const revertOps = [];
+        
+        // Undo adds: remove newly added marks
+        if (newMarkIds.length > 0) {
+          for (const id of newMarkIds) revertOps.push({ op: 'remove', markId: id });
+        }
+        
+        // Undo removes: re-add the cached marks
+        for (const cached of revertCache.removed) {
+          revertOps.push({
+            op: 'add', type: cached.type, x: cached.x, y: cached.y,
+            size: cached.size, color: cached.color, opacity: cached.opacity,
+            text: cached.text, x2: cached.x2, y2: cached.y2, canvasId: canvas.id,
+          });
+        }
+        
+        // Undo moves: move marks back to original position
+        for (const cached of revertCache.moved) {
+          revertOps.push({ op: 'move', markId: cached.id, x: cached.x, y: cached.y });
+        }
+        
+        if (revertOps.length > 0) {
+          const revertResult = await pushMarksBatch(revertOps, config.apiKey);
+          const rAdded = revertResult.added || 0;
+          const rRemoved = revertResult.removed || 0;
+          const rMoved = revertResult.moved || 0;
+          console.log(`  Reverted: +${rAdded} -${rRemoved} ~${rMoved}`);
+        }
+        
         allMarks = await fetchAllMarks();
         canvasMarks = allMarks.filter(m => canvasAgents.includes(m.agentId) || m.agentId === 'system');
         if (canvasMarks.length === 0) canvasMarks = allMarks;
@@ -500,8 +710,8 @@ async function main() {
       strategy: strategy.description?.slice(0, 200),
       zone: strategy.zone,
       colors: strategy.colors,
-      marksGenerated: newOps.length,
-      marksLanded: actualAdded,
+      opsGenerated: { add: addOps.length, move: moveOps.length, remove: removeOps.length, total: newOps.length },
+      opsLanded,
       scoreBefore: (currentScore.average - improvement).toFixed(2),
       scoreAfter: newScore.average.toFixed(2),
       improvement: improvement.toFixed(2),
@@ -517,10 +727,11 @@ async function main() {
     if (i < config.maxIterations) await new Promise(r => setTimeout(r, config.delay));
   }
   
-  console.log(`\n🏁 DONE`);
+  console.log(`\n🏁 DONE${budgetExhausted ? ' (budget exhausted)' : ''}`);
   console.log(`Final: ${currentScore.average.toFixed(2)}/10 | ${canvasMarks.length} marks`);
   console.log(`${params.totalIterations} iterations: ${params.keptIterations} kept, ${params.revertedIterations} reverted`);
   console.log(`Best: ${params.bestScore.toFixed(1)}/10 | size=${params.bestSizeRange} opacity=${params.bestOpacityRange}`);
+  if (budgetExhausted) console.log(`💡 To continue: add more credits or increase mark limit for this API key.`);
 }
 
 main().catch(e => { console.error('Fatal:', e.message); process.exit(1); });

@@ -308,6 +308,10 @@ try {
     db.exec('ALTER TABLE agents ADD COLUMN subtheme TEXT DEFAULT NULL');
     console.log('v2 Migration: Added subtheme to agents');
   }
+  if (!agentsColumns2.some(c => c.name === 'canvas_role')) {
+    db.exec("ALTER TABLE agents ADD COLUMN canvas_role TEXT DEFAULT 'contributor'");
+    console.log('v2 Migration: Added canvas_role to agents (contributor|curator)');
+  }
 } catch (e) {
   console.error('v2 Migration error:', e);
 }
@@ -489,6 +493,13 @@ function checkAndResetDailyEvolves(agentId) {
   return { used: agent.daily_evolves_used || 0, resetAt: agent.daily_evolves_reset_at };
 }
 
+function isCurator(agentId, canvasId) {
+  const agent = stmts.getAgent.get(agentId);
+  if (!agent) return false;
+  if (agent.canvas_role === 'curator' && agent.canvas_id === canvasId) return true;
+  return false;
+}
+
 function getBudget(agentId) {
   const agent = stmts.getAgent.get(agentId);
   if (!agent) return {
@@ -519,6 +530,7 @@ function getBudget(agentId) {
     dailyEvolvesLeft,
     nextResetIn: Math.max(0, nextResetIn),
     memberDays: days,
+    canvasRole: agent.canvas_role || 'contributor',
     frozen: !!agent.frozen,
   };
 }
@@ -1972,6 +1984,18 @@ app.post('/api/admin/reset-budgets', (req, res) => {
 });
 
 // Backdate agent join time (for simulation)
+app.post('/api/admin/set-role', (req, res) => {
+  const { agentId, canvasId, role } = req.body;
+  if (!agentId || !role) return res.status(400).json({ error: 'agentId and role required' });
+  if (!['contributor', 'curator'].includes(role)) return res.status(400).json({ error: 'role must be contributor or curator' });
+  const updates = { role };
+  if (canvasId) updates.canvasId = canvasId;
+  db.prepare('UPDATE agents SET canvas_role = ?' + (canvasId ? ', canvas_id = ?' : '') + ' WHERE id = ?')
+    .run(...(canvasId ? [role, canvasId, agentId] : [role, agentId]));
+  const agent = stmts.getAgent.get(agentId);
+  res.json({ ok: true, agentId, role, canvasId: agent?.canvas_id });
+});
+
 app.post('/api/admin/set-tenure', (req, res) => {
   const { agentId, days } = req.body;
   if (!agentId || days == null) return res.status(400).json({ error: 'agentId and days required' });
@@ -2084,7 +2108,8 @@ app.post('/api/mark', (req, res) => {
 app.patch('/api/mark/:id', (req, res) => {
   const existing = stmts.getMark.get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
-  if (req.body.agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
+  const canEdit = req.body.agentId === existing.agent_id || isCurator(req.body.agentId, existing.canvas_id);
+  if (!canEdit) return res.status(403).json({ error: 'Not your mark (need curator role)' });
 
   const budget = getBudget(existing.agent_id);
   if (budget.frozen) {
@@ -2112,7 +2137,8 @@ app.delete('/api/mark/:id', (req, res) => {
   const existing = stmts.getMark.get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Not found' });
   const agentId = req.body.agentId || req.query.agentId;
-  if (agentId !== existing.agent_id) return res.status(403).json({ error: 'Not your mark' });
+  const canEdit = agentId === existing.agent_id || isCurator(agentId, existing.canvas_id);
+  if (!canEdit) return res.status(403).json({ error: 'Not your mark (need curator role)' });
   stmts.deleteMark.run(existing.id, existing.agent_id);
   broadcast({ type: 'mark:deleted', id: existing.id });
   res.json({ deleted: existing.id });
@@ -2365,11 +2391,16 @@ app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
   const moves = ops.filter(o => o.op === 'move' || o.op === 'modify');
   const adds = ops.filter(o => o.op === 'add');
   
+  // Curator can edit any mark on their assigned canvas
+  const curatorMode = isCurator(agentId, ops[0]?.canvasId || null);
+  
   for (const op of removes) {
     if (!op.markId) { results.errors.push('remove: markId required'); continue; }
     const existing = stmts.getMark.get(op.markId);
-    if (!existing || existing.agent_id !== agentId) { results.errors.push(`remove: mark ${op.markId} not found or not yours`); continue; }
-    stmts.deleteMark.run(op.markId, agentId);
+    if (!existing) { results.errors.push(`remove: mark ${op.markId} not found`); continue; }
+    const canEdit = existing.agent_id === agentId || (curatorMode && existing.canvas_id === stmts.getAgent.get(agentId)?.canvas_id);
+    if (!canEdit) { results.errors.push(`remove: mark ${op.markId} not yours (need curator role)`); continue; }
+    stmts.deleteMark.run(op.markId, existing.agent_id);
     broadcast({ type: 'mark:deleted', id: op.markId });
     results.removed++;
   }
@@ -2377,7 +2408,9 @@ app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
   for (const op of moves) {
     if (!op.markId) { results.errors.push('move: markId required'); continue; }
     const existing = stmts.getMark.get(op.markId);
-    if (!existing || existing.agent_id !== agentId) { results.errors.push(`move: mark ${op.markId} not found or not yours`); continue; }
+    if (!existing) { results.errors.push(`move: mark ${op.markId} not found`); continue; }
+    const canEdit = existing.agent_id === agentId || (curatorMode && existing.canvas_id === stmts.getAgent.get(agentId)?.canvas_id);
+    if (!canEdit) { results.errors.push(`move: mark ${op.markId} not yours (need curator role)`); continue; }
     const updated = {
       id: existing.id,
       x: op.x ?? existing.x,
@@ -2429,8 +2462,9 @@ app.delete('/api/ext/mark/:id', requireApiKey, (req, res) => {
   const agentId = req.apiAgent.id;
   const existing = stmts.getMark.get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Mark not found' });
-  if (existing.agent_id !== agentId) return res.status(403).json({ error: 'Not your mark' });
-  stmts.deleteMark.run(existing.id, agentId);
+  const canEdit = existing.agent_id === agentId || isCurator(agentId, existing.canvas_id);
+  if (!canEdit) return res.status(403).json({ error: 'Not your mark (need curator role)' });
+  stmts.deleteMark.run(existing.id, existing.agent_id);
   broadcast({ type: 'mark:deleted', id: existing.id });
   res.json({ deleted: existing.id });
 });
