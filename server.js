@@ -493,10 +493,21 @@ function checkAndResetDailyEvolves(agentId) {
   return { used: agent.daily_evolves_used || 0, resetAt: agent.daily_evolves_reset_at };
 }
 
-function isCurator(agentId, canvasId) {
+function isCurator(agentId, canvasIdOrMarkAgentId) {
   const agent = stmts.getAgent.get(agentId);
-  if (!agent) return false;
-  if (agent.canvas_role === 'curator' && agent.canvas_id === canvasId) return true;
+  if (!agent || agent.canvas_role !== 'curator') return false;
+  
+  // If we have a canvas_id on the mark, compare directly
+  if (canvasIdOrMarkAgentId && agent.canvas_id === canvasIdOrMarkAgentId) return true;
+  
+  // If mark has no canvas_id (null), check if the mark's owner is on the same canvas
+  // This handles marks created before canvas_id was set on marks
+  if (!canvasIdOrMarkAgentId || canvasIdOrMarkAgentId === null) return true; // curator can edit any orphaned mark
+  
+  // Also check if the target is actually an agent_id on the same canvas
+  const markOwner = stmts.getAgent.get(canvasIdOrMarkAgentId);
+  if (markOwner && markOwner.canvas_id === agent.canvas_id) return true;
+  
   return false;
 }
 
@@ -2392,13 +2403,14 @@ app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
   const adds = ops.filter(o => o.op === 'add');
   
   // Curator can edit any mark on their assigned canvas
-  const curatorMode = isCurator(agentId, ops[0]?.canvasId || null);
+  const curatorAgent = stmts.getAgent.get(agentId);
+  const curatorMode = curatorAgent?.canvas_role === 'curator';
   
   for (const op of removes) {
     if (!op.markId) { results.errors.push('remove: markId required'); continue; }
     const existing = stmts.getMark.get(op.markId);
     if (!existing) { results.errors.push(`remove: mark ${op.markId} not found`); continue; }
-    const canEdit = existing.agent_id === agentId || (curatorMode && existing.canvas_id === stmts.getAgent.get(agentId)?.canvas_id);
+    const canEdit = existing.agent_id === agentId || curatorMode;
     if (!canEdit) { results.errors.push(`remove: mark ${op.markId} not yours (need curator role)`); continue; }
     stmts.deleteMark.run(op.markId, existing.agent_id);
     broadcast({ type: 'mark:deleted', id: op.markId });
@@ -2409,7 +2421,7 @@ app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
     if (!op.markId) { results.errors.push('move: markId required'); continue; }
     const existing = stmts.getMark.get(op.markId);
     if (!existing) { results.errors.push(`move: mark ${op.markId} not found`); continue; }
-    const canEdit = existing.agent_id === agentId || (curatorMode && existing.canvas_id === stmts.getAgent.get(agentId)?.canvas_id);
+    const canEdit = existing.agent_id === agentId || curatorMode;
     if (!canEdit) { results.errors.push(`move: mark ${op.markId} not yours (need curator role)`); continue; }
     const updated = {
       id: existing.id,

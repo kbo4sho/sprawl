@@ -413,11 +413,13 @@ REMOVE: {"op":"remove","markId":"existing-id"}`;
   const parsed = parseJSON(raw);
   const ops = Array.isArray(parsed) ? parsed : parsed.ops || [];
   
+  // Cap total ops to prevent LLM over-generation (requested totalOps, allow 20% buffer)
+  const maxOps = Math.ceil(totalOps * 1.2) || 60;
   return ops.filter(o => {
     if (o.op === 'remove') return !!o.markId;
     if (o.op === 'move') return !!o.markId && typeof o.x === 'number';
     return typeof o.x === 'number'; // add
-  }).map(o => {
+  }).slice(0, maxOps).map(o => {
     if (o.op === 'remove') return { op: 'remove', markId: o.markId };
     if (o.op === 'move') return { op: 'move', markId: o.markId, x: o.x, y: o.y };
     return {
