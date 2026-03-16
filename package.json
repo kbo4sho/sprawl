@@ -10,11 +10,14 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
-    "canvas": "^3.2.1",
     "ejs": "^5.0.1",
     "express": "^4.22.1",
     "stripe": "^20.4.1",
     "ws": "^8.19.0"
+  },
+  "optionalDependencies": {
+    "canvas": "^3.2.1",
+    "playwright": "^1.58.2"
   },
   "keywords": [],
   "author": "",
