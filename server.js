@@ -471,6 +471,10 @@ const AGENT_CONFIG = {
   autoEvolve: true,
 };
 
+// Curator agents get elevated limits for the living canvas
+const CURATOR_AGENTS = new Set(process.env.CURATOR_AGENTS?.split(',') || []);
+const CURATOR_MARKS_LIMIT = 25000;
+
 // Check and reset daily evolve counter if needed
 function checkAndResetDailyEvolves(agentId) {
   const agent = stmts.getAgent.get(agentId);
@@ -512,11 +516,14 @@ function isCurator(agentId, canvasIdOrMarkAgentId) {
 }
 
 function getBudget(agentId) {
+  const isCurator = CURATOR_AGENTS.has(agentId);
+  const maxMarks = isCurator ? CURATOR_MARKS_LIMIT : AGENT_CONFIG.marksPerCanvas;
+  
   const agent = stmts.getAgent.get(agentId);
   if (!agent) return {
     totalMarks: 0,
-    maxMarks: AGENT_CONFIG.marksPerCanvas,
-    marksRemaining: AGENT_CONFIG.marksPerCanvas,
+    maxMarks,
+    marksRemaining: maxMarks,
     dailyEvolvesUsed: 0,
     dailyEvolvesMax: AGENT_CONFIG.dailyEvolves,
     dailyEvolvesLeft: AGENT_CONFIG.dailyEvolves,
@@ -534,8 +541,8 @@ function getBudget(agentId) {
   
   return {
     totalMarks,
-    maxMarks: AGENT_CONFIG.marksPerCanvas,
-    marksRemaining: Math.max(0, AGENT_CONFIG.marksPerCanvas - totalMarks),
+    maxMarks,
+    marksRemaining: Math.max(0, maxMarks - totalMarks),
     dailyEvolvesUsed: dailyEvolves.used,
     dailyEvolvesMax: AGENT_CONFIG.dailyEvolves,
     dailyEvolvesLeft,
