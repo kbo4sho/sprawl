@@ -1,0 +1,463 @@
+{
+  "objects": [
+    {
+      "name": "wine-bottle-body",
+      "description": "Dark glass wine bottle body — dense silhouette, center-left focal point",
+      "bounds": {
+        "xMin": -90,
+        "xMax": -25,
+        "yMin": -40,
+        "yMax": 150
+      },
+      "targetMarkCount": 80,
+      "palette": [
+        "#1a0a2e",
+        "#2d1b3d",
+        "#3b1f4a",
+        "#0d0d1a",
+        "#140b24",
+        "#251538",
+        "#1e0e30"
+      ],
+      "sizeRange": [
+        2,
+        5
+      ],
+      "opacityRange": [
+        0.6,
+        0.95
+      ],
+      "priority": 1,
+      "currentMarkCount": 150
+    },
+    {
+      "name": "wine-bottle-neck",
+      "description": "Narrow neck and lip of the wine bottle rising above the body",
+      "bounds": {
+        "xMin": -70,
+        "xMax": -45,
+        "yMin": -120,
+        "yMax": -40
+      },
+      "targetMarkCount": 35,
+      "palette": [
+        "#1a0a2e",
+        "#2d1b3d",
+        "#0d0d1a",
+        "#140b24",
+        "#3b1f4a"
+      ],
+      "sizeRange": [
+        2,
+        4
+      ],
+      "opacityRange": [
+        0.6,
+        0.95
+      ],
+      "priority": 1,
+      "currentMarkCount": 92
+    },
+    {
+      "name": "wine-bottle-highlight",
+      "description": "Upper-left light reflection along the bottle glass",
+      "bounds": {
+        "xMin": -88,
+        "xMax": -68,
+        "yMin": -100,
+        "yMax": 80
+      },
+      "targetMarkCount": 20,
+      "palette": [
+        "#4a2d6b",
+        "#5c3d7a",
+        "#6b4f8a",
+        "#3d2555",
+        "#7a6299"
+      ],
+      "sizeRange": [
+        1,
+        3
+      ],
+      "opacityRange": [
+        0.3,
+        0.7
+      ],
+      "priority": 1,
+      "currentMarkCount": 62
+    },
+    {
+      "name": "wine-bottle-label",
+      "description": "Cream-colored label on the bottle body",
+      "bounds": {
+        "xMin": -75,
+        "xMax": -42,
+        "yMin": 20,
+        "yMax": 70
+      },
+      "targetMarkCount": 18,
+      "palette": [
+        "#d4c5a0",
+        "#c9b88a",
+        "#e0d4b8",
+        "#b8a878",
+        "#f0e6cc"
+      ],
+      "sizeRange": [
+        2,
+        4
+      ],
+      "opacityRange": [
+        0.5,
+        0.8
+      ],
+      "priority": 1,
+      "currentMarkCount": 28
+    },
+    {
+      "name": "fruit-bowl-vessel",
+      "description": "Ceramic or pewter bowl — the container holding the fruit",
+      "bounds": {
+        "xMin": 15,
+        "xMax": 130,
+        "yMin": 40,
+        "yMax": 100
+      },
+      "targetMarkCount": 40,
+      "palette": [
+        "#8b7355",
+        "#a0896b",
+        "#6b5a42",
+        "#bfa882",
+        "#554433",
+        "#c4b08e"
+      ],
+      "sizeRange": [
+        2,
+        5
+      ],
+      "opacityRange": [
+        0.5,
+        0.9
+      ],
+      "priority": 2,
+      "currentMarkCount": 43
+    },
+    {
+      "name": "fruit-apples",
+      "description": "Red and green apples clustered in the left side of the bowl",
+      "bounds": {
+        "xMin": 20,
+        "xMax": 70,
+        "yMin": -10,
+        "yMax": 50
+      },
+      "targetMarkCount": 35,
+      "palette": [
+        "#8b1a1a",
+        "#a02020",
+        "#c43030",
+        "#6b0e0e",
+        "#3d6b2e",
+        "#4a7a38",
+        "#2d5420"
+      ],
+      "sizeRange": [
+        2,
+        5
+      ],
+      "opacityRange": [
+        0.6,
+        0.95
+      ],
+      "priority": 2,
+      "currentMarkCount": 66
+    },
+    {
+      "name": "fruit-grapes",
+      "description": "Cluster of purple-red grapes spilling over the right side of the bowl",
+      "bounds": {
+        "xMin": 70,
+        "xMax": 125,
+        "yMin": -15,
+        "yMax": 60
+      },
+      "targetMarkCount": 40,
+      "palette": [
+        "#4a1942",
+        "#6b2058",
+        "#8b2a6e",
+        "#3d1038",
+        "#5c1a4a",
+        "#7a2468"
+      ],
+      "sizeRange": [
+        2,
+        4
+      ],
+      "opacityRange": [
+        0.6,
+        0.95
+      ],
+      "priority": 2,
+      "currentMarkCount": 56
+    },
+    {
+      "name": "fruit-pear-peach",
+      "description": "Golden pear and peach at the top center of the fruit arrangement",
+      "bounds": {
+        "xMin": 45,
+        "xMax": 100,
+        "yMin": -30,
+        "yMax": 10
+      },
+      "targetMarkCount": 25,
+      "palette": [
+        "#c8a830",
+        "#d4b840",
+        "#e0c850",
+        "#b89820",
+        "#daa520",
+        "#f0c060",
+        "#e8a040"
+      ],
+      "sizeRange": [
+        2,
+        5
+      ],
+      "opacityRange": [
+        0.6,
+        0.9
+      ],
+      "priority": 2,
+      "currentMarkCount": 25
+    },
+    {
+      "name": "fruit-highlights",
+      "description": "Bright specular highlights on fruit surfaces from upper-left light",
+      "bounds": {
+        "xMin": 20,
+        "xMax": 110,
+        "yMin": -25,
+        "yMax": 45
+      },
+      "targetMarkCount": 15,
+      "palette": [
+        "#fff8e0",
+        "#ffe8b0",
+        "#ffd480",
+        "#fff0d0",
+        "#ffcc66"
+      ],
+      "sizeRange": [
+        1,
+        3
+      ],
+      "opacityRange": [
+        0.4,
+        0.8
+      ],
+      "priority": 2,
+      "currentMarkCount": 108
+    },
+    {
+      "name": "table-surface",
+      "description": "Warm wooden table filling the bottom third of the canvas",
+      "bounds": {
+        "xMin": -350,
+        "xMax": 350,
+        "yMin": 130,
+        "yMax": 300
+      },
+      "targetMarkCount": 80,
+      "palette": [
+        "#5c3a1e",
+        "#6b4428",
+        "#7a5035",
+        "#4a2e15",
+        "#8b6040",
+        "#3d2010",
+        "#704830"
+      ],
+      "sizeRange": [
+        3,
+        7
+      ],
+      "opacityRange": [
+        0.4,
+        0.85
+      ],
+      "priority": 3,
+      "currentMarkCount": 124
+    },
+    {
+      "name": "table-woodgrain",
+      "description": "Subtle horizontal woodgrain streaks across the table",
+      "bounds": {
+        "xMin": -300,
+        "xMax": 300,
+        "yMin": 140,
+        "yMax": 280
+      },
+      "targetMarkCount": 25,
+      "palette": [
+        "#4a2e15",
+        "#3d2010",
+        "#6b4428",
+        "#352010"
+      ],
+      "sizeRange": [
+        4,
+        9
+      ],
+      "opacityRange": [
+        0.15,
+        0.35
+      ],
+      "priority": 3,
+      "currentMarkCount": 109
+    },
+    {
+      "name": "draped-cloth-main",
+      "description": "Rich cream/ivory cloth draped across front table edge, cascading down",
+      "bounds": {
+        "xMin": -200,
+        "xMax": 180,
+        "yMin": 100,
+        "yMax": 250
+      },
+      "targetMarkCount": 60,
+      "palette": [
+        "#e8dcc8",
+        "#d4c8b0",
+        "#f0e6d4",
+        "#c8b898",
+        "#f5edd8",
+        "#ddd0ba"
+      ],
+      "sizeRange": [
+        2,
+        6
+      ],
+      "opacityRange": [
+        0.4,
+        0.85
+      ],
+      "priority": 4,
+      "currentMarkCount": 115
+    },
+    {
+      "name": "draped-cloth-folds",
+      "description": "Shadow areas within the cloth folds for depth and volume",
+      "bounds": {
+        "xMin": -180,
+        "xMax": 160,
+        "yMin": 110,
+        "yMax": 240
+      },
+      "targetMarkCount": 30,
+      "palette": [
+        "#a09078",
+        "#8b7d65",
+        "#b8a890",
+        "#756550",
+        "#9a8a72"
+      ],
+      "sizeRange": [
+        2,
+        5
+      ],
+      "opacityRange": [
+        0.3,
+        0.7
+      ],
+      "priority": 4,
+      "currentMarkCount": 101
+    },
+    {
+      "name": "background-warm",
+      "description": "Dark warm background behind the still life — deep amber and umber tones",
+      "bounds": {
+        "xMin": -380,
+        "xMax": 380,
+        "yMin": -380,
+        "yMax": -80
+      },
+      "targetMarkCount": 50,
+      "palette": [
+        "#1a1008",
+        "#2a1a0e",
+        "#1e1410",
+        "#0d0a06",
+        "#3a2818",
+        "#241810"
+      ],
+      "sizeRange": [
+        4,
+        10
+      ],
+      "opacityRange": [
+        0.2,
+        0.5
+      ],
+      "priority": 5,
+      "currentMarkCount": 102
+    },
+    {
+      "name": "background-light-source",
+      "description": "Warm golden glow from upper-left light source",
+      "bounds": {
+        "xMin": -380,
+        "xMax": -150,
+        "yMin": -380,
+        "yMax": -150
+      },
+      "targetMarkCount": 20,
+      "palette": [
+        "#3d3018",
+        "#4a3a20",
+        "#5c4a28",
+        "#6b5830",
+        "#4a3820"
+      ],
+      "sizeRange": [
+        5,
+        10
+      ],
+      "opacityRange": [
+        0.1,
+        0.35
+      ],
+      "priority": 5,
+      "currentMarkCount": 20
+    },
+    {
+      "name": "cast-shadows",
+      "description": "Shadows cast by bottle and bowl onto table, falling lower-right",
+      "bounds": {
+        "xMin": -20,
+        "xMax": 200,
+        "yMin": 120,
+        "yMax": 220
+      },
+      "targetMarkCount": 25,
+      "palette": [
+        "#1a1008",
+        "#2a1810",
+        "#0d0a06",
+        "#1e1210",
+        "#352818"
+      ],
+      "sizeRange": [
+        3,
+        7
+      ],
+      "opacityRange": [
+        0.2,
+        0.5
+      ],
+      "priority": 5,
+      "currentMarkCount": 53
+    }
+  ]
+}

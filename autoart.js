@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 
 /**
- * autoart.js v2 - Autonomous art evolution for Sprawl
+ * autoart.js v3 - Composition-based autonomous art for Sprawl
  * 
- * Score → Keep/Revert → Mutate → Compound
- * 
- * Fixes from v1:
- * - Scorer sees FULL canvas composition, not just tail
- * - Checks push results for actual adds (catches budget/limit errors)
- * - Stricter keep/revert threshold
- * - More aggressive strategy mutation to avoid loops
+ * NEW in v3:
+ * - Phase 0: LLM-generated composition plan (autoart-plan.json)
+ * - Vision-based scoring with canvas rendering
+ * - Object-focused iteration (pick most underdone object from plan)
+ * - Node.js canvas renderer (or Playwright fallback)
  */
 
 const fs = require('fs');
 const path = require('path');
+const { exec } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 
 const SPRAWL_API = 'https://sprawl.place';
 const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions';
@@ -21,7 +22,9 @@ const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN;
 const MODEL = 'anthropic/claude-sonnet-4-5';
 const LOG_FILE = path.join(__dirname, 'autoart-log.json');
 const PARAMS_FILE = path.join(__dirname, 'autoart-params.json');
-const PALETTE = ['#ffeedd','#ff6b35','#004e89','#1a936f','#c2b280','#8b4513','#2d3153','#684b3c','#d4a373','#82641d','#4a7c2e','#3d1c02','#6b4423','#b8860b','#f5f5dc','#800020','#2f4f4f','#daa520','#fffdd0','#191919'];
+const PLAN_FILE = path.join(__dirname, 'autoart-plan.json');
+const RENDER_TEMP = '/tmp/autoart_render.png';
+const MARKS_TEMP = '/tmp/autoart_marks.json';
 
 // === Learned Parameters ===
 function loadParams() {
@@ -30,14 +33,7 @@ function loadParams() {
     sizeRange: [2, 8],
     opacityRange: [0.15, 0.9],
     markCount: 40,
-    dotRatio: 0.75,
-    lineRatio: 0.2,
-    textRatio: 0.05,
     clusterTightness: 60,
-    colorScores: {},
-    zoneScores: {},
-    winningPatterns: [],
-    losingPatterns: [],
     bestScore: 0,
     bestSizeRange: [2, 8],
     bestOpacityRange: [0.15, 0.9],
@@ -46,6 +42,8 @@ function loadParams() {
     totalIterations: 0,
     keptIterations: 0,
     revertedIterations: 0,
+    winningPatterns: [],
+    losingPatterns: [],
   };
 }
 
@@ -56,7 +54,6 @@ function mutateParams(params) {
   const r = () => Math.random();
   const j = (v, lo, hi) => Math.max(lo, Math.min(hi, v + (r() - 0.5) * (hi - lo) * 0.4));
   
-  // More aggressive mutations — 50% explore, 50% exploit
   if (r() < 0.6) {
     m.sizeRange[0] = Math.max(1, Math.round(j(m.sizeRange[0], 1, 6)));
     m.sizeRange[1] = Math.max(m.sizeRange[0] + 2, Math.round(j(m.sizeRange[1], 4, 16)));
@@ -66,15 +63,10 @@ function mutateParams(params) {
     m.opacityRange[1] = Math.round(j(m.opacityRange[1], 0.5, 1.0) * 100) / 100;
   }
   if (r() < 0.5) {
-    m.markCount = Math.max(20, Math.min(50, Math.round(j(m.markCount, 20, 50))));
+    m.markCount = Math.max(20, Math.min(60, Math.round(j(m.markCount, 20, 60))));
   }
   if (r() < 0.4) {
     m.clusterTightness = Math.max(15, Math.min(150, Math.round(j(m.clusterTightness, 15, 150))));
-  }
-  if (r() < 0.4) {
-    m.dotRatio = Math.round(j(m.dotRatio, 0.5, 0.95) * 100) / 100;
-    m.lineRatio = Math.round((1 - m.dotRatio) * (0.4 + r() * 0.4) * 100) / 100;
-    m.textRatio = Math.round(Math.max(0, 1 - m.dotRatio - m.lineRatio) * 100) / 100;
   }
   return m;
 }
@@ -83,8 +75,8 @@ function updateParams(params, strategy, scoreBefore, scoreAfter, kept) {
   params.totalIterations++;
   if (kept) {
     params.keptIterations++;
-    params.winningPatterns.push(strategy.description?.slice(0, 100) || 'unknown');
-    if (params.winningPatterns.length > 15) params.winningPatterns.shift();
+    params.winningPatterns.push(strategy.object?.slice(0, 50) || 'unknown');
+    if (params.winningPatterns.length > 10) params.winningPatterns.shift();
     if (scoreAfter.average > params.bestScore) {
       params.bestScore = scoreAfter.average;
       params.bestSizeRange = [...params.sizeRange];
@@ -92,37 +84,27 @@ function updateParams(params, strategy, scoreBefore, scoreAfter, kept) {
       params.bestMarkCount = params.markCount;
       params.bestClusterTightness = params.clusterTightness;
     }
-    for (const c of (strategy.colors || [])) {
-      if (!params.colorScores[c]) params.colorScores[c] = { totalScore: 0, count: 0 };
-      params.colorScores[c].totalScore += scoreAfter.average;
-      params.colorScores[c].count++;
-    }
-    if (strategy.zone) {
-      if (!params.zoneScores[strategy.zone]) params.zoneScores[strategy.zone] = { totalScore: 0, count: 0 };
-      params.zoneScores[strategy.zone].totalScore += scoreAfter.average;
-      params.zoneScores[strategy.zone].count++;
-    }
   } else {
     params.revertedIterations++;
-    params.losingPatterns.push(strategy.description?.slice(0, 100) || 'unknown');
-    if (params.losingPatterns.length > 15) params.losingPatterns.shift();
+    params.losingPatterns.push(strategy.object?.slice(0, 50) || 'unknown');
+    if (params.losingPatterns.length > 10) params.losingPatterns.shift();
   }
   return params;
-}
-
-function getBestColors(params, count = 6) {
-  const scored = Object.entries(params.colorScores)
-    .filter(([_, v]) => v.count >= 2)
-    .map(([color, v]) => ({ color, avg: v.totalScore / v.count }))
-    .sort((a, b) => b.avg - a.avg);
-  if (scored.length >= count) return scored.slice(0, count).map(s => s.color);
-  return [...scored.map(s => s.color), ...PALETTE.slice(0, count - scored.length)];
 }
 
 // === CLI ===
 function parseArgs() {
   const args = process.argv.slice(2);
-  const config = { canvasId: null, apiKey: null, maxIterations: 10, delay: 8000, dryRun: false, goalsFile: path.join(__dirname, 'autoart-goals.md') };
+  const config = {
+    canvasId: null,
+    apiKey: null,
+    maxIterations: 10,
+    delay: 8000,
+    dryRun: false,
+    goalsFile: path.join(__dirname, 'autoart-goals.md'),
+    replan: false,
+    reset: false,
+  };
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
       case '--canvas': config.canvasId = args[++i]; break;
@@ -131,10 +113,18 @@ function parseArgs() {
       case '--delay': config.delay = parseInt(args[++i], 10); break;
       case '--dry-run': config.dryRun = true; break;
       case '--goals': config.goalsFile = args[++i]; break;
+      case '--replan': config.replan = true; break;
+      case '--reset': config.reset = true; break;
     }
   }
-  if (!config.canvasId || !config.apiKey) { console.error('Usage: node autoart.js --canvas <id> --key <sprl_xxx>'); process.exit(1); }
-  if (!GATEWAY_TOKEN) { console.error('Missing OPENCLAW_GATEWAY_TOKEN'); process.exit(1); }
+  if (!config.canvasId || !config.apiKey) {
+    console.error('Usage: node autoart.js --canvas <id> --key <sprl_xxx>');
+    process.exit(1);
+  }
+  if (!GATEWAY_TOKEN) {
+    console.error('Missing OPENCLAW_GATEWAY_TOKEN');
+    process.exit(1);
+  }
   return config;
 }
 
@@ -155,321 +145,499 @@ async function pushMarksBatch(ops, apiKey) {
     headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ ops }),
   });
-  const data = await r.json();
-  return data; // { added, removed, moved, errors, budget }
+  return r.json();
 }
 
-async function checkBudget(apiKey) {
-  // Push an empty batch to check budget without side effects
-  try {
-    const r = await fetch(`${SPRAWL_API}/api/ext/marks/batch`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ops: [] }),
-    });
-    const data = await r.json();
-    return data.budget || null; // { remaining, total } or null
-  } catch { return null; }
-}
-
-async function callLLM(system, user, temp = 0.7) {
+async function callLLM(system, user, temp = 0.7, schema = null) {
+  const body = {
+    model: MODEL,
+    max_tokens: 4000,
+    temperature: temp,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ]
+  };
+  if (schema) {
+    body.response_format = {
+      type: 'json_schema',
+      json_schema: { name: schema.name, strict: true, schema: schema.schema }
+    };
+  }
   const r = await fetch(GATEWAY_URL, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${GATEWAY_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, max_tokens: 4000, temperature: temp, messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ] }),
+    body: JSON.stringify(body),
   });
   const data = await r.json();
   if (data.error) throw new Error(JSON.stringify(data.error));
   return data.choices?.[0]?.message?.content || '';
 }
 
+// Vision scoring via local Ollama (Mistral Small 3.1 — French, runs local, free)
+const VISION_MODEL = process.env.AUTOART_VISION_MODEL || 'mistral-small3.1';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+
+async function callVisionLLM(system, text, imageBase64, temp = 0.2) {
+  const r = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: VISION_MODEL,
+      stream: false,
+      options: { temperature: temp },
+      messages: [{
+        role: 'user',
+        content: `${system}\n\n${text}`,
+        images: [imageBase64],
+      }]
+    }),
+  });
+  const data = await r.json();
+  if (data.error) throw new Error(data.error);
+  return data.message?.content || '';
+}
+
 function parseJSON(text) {
   let s = text.trim();
   if (s.startsWith('```')) s = s.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
   const fb = s.indexOf('{'), lb = s.lastIndexOf('}');
-  if (fb >= 0 && lb > fb) { try { return JSON.parse(s.slice(fb, lb + 1)); } catch {} }
+  if (fb >= 0 && lb > fb) {
+    try { return JSON.parse(s.slice(fb, lb + 1)); } catch {}
+  }
   const ab = s.indexOf('['), alb = s.lastIndexOf(']');
-  if (ab >= 0 && alb > ab) { try { return JSON.parse(s.slice(ab, alb + 1)); } catch {} }
-  // Try fixing common LLM JSON issues: trailing commas, unquoted keys
+  if (ab >= 0 && alb > ab) {
+    try { return JSON.parse(s.slice(ab, alb + 1)); } catch {}
+  }
+  // Try fixing common LLM JSON issues
   try {
     const cleaned = s.replace(/,\s*([}\]])/g, '$1');
     const fb2 = cleaned.indexOf('{'), lb2 = cleaned.lastIndexOf('}');
     if (fb2 >= 0 && lb2 > fb2) return JSON.parse(cleaned.slice(fb2, lb2 + 1));
-    const ab2 = cleaned.indexOf('['), alb2 = cleaned.lastIndexOf(']');
-    if (ab2 >= 0 && alb2 > ab2) return JSON.parse(cleaned.slice(ab2, alb2 + 1));
   } catch {}
   throw new Error('Failed to parse JSON');
 }
 
-// === Composition Summary (for scorer to see FULL canvas) ===
-function summarizeComposition(marks) {
-  // Build a statistical summary the scorer can reason about
-  const xs = marks.map(m => m.x), ys = marks.map(m => m.y);
-  const types = {}, colors = {};
-  let totalSize = 0, totalOpacity = 0;
+// === Composition Plan (Phase 0) ===
+async function generateCompositionPlan(canvas, goals) {
+  console.log('🎯 Generating composition plan...\n');
   
-  for (const m of marks) {
-    types[m.type] = (types[m.type] || 0) + 1;
-    colors[m.color] = (colors[m.color] || 0) + 1;
-    totalSize += m.size || 5;
-    totalOpacity += m.opacity || 0.5;
-  }
+  const system = `You are a composition planner for a canvas artwork. You define the spatial layout and parameters for each object in the scene.`;
   
-  const topColors = Object.entries(colors).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([c, n]) => `${c}(${n})`).join(', ');
-  
-  // Spatial density: divide into 4 quadrants + center
-  const zones = { 'upper-left': 0, 'upper-right': 0, 'lower-left': 0, 'lower-right': 0, center: 0 };
-  for (const m of marks) {
-    if (Math.abs(m.x) < 100 && Math.abs(m.y) < 100) zones.center++;
-    else if (m.x < 0 && m.y < 0) zones['upper-left']++;
-    else if (m.x >= 0 && m.y < 0) zones['upper-right']++;
-    else if (m.x < 0 && m.y >= 0) zones['lower-left']++;
-    else zones['lower-right']++;
-  }
-  
-  // Text marks
-  const texts = marks.filter(m => m.type === 'text' && m.text).map(m => m.text).slice(0, 10);
-  
-  return {
-    total: marks.length,
-    bounds: { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) },
-    types,
-    topColors,
-    avgSize: (totalSize / marks.length).toFixed(1),
-    avgOpacity: (totalOpacity / marks.length).toFixed(2),
-    zones,
-    texts,
-    // Also include a spatial sample — spread across the canvas
-    sample: sampleMarks(marks, 40),
-  };
-}
-
-function sampleMarks(marks, count) {
-  // Take marks evenly distributed across the canvas, not just the tail
-  if (marks.length <= count) return marks;
-  const step = Math.floor(marks.length / count);
-  const sampled = [];
-  for (let i = 0; i < marks.length; i += step) {
-    if (sampled.length >= count) break;
-    sampled.push(marks[i]);
-  }
-  return sampled;
-}
-
-// === Core ===
-async function generateStrategy(params, marks, canvas, goals, budget) {
-  const bestColors = getBestColors(params);
-  const winRate = params.totalIterations > 0 ? (params.keptIterations / params.totalIterations * 100).toFixed(0) : '?';
-  const comp = summarizeComposition(marks);
-  
-  // Force zone diversity — don't repeat the same zone 3x in a row
-  const recentZones = params.winningPatterns.slice(-3).join(' ');
-  
-  // Find weak marks (candidates for removal/moving)
-  const weakMarks = findWeakMarks(marks, comp);
-  
-  // Budget-aware op guidance
-  const remaining = budget?.marksRemaining ?? 999;
-  let opGuidance;
-  if (remaining <= 0) {
-    opGuidance = `BUDGET EXHAUSTED (0 marks remaining). You can ONLY use "move" and "remove" ops. No "add" ops allowed. Sculpt what exists.`;
-  } else if (remaining < 20) {
-    opGuidance = `LOW BUDGET (${remaining} marks remaining). Prefer remove+add combos (net zero) or move ops. Pure adds only if critical.`;
-  } else {
-    opGuidance = `Budget: ${remaining} marks remaining. Mix add/move/remove as needed.`;
-  }
-  
-  const system = `You are an art evolution strategist. You can ADD new marks, MOVE existing marks to better positions, or REMOVE weak marks. Generate a DIFFERENT strategy each time.`;
-  
-  const user = `Canvas: "${canvas.theme}"
+  const user = `Canvas theme: "${canvas.theme}"
 Spatial guide: ${canvas.spatialGuide || 'none'}
-Total marks: ${comp.total}
-Avg size: ${comp.avgSize} | Avg opacity: ${comp.avgOpacity}
-Types: ${JSON.stringify(comp.types)}
-Top colors: ${comp.topColors}
-Zone density: ${JSON.stringify(comp.zones)}
-Text marks: ${comp.texts.join(', ') || 'none'}
-Bounds: x[${comp.bounds.minX},${comp.bounds.maxX}] y[${comp.bounds.minY},${comp.bounds.maxY}]
 
-Sample marks (spread across canvas):
-${comp.sample.map(m => `(${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}${m.text ? ` "${m.text}"` : ''}${m.id ? ` id=${m.id}` : ''}`).join('\n')}
+Goals:
+${goals}
 
-WEAK MARKS (candidates for remove/move — scattered, oversized, or misplaced):
-${weakMarks.slice(0, 15).map(m => `id=${m.id} (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity} — ${m.weakness}`).join('\n') || 'none identified'}
+Canvas coordinates: -400 to 400 (x and y)
 
-${opGuidance}
+Define a composition plan with objects that match the theme. For a still life, define:
+- Wine bottle (exact x/y bounds, color palette, target mark count, size range, opacity range)
+- Fruit bowl (bounds, colors, mark count, etc.)
+- Draped cloth (bounds, colors, etc.)
+- Table surface (bounds, colors, etc.)
+- Background/atmosphere (bounds, colors, etc.)
 
-LEARNED (${params.totalIterations} iterations, ${winRate}% kept):
-Best size: ${params.bestSizeRange} | Best opacity: ${params.bestOpacityRange}
-Best colors: ${bestColors.join(', ')}
-Score: ${params.bestScore.toFixed(1)}/10
+For each object, specify:
+- name: short descriptive name
+- description: what it represents
+- bounds: {xMin, xMax, yMin, yMax} (integers, -400 to 400)
+- targetMarkCount: MINIMUM marks to get started (not a cap — agents can always add more if the critic says it needs density)
+- palette: array of hex colors specific to this object
+- sizeRange: [min, max] for mark sizes
+- opacityRange: [min, max] for opacity
+- priority: 1-5 (1=most important, paint first)
 
-RECENT ZONES (DON'T repeat): ${recentZones || 'none'}
+Output ONLY JSON:
+{
+  "objects": [
+    {
+      "name": "wine-bottle",
+      "description": "Dark glass wine bottle",
+      "bounds": {"xMin": -100, "xMax": -20, "yMin": -120, "yMax": 150},
+      "targetMarkCount": 100,
+      "palette": ["#1a0a2e", "#2d1b3d", "#3b1f4a"],
+      "sizeRange": [2, 6],
+      "opacityRange": [0.4, 0.9],
+      "priority": 1
+    },
+    ...
+  ]
+}`;
 
-✅ Winning: ${params.winningPatterns.slice(-3).join(' | ') || 'none'}
-❌ Losing: ${params.losingPatterns.slice(-3).join(' | ') || 'none'}
-
-HUMAN GOALS:
-${goals || 'Use creative judgment.'}
-
-Pick a DIFFERENT zone than recent ones. The sparsest zone is: ${Object.entries(comp.zones).sort((a,b) => a[1] - b[1])[0][0]} (${Object.entries(comp.zones).sort((a,b) => a[1] - b[1])[0][1]} marks).
-
-Output JSON: {"description":"specific plan","zone":"area with coords","colors":["#hex",...],"spatialApproach":"how to arrange","emphasis":"priority","ops":{"add":N,"move":N,"remove":N}}
-The ops field says how many of each operation type to generate.`;
-
-  return parseJSON(await callLLM(system, user, 0.9));
+  const raw = await callLLM(system, user, 0.7);
+  const plan = parseJSON(raw);
+  
+  // Add currentMarkCount to each object
+  for (const obj of plan.objects) {
+    obj.currentMarkCount = 0;
+  }
+  
+  fs.writeFileSync(PLAN_FILE, JSON.stringify(plan, null, 2));
+  console.log(`📋 Plan saved to ${PLAN_FILE}`);
+  console.log(`Objects: ${plan.objects.map(o => o.name).join(', ')}\n`);
+  
+  return plan;
 }
 
-function findWeakMarks(marks, comp) {
-  // Identify marks that are likely hurting the composition
-  const weak = [];
-  const avgSize = parseFloat(comp.avgSize);
+function loadCompositionPlan() {
+  if (!fs.existsSync(PLAN_FILE)) return null;
+  return JSON.parse(fs.readFileSync(PLAN_FILE, 'utf8'));
+}
+
+function updatePlanMarkCounts(plan, marks) {
+  // Count how many marks are in each object's bounds
+  for (const obj of plan.objects) {
+    obj.currentMarkCount = marks.filter(m =>
+      m.x >= obj.bounds.xMin && m.x <= obj.bounds.xMax &&
+      m.y >= obj.bounds.yMin && m.y <= obj.bounds.yMax
+    ).length;
+  }
+  return plan;
+}
+
+function pickMostUnderdoneObject(plan) {
+  // No caps — targets are minimums, not limits.
+  // Prioritize objects below target first, then cycle through all objects.
+  // The vision critic decides when we're done, not the mark count.
+  const scored = plan.objects.map(obj => {
+    const completion = obj.targetMarkCount > 0 ? obj.currentMarkCount / obj.targetMarkCount : 1;
+    const priorityBoost = (6 - obj.priority) * 0.3;
+    // Objects below target get a big bonus to be picked first
+    const belowTarget = completion < 1.0 ? -2 : 0;
+    return { obj, score: completion - priorityBoost + belowTarget };
+  }).sort((a, b) => a.score - b.score);
   
+  return scored[0].obj;
+}
+
+// === Rendering ===
+async function renderCanvasToImage(marks) {
+  // Try node-canvas first, fall back to Playwright
+  try {
+    // Check if node-canvas is available
+    const Canvas = require('canvas');
+    return await renderWithNodeCanvas(marks, Canvas);
+  } catch (err) {
+    console.log('  node-canvas not available, using Playwright fallback...');
+    return await renderWithPlaywright(marks);
+  }
+}
+
+async function renderWithNodeCanvas(marks, Canvas) {
+  const { createCanvas } = Canvas;
+  const width = 800;
+  const height = 800;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  
+  // Background
+  ctx.fillStyle = '#0a0a0a';
+  ctx.fillRect(0, 0, width, height);
+  
+  // Coordinate mapping: marks are -400 to 400, canvas is 0 to 800
+  const mapX = x => (x + 400) / 800 * width;
+  const mapY = y => (y + 400) / 800 * height;
+  
+  // Draw marks
   for (const m of marks) {
-    if (!m.id) continue; // Can't operate on marks without IDs
-    const reasons = [];
+    ctx.globalAlpha = m.opacity || 0.5;
+    ctx.fillStyle = m.color || '#ffffff';
     
-    // Oversized marks (> 2x average)
-    if (m.size > avgSize * 2.5 && m.size > 10) reasons.push(`oversized (${m.size})`);
-    
-    // Isolated marks (far from any cluster) — check distance to nearest neighbor
-    // Simple heuristic: marks in very sparse zones
-    const inCenter = Math.abs(m.x) < 100 && Math.abs(m.y) < 100;
-    if (!inCenter && m.opacity < 0.2) reasons.push('faint peripheral');
-    
-    // Very low opacity + large = visual noise
-    if (m.opacity < 0.1 && m.size > 5) reasons.push('noise (faint + large)');
-    
-    // Text marks that are generic
-    if (m.type === 'text' && m.text && m.size > 8) reasons.push('large text');
-    
-    if (reasons.length > 0) {
-      weak.push({ ...m, weakness: reasons.join(', ') });
+    if (m.type === 'dot' || !m.type) {
+      ctx.beginPath();
+      ctx.arc(mapX(m.x), mapY(m.y), m.size || 5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (m.type === 'line' && typeof m.x2 === 'number' && typeof m.y2 === 'number') {
+      ctx.strokeStyle = m.color || '#ffffff';
+      ctx.lineWidth = m.size || 2;
+      ctx.beginPath();
+      ctx.moveTo(mapX(m.x), mapY(m.y));
+      ctx.lineTo(mapX(m.x2), mapY(m.y2));
+      ctx.stroke();
+    } else if (m.type === 'text' && m.text) {
+      ctx.font = `${m.size || 12}px monospace`;
+      ctx.fillText(m.text, mapX(m.x), mapY(m.y));
     }
   }
   
-  // Sort by most problematic
-  return weak.sort((a, b) => b.size - a.size).slice(0, 20);
+  // Save to file
+  const buffer = canvas.toBuffer('image/png');
+  fs.writeFileSync(RENDER_TEMP, buffer);
+  return RENDER_TEMP;
 }
 
-async function generateMarks(params, strategy, marks, canvas) {
-  const system = `You are an AI artist. Output ONLY a JSON array of mark ops. No explanation.`;
+async function renderWithPlaywright(marks) {
+  // Write marks to temp file
+  fs.writeFileSync(MARKS_TEMP, JSON.stringify(marks, null, 2));
   
-  const plannedOps = strategy.ops || { add: params.markCount, move: 0, remove: 0 };
-  const numAdd = plannedOps.add || 0;
-  const numMove = plannedOps.move || 0;
-  const numRemove = plannedOps.remove || 0;
-  const totalOps = numAdd + numMove + numRemove;
+  // Build SVG
+  const width = 800;
+  const height = 800;
+  const mapX = x => (x + 400) / 800 * width;
+  const mapY = y => (y + 400) / 800 * height;
   
-  // Find existing marks with IDs for move/remove ops
-  const existingWithIds = marks.filter(m => m.id).slice(-200); // recent marks
-  const weakMarks = findWeakMarks(marks, summarizeComposition(marks));
-  
-  let moveRemoveContext = '';
-  if (numMove > 0 || numRemove > 0) {
-    moveRemoveContext = `\nEXISTING MARKS (use these IDs for move/remove ops):
-${weakMarks.slice(0, 20).map(m => `id="${m.id}" (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} — ${m.weakness}`).join('\n')}
-
-Additional marks you can move/remove:
-${existingWithIds.slice(0, 30).map(m => `id="${m.id}" (${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}`).join('\n')}`;
+  let svgElements = [];
+  for (const m of marks) {
+    if (m.type === 'dot' || !m.type) {
+      svgElements.push(`<circle cx="${mapX(m.x)}" cy="${mapY(m.y)}" r="${m.size || 5}" fill="${m.color || '#fff'}" opacity="${m.opacity || 0.5}"/>`);
+    } else if (m.type === 'line' && typeof m.x2 === 'number' && typeof m.y2 === 'number') {
+      svgElements.push(`<line x1="${mapX(m.x)}" y1="${mapY(m.y)}" x2="${mapX(m.x2)}" y2="${mapY(m.y2)}" stroke="${m.color || '#fff'}" stroke-width="${m.size || 2}" opacity="${m.opacity || 0.5}"/>`);
+    } else if (m.type === 'text' && m.text) {
+      svgElements.push(`<text x="${mapX(m.x)}" y="${mapY(m.y)}" font-size="${m.size || 12}" fill="${m.color || '#fff'}" opacity="${m.opacity || 0.5}" font-family="monospace">${m.text}</text>`);
+    }
   }
   
-  const numDots = Math.round(numAdd * params.dotRatio);
-  const numLines = Math.round(numAdd * params.lineRatio);
+  const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#0a0a0a"/>
+  ${svgElements.join('\n  ')}
+</svg>`;
   
-  const user = `Canvas: "${canvas.theme}"
-Strategy: ${strategy.description}
-Zone: ${strategy.zone}
-Colors: ${(strategy.colors || PALETTE.slice(0, 6)).join(', ')} (ONLY these)
-
-Generate ${totalOps} operations:
-- ${numAdd} ADD ops: ~${numDots} dots, ~${numLines} lines, rest text
-- ${numMove} MOVE ops: reposition existing marks to better locations
-- ${numRemove} REMOVE ops: delete marks that hurt the composition
-${moveRemoveContext}
-
-Size: ${params.sizeRange[0]}-${params.sizeRange[1]}
-Opacity: ${params.opacityRange[0]}-${params.opacityRange[1]} (use 3 layers: bg/structure/focal)
-Cluster: pack within ${params.clusterTightness}px radius
-
-RULES:
-- Small marks, close together — like pointillism
-- Build solid FORMS, not scattered dots
-- Lines for edges only
-- Text rare, size 3-5, low opacity
-- Canvas range: -400 to 400
-- For MOVE: use markId of existing mark + new x,y position
-- For REMOVE: use markId of mark to delete
-
-Output ONLY a JSON array:
-ADD:    {"op":"add","type":"dot","x":0,"y":0,"size":5,"color":"#hex","opacity":0.7,"canvasId":"${canvas.id}"}
-MOVE:   {"op":"move","markId":"existing-id","x":10,"y":20}
-REMOVE: {"op":"remove","markId":"existing-id"}`;
-
-  const raw = await callLLM(system, user, 0.9);
-  const parsed = parseJSON(raw);
-  const ops = Array.isArray(parsed) ? parsed : parsed.ops || [];
+  const svgPath = '/tmp/autoart_canvas.svg';
+  fs.writeFileSync(svgPath, svg);
   
-  // Cap total ops to prevent LLM over-generation (requested totalOps, allow 20% buffer)
-  const maxOps = Math.ceil(totalOps * 1.2) || 60;
-  return ops.filter(o => {
-    if (o.op === 'remove') return !!o.markId;
-    if (o.op === 'move') return !!o.markId && typeof o.x === 'number';
-    return typeof o.x === 'number'; // add
-  }).slice(0, maxOps).map(o => {
-    if (o.op === 'remove') return { op: 'remove', markId: o.markId };
-    if (o.op === 'move') return { op: 'move', markId: o.markId, x: o.x, y: o.y };
-    return {
-      op: 'add',
-      type: ['dot', 'line', 'text'].includes(o.type) ? o.type : 'dot',
-      x: o.x, y: o.y,
-      size: Math.max(1, Math.min(20, o.size || 5)),
-      color: o.color || strategy.colors?.[0] || '#ffeedd',
-      opacity: Math.max(0.05, Math.min(1, o.opacity || 0.5)),
-      text: o.type === 'text' ? (o.text || '').slice(0, 10) : undefined,
-      x2: o.type === 'line' ? o.x2 : undefined,
-      y2: o.type === 'line' ? o.y2 : undefined,
-      canvasId: canvas.id,
-    };
-  });
+  // Use Playwright via Python to screenshot
+  const pythonScript = `
+import sys
+from playwright.sync_api import sync_playwright
+
+svg_path = "${svgPath}"
+output_path = "${RENDER_TEMP}"
+
+with sync_playwright() as p:
+    browser = p.chromium.launch()
+    page = browser.new_page(viewport={"width": ${width}, "height": ${height}})
+    page.goto(f"file://{svg_path}")
+    page.screenshot(path=output_path)
+    browser.close()
+`;
+  
+  const scriptPath = '/tmp/autoart_render.py';
+  fs.writeFileSync(scriptPath, pythonScript);
+  
+  await execAsync(`python3 ${scriptPath}`);
+  return RENDER_TEMP;
 }
 
-async function scoreComposition(marks, canvas, goals) {
-  const comp = summarizeComposition(marks);
+// === Heuristic Scoring (instant, deterministic) ===
+function scoreHeuristic(marks, plan, targetObject, newMarks) {
+  // Score based on density, coverage, and clustering within the target object bounds
+  const b = targetObject.bounds;
+  const objMarks = marks.filter(m => m.x >= b.xMin && m.x <= b.xMax && m.y >= b.yMin && m.y <= b.yMax);
   
-  const system = `You are a harsh art critic. Only truly good work scores above 6. Be SPECIFIC about what's wrong.`;
+  const width = b.xMax - b.xMin;
+  const height = b.yMax - b.yMin;
+  const area = width * height;
   
-  const user = `Canvas: "${canvas.theme}" — ${comp.total} total marks
-Goals: ${goals || 'none'}
+  // 1. Density: marks per 100 sq units in this object's region
+  const density = (objMarks.length / area) * 100;
+  const densityScore = Math.min(10, density * 5); // 0.2 marks/100squ = 1, 2.0 = 10
+  
+  // 2. Coverage: divide region into 5x5 grid, what % of cells have marks?
+  const gridW = 5, gridH = 5;
+  const cellW = width / gridW, cellH = height / gridH;
+  const cells = new Set();
+  for (const m of objMarks) {
+    const cx = Math.floor((m.x - b.xMin) / cellW);
+    const cy = Math.floor((m.y - b.yMin) / cellH);
+    cells.add(`${cx},${cy}`);
+  }
+  const coverageScore = (cells.size / (gridW * gridH)) * 10;
+  
+  // 3. New marks clustering: are the new marks tightly packed?
+  let clusterScore = 5;
+  if (newMarks && newMarks.length > 1) {
+    let totalDist = 0, count = 0;
+    for (let i = 0; i < Math.min(newMarks.length, 20); i++) {
+      for (let j = i + 1; j < Math.min(newMarks.length, 20); j++) {
+        totalDist += Math.sqrt((newMarks[i].x - newMarks[j].x) ** 2 + (newMarks[i].y - newMarks[j].y) ** 2);
+        count++;
+      }
+    }
+    const avgDist = totalDist / count;
+    // Tighter clustering = higher score. <20px avg = 10, >100px = 2
+    clusterScore = Math.max(2, Math.min(10, 10 - (avgDist - 20) / 10));
+  }
+  
+  // 4. Global coverage: how many plan objects have decent density?
+  let objectsWithDensity = 0;
+  for (const obj of plan.objects) {
+    const ob = obj.bounds;
+    const om = marks.filter(m => m.x >= ob.xMin && m.x <= ob.xMax && m.y >= ob.yMin && m.y <= ob.yMax);
+    const oArea = (ob.xMax - ob.xMin) * (ob.yMax - ob.yMin);
+    if (oArea > 0 && (om.length / oArea) * 100 > 0.3) objectsWithDensity++;
+  }
+  const globalScore = (objectsWithDensity / plan.objects.length) * 10;
+  
+  const average = (densityScore + coverageScore + clusterScore + globalScore) / 4;
+  return {
+    density: +densityScore.toFixed(1),
+    coverage: +coverageScore.toFixed(1),
+    clustering: +clusterScore.toFixed(1),
+    global: +globalScore.toFixed(1),
+    average: +average.toFixed(2),
+    reasoning: `density=${densityScore.toFixed(1)} coverage=${coverageScore.toFixed(1)} cluster=${clusterScore.toFixed(1)} global=${globalScore.toFixed(1)}`
+  };
+}
 
-FULL COMPOSITION ANALYSIS:
-- Bounds: x[${comp.bounds.minX},${comp.bounds.maxX}] y[${comp.bounds.minY},${comp.bounds.maxY}]
-- Types: ${JSON.stringify(comp.types)}
-- Top colors: ${comp.topColors}
-- Avg size: ${comp.avgSize} | Avg opacity: ${comp.avgOpacity}
-- Zone density: UL=${comp.zones['upper-left']} UR=${comp.zones['upper-right']} LL=${comp.zones['lower-left']} LR=${comp.zones['lower-right']} C=${comp.zones.center}
-- Texts: ${comp.texts.join(', ') || 'none'}
+// === Vision Scoring (expensive, use for milestones) ===
+async function scoreCompositionWithVision(marks, canvas, goals, imagePath) {
+  console.log('🔍 Rendering canvas for vision scoring...');
+  await renderCanvasToImage(marks);
+  
+  const imageBuffer = fs.readFileSync(imagePath);
+  const imageBase64 = imageBuffer.toString('base64');
+  
+  const system = `You are a harsh art critic evaluating a canvas artwork. Score 1-10 on four dimensions. Only truly good work scores above 6.`;
+  
+  const text = `Canvas theme: "${canvas.theme}"
+Total marks: ${marks.length}
 
-SPATIAL SAMPLE (40 marks spread across canvas):
-${comp.sample.map(m => `(${Math.round(m.x)},${Math.round(m.y)}) ${m.type} sz=${m.size} c=${m.color} op=${m.opacity}`).join('\n')}
+Goals:
+${goals}
 
-Score 1-10:
-1. coherence — do marks form recognizable shapes matching "${canvas.theme}"?
+Score the composition on:
+1. coherence — do marks form recognizable shapes matching the theme?
 2. density — appropriate density? (too sparse=bad, too blobby=bad, pointillist=good)
-3. thematic — does it actually look like the theme? Can you identify wine bottle, fruit, cloth, table?
+3. thematic — does it actually look like "${canvas.theme}"? Identify specific objects.
 4. intentionality — deliberate composition or random scatter?
 
 5=mediocre, 7=genuinely good, 9=remarkable. Most canvases are 3-5.
 
-Output JSON: {"coherence":N,"density":N,"thematic":N,"intentionality":N,"reasoning":"specific critique","suggestions":"what would improve score most"}`;
+Output ONLY JSON:
+{
+  "coherence": N,
+  "density": N,
+  "thematic": N,
+  "intentionality": N,
+  "reasoning": "specific critique in 1-2 sentences",
+  "suggestions": "what would improve score most"
+}`;
 
-  const raw = await callLLM(system, user, 0.2);
+  const raw = await callVisionLLM(system, text, imageBase64, 0.2);
   const scores = parseJSON(raw);
   scores.average = (scores.coherence + scores.density + scores.thematic + scores.intentionality) / 4;
   return scores;
+}
+
+// === Strategy & Generation ===
+async function generateStrategy(params, plan, targetObject, canvas, goals) {
+  const system = `You are an art strategist. You're building a specific object within a composition plan.`;
+  
+  const user = `Canvas: "${canvas.theme}"
+Target object: ${targetObject.name} — ${targetObject.description}
+
+Object bounds: x[${targetObject.bounds.xMin}, ${targetObject.bounds.xMax}] y[${targetObject.bounds.yMin}, ${targetObject.bounds.yMax}]
+Minimum marks: ${targetObject.targetMarkCount} (not a cap — add as many as needed for density and realism)
+Current marks: ${targetObject.currentMarkCount}
+
+Palette for this object: ${targetObject.palette.join(', ')}
+Size range: ${targetObject.sizeRange}
+Opacity range: ${targetObject.opacityRange}
+
+Current learned params:
+- Mark count per iteration: ${params.markCount}
+- Cluster tightness: ${params.clusterTightness}px
+- Best score so far: ${params.bestScore.toFixed(1)}/10
+
+Goals:
+${goals}
+
+Output JSON strategy for adding marks to this object ONLY:
+{
+  "description": "brief plan for this batch",
+  "approach": "how to arrange marks within bounds",
+  "emphasis": "what to prioritize",
+  "markCount": ${params.markCount}
+}`;
+
+  return parseJSON(await callLLM(system, user, 0.8));
+}
+
+// JSON Schema for structured mark output — enforces valid marks at the model level
+function buildMarkSchema(targetObject, canvas) {
+  return {
+    name: 'mark_operations',
+    schema: {
+      type: 'object',
+      properties: {
+        marks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', enum: ['dot', 'line'] },
+              x: { type: 'integer', description: `min ${targetObject.bounds.xMin}, max ${targetObject.bounds.xMax}` },
+              y: { type: 'integer', description: `min ${targetObject.bounds.yMin}, max ${targetObject.bounds.yMax}` },
+              size: { type: 'number', description: `min ${targetObject.sizeRange[0]}, max ${targetObject.sizeRange[1]}` },
+              color: { type: 'string', description: `hex color from palette: ${targetObject.palette.join(', ')}` },
+              opacity: { type: 'number', description: `min ${targetObject.opacityRange[0]}, max ${targetObject.opacityRange[1]}` },
+              x2: { type: 'integer', description: 'line endpoint x (only for type=line)' },
+              y2: { type: 'integer', description: 'line endpoint y (only for type=line)' },
+            },
+            required: ['type', 'x', 'y', 'size', 'color', 'opacity'],
+            additionalProperties: false,
+          }
+        }
+      },
+      required: ['marks'],
+      additionalProperties: false,
+    }
+  };
+}
+
+async function generateMarks(params, strategy, targetObject, canvas) {
+  const system = `You are an AI pointillist artist. Generate marks to build a specific object in a composition.`;
+  
+  const xMin = targetObject.bounds.xMin, xMax = targetObject.bounds.xMax;
+  const yMin = targetObject.bounds.yMin, yMax = targetObject.bounds.yMax;
+  const sMin = targetObject.sizeRange[0], sMax = targetObject.sizeRange[1];
+  const oMin = targetObject.opacityRange[0], oMax = targetObject.opacityRange[1];
+  
+  const user = `Canvas: "${canvas.theme}"
+Strategy: ${strategy.description}
+
+Target object: ${targetObject.name}
+Bounds: x must be ${xMin} to ${xMax}, y must be ${yMin} to ${yMax}
+Palette: ${targetObject.palette.join(', ')} — ONLY use these exact hex colors
+Size: ${sMin} to ${sMax}
+Opacity: ${oMin} to ${oMax}
+
+Generate ${strategy.markCount || params.markCount} marks.
+
+CONSTRAINTS (violating any = invalid output):
+- x: integer, min ${xMin}, max ${xMax}
+- y: integer, min ${yMin}, max ${yMax}  
+- size: number, min ${sMin}, max ${sMax}
+- opacity: number, min ${oMin}, max ${oMax}
+- color: ONLY from palette above
+- type: "dot" or "line" only (NO "text" type)
+- Cluster marks tightly (within ${params.clusterTightness}px) to form solid shapes
+- Build form, not scatter
+
+Output ONLY a JSON object, no markdown, no explanation:
+{"marks":[{"type":"dot","x":0,"y":0,"size":3,"color":"#hex","opacity":0.5}, ...]}`;
+
+  const raw = await callLLM(system, user, 0.9);
+  const parsed = parseJSON(raw);
+  const ops = parsed.marks || (Array.isArray(parsed) ? parsed : []);
+  
+  // Clamp values to enforce min/max (belt AND suspenders)
+  return ops.filter(o => {
+    return typeof o.x === 'number' && typeof o.y === 'number';
+  }).map(o => ({
+    op: 'add',
+    type: o.type === 'line' ? 'line' : 'dot',
+    x: Math.max(xMin, Math.min(xMax, Math.round(o.x))),
+    y: Math.max(yMin, Math.min(yMax, Math.round(o.y))),
+    size: Math.max(sMin, Math.min(sMax, o.size || sMin)),
+    color: targetObject.palette.includes(o.color) ? o.color : targetObject.palette[0],
+    opacity: Math.max(oMin, Math.min(oMax, o.opacity || oMin)),
+    x2: o.type === 'line' ? Math.max(xMin, Math.min(xMax, Math.round(o.x2 || o.x))) : undefined,
+    y2: o.type === 'line' ? Math.max(yMin, Math.min(yMax, Math.round(o.y2 || o.y))) : undefined,
+    canvasId: canvas.id,
+  })).slice(0, (strategy.markCount || params.markCount) * 1.5);
 }
 
 // === Main ===
@@ -477,24 +645,17 @@ async function main() {
   const config = parseArgs();
   let params = loadParams();
   
-  // Reset params for fresh run if requested
-  if (process.argv.includes('--reset')) {
-    params = loadParams.__default ? loadParams.__default() : {
-      sizeRange: [2, 8], opacityRange: [0.15, 0.9], markCount: 40, dotRatio: 0.75,
-      lineRatio: 0.2, textRatio: 0.05, clusterTightness: 60, colorScores: {},
-      zoneScores: {}, winningPatterns: [], losingPatterns: [], bestScore: 0,
-      bestSizeRange: [2, 8], bestOpacityRange: [0.15, 0.9], bestMarkCount: 40,
-      bestClusterTightness: 60, totalIterations: 0, keptIterations: 0, revertedIterations: 0,
-    };
+  if (config.reset) {
+    params = loadParams(); // reset to defaults
     saveParams(params);
     if (fs.existsSync(LOG_FILE)) fs.unlinkSync(LOG_FILE);
-    console.log('🔄 Reset params and log\n');
+    if (fs.existsSync(PLAN_FILE)) fs.unlinkSync(PLAN_FILE);
+    console.log('🔄 Reset params, log, and plan\n');
   }
   
-  console.log('🎨 Autoart v2 — Autonomous Art Evolution\n');
+  console.log('🎨 Autoart v3 — Composition-Based Evolution\n');
   console.log(`Canvas: ${config.canvasId}`);
-  console.log(`Iterations: ${config.maxIterations} | Delay: ${config.delay}ms | Dry run: ${config.dryRun}`);
-  console.log(`Prior: ${params.totalIterations} iterations, ${params.keptIterations} kept, best ${params.bestScore.toFixed(1)}\n`);
+  console.log(`Iterations: ${config.maxIterations} | Delay: ${config.delay}ms | Dry run: ${config.dryRun}\n`);
 
   let goals = '';
   if (fs.existsSync(config.goalsFile)) {
@@ -503,154 +664,124 @@ async function main() {
   }
 
   const canvas = await fetchCanvas(config.canvasId);
+  console.log(`Canvas: "${canvas.theme}"\n`);
   
-  // Get canvas marks by checking which agents are on this canvas
+  // Load or generate composition plan
+  let plan = config.replan ? null : loadCompositionPlan();
+  if (!plan) {
+    plan = await generateCompositionPlan(canvas, goals);
+  } else {
+    console.log(`📋 Loaded existing plan: ${plan.objects.map(o => o.name).join(', ')}\n`);
+  }
+  
+  // Get canvas marks
   const canvasAgents = (canvas.agents || []).map(a => a.id);
   let allMarks = await fetchAllMarks();
   let canvasMarks = allMarks.filter(m => canvasAgents.includes(m.agentId) || m.agentId === 'system');
+  if (canvasMarks.length === 0) canvasMarks = allMarks;
   
-  // Fallback: if no agents listed, just get the most recent marks
-  if (canvasMarks.length === 0) {
-    canvasMarks = allMarks; // Use all marks as fallback
+  console.log(`${canvasMarks.length} marks on canvas\n`);
+  
+  // Update plan with current mark counts
+  plan = updatePlanMarkCounts(plan, canvasMarks);
+  console.log('Object progress:');
+  for (const obj of plan.objects.sort((a, b) => a.priority - b.priority)) {
+    const pct = obj.targetMarkCount > 0 ? (obj.currentMarkCount / obj.targetMarkCount * 100).toFixed(0) : '100';
+    console.log(`  ${obj.name}: ${obj.currentMarkCount}/${obj.targetMarkCount} (${pct}%)`);
   }
+  console.log();
   
-  console.log(`Canvas: "${canvas.theme}" — ${canvasMarks.length} marks\n`);
-
-  // Initial score
+  // Initial score (heuristic — instant)
+  const VISION_EVERY = 5; // Vision scoring every Nth iteration
   console.log('Scoring initial state...');
-  let currentScore = await scoreComposition(canvasMarks, canvas, goals);
-  console.log(`Initial: ${currentScore.average.toFixed(2)}/10`);
-  console.log(`  C=${currentScore.coherence} D=${currentScore.density} T=${currentScore.thematic} I=${currentScore.intentionality}`);
-  console.log(`  ${currentScore.reasoning?.slice(0, 150)}`);
-  console.log(`  💡 ${currentScore.suggestions?.slice(0, 150)}\n`);
-
-  let budgetExhausted = false;
-  let consecutiveErrors = 0;
+  let currentScore = scoreHeuristic(canvasMarks, plan, plan.objects[0], []);
+  console.log(`Initial (heuristic): ${currentScore.average}/10`);
+  console.log(`  ${currentScore.reasoning}\n`);
 
   for (let i = 1; i <= config.maxIterations; i++) {
     console.log(`\n━━━ Iteration ${i}/${config.maxIterations} ━━━\n`);
     
-    // Re-read goals each iteration (can be edited live)
+    // Re-read goals each iteration
     if (fs.existsSync(config.goalsFile)) goals = fs.readFileSync(config.goalsFile, 'utf8');
     
-    // Pre-check budget before wasting LLM calls
-    let currentBudget = null;
-    if (!config.dryRun) {
-      currentBudget = await checkBudget(config.apiKey);
-      if (currentBudget && typeof currentBudget.marksRemaining === 'number') {
-        console.log(`Budget: ${currentBudget.marksRemaining}/${currentBudget.maxMarks} marks remaining`);
-        if (currentBudget.marksRemaining <= 0) {
-          console.log('  Budget exhausted — switching to sculpt mode (move/remove only)');
-        }
-      }
-    }
+    // Update plan mark counts
+    plan = updatePlanMarkCounts(plan, canvasMarks);
+    
+    // Pick most underdone object
+    const targetObject = pickMostUnderdoneObject(plan);
+    const completion = targetObject.targetMarkCount > 0 ? (targetObject.currentMarkCount / targetObject.targetMarkCount * 100).toFixed(0) : '100';
+    console.log(`Target object: ${targetObject.name} (${targetObject.currentMarkCount}/${targetObject.targetMarkCount} = ${completion}%)`);
     
     let iterParams, strategy, newOps;
     
     try {
       iterParams = mutateParams(params);
-      console.log(`Params: size=${iterParams.sizeRange} opacity=${iterParams.opacityRange} marks=${iterParams.markCount} cluster=${iterParams.clusterTightness}px`);
+      console.log(`Params: size=${iterParams.sizeRange} opacity=${iterParams.opacityRange} marks=${iterParams.markCount}`);
       
-      // Strategy
-      strategy = await generateStrategy(iterParams, canvasMarks, canvas, goals, currentBudget);
-      console.log(`Strategy: ${strategy.description?.slice(0, 120)}`);
-      console.log(`Zone: ${strategy.zone} | Colors: ${(strategy.colors || []).slice(0, 4).join(', ')}`);
+      strategy = await generateStrategy(iterParams, plan, targetObject, canvas, goals);
+      console.log(`Strategy: ${strategy.description}`);
       
-      // Generate marks
-      newOps = await generateMarks(iterParams, strategy, canvasMarks, canvas);
-      console.log(`Generated ${newOps.length} marks`);
+      newOps = await generateMarks(iterParams, strategy, targetObject, canvas);
+      console.log(`Generated ${newOps.length} marks for ${targetObject.name}`);
     } catch (err) {
-      consecutiveErrors++;
       console.log(`⚠️  LLM/parse error: ${err.message?.slice(0, 100)}`);
-      if (consecutiveErrors >= 3) {
-        console.log('🛑 3 consecutive errors — stopping to avoid burning credits.');
-        break;
-      }
-      console.log(`  Retrying next iteration (${consecutiveErrors}/3 errors)...`);
+      console.log(`  Skipping iteration...`);
       if (i < config.maxIterations) await new Promise(r => setTimeout(r, config.delay));
       continue;
     }
     
-    // Reset error counter on successful generation
-    consecutiveErrors = 0;
-    
-    if (newOps.length === 0) { console.log('⚠️  No marks, skipping'); continue; }
-    
-    // Categorize ops
-    const addOps = newOps.filter(o => o.op === 'add');
-    const moveOps = newOps.filter(o => o.op === 'move');
-    const removeOps = newOps.filter(o => o.op === 'remove');
-    console.log(`Ops: ${addOps.length} add, ${moveOps.length} move, ${removeOps.length} remove`);
-    
-    // Cache marks that will be moved/removed (for revert)
-    const revertCache = { removed: [], moved: [] };
-    if (!config.dryRun) {
-      for (const op of removeOps) {
-        const orig = canvasMarks.find(m => m.id === op.markId);
-        if (orig) revertCache.removed.push({ ...orig });
-      }
-      for (const op of moveOps) {
-        const orig = canvasMarks.find(m => m.id === op.markId);
-        if (orig) revertCache.moved.push({ id: orig.id, x: orig.x, y: orig.y });
-      }
+    if (newOps.length === 0) {
+      console.log('⚠️  No marks generated, skipping');
+      continue;
     }
     
-    // Push and CHECK the result
-    let pushResult = null;
-    let opsLanded = 0;
+    // Cache for revert
+    let newMarkIds = [];
+    
+    // Push
     if (!config.dryRun) {
-      pushResult = await pushMarksBatch(newOps, config.apiKey);
+      const pushResult = await pushMarksBatch(newOps, config.apiKey);
       const added = pushResult.added || 0;
-      const removed = pushResult.removed || 0;
-      const moved = pushResult.moved || 0;
-      opsLanded = added + removed + moved;
-      console.log(`Pushed: +${added} -${removed} ~${moved}`);
+      console.log(`Pushed: +${added} marks`);
       if (pushResult.errors?.length) console.log(`  Errors: ${pushResult.errors.slice(0, 3).join(', ')}`);
-      if (opsLanded === 0) {
-        const hasLimitError = pushResult.errors?.some(e => /limit|budget|exhausted/i.test(e));
-        // If budget exhausted but we have move/remove ops, that's still useful
-        if (hasLimitError && moveOps.length === 0 && removeOps.length === 0) {
-          console.log('🛑 Mark limit reached and no move/remove ops — stopping run.');
-          budgetExhausted = true;
-          break;
-        }
-        if (!hasLimitError) {
-          console.log('⚠️  No ops landed! Skipping.');
-          continue;
-        }
+      
+      if (added === 0) {
+        console.log('⚠️  No marks added, skipping scoring');
+        continue;
+      }
+      
+      // Get updated marks
+      allMarks = await fetchAllMarks();
+      canvasMarks = allMarks.filter(m => canvasAgents.includes(m.agentId) || m.agentId === 'system');
+      if (canvasMarks.length === 0) canvasMarks = allMarks;
+      
+      newMarkIds = canvasMarks.slice(-added).map(m => m.id);
+    } else {
+      console.log(`[DRY RUN] Would push ${newOps.length} marks`);
+    }
+    
+    // Score: heuristic every iteration, vision every VISION_EVERY
+    let newScore;
+    const useVision = (i % VISION_EVERY === 0);
+    
+    if (useVision) {
+      try {
+        console.log('🔍 Vision checkpoint...');
+        newScore = await scoreCompositionWithVision(canvasMarks, canvas, goals, RENDER_TEMP);
+        console.log(`  Vision: C=${newScore.coherence} D=${newScore.density} T=${newScore.thematic} I=${newScore.intentionality}`);
+      } catch (err) {
+        console.log(`⚠️  Vision failed, falling back to heuristic`);
+        newScore = scoreHeuristic(canvasMarks, plan, targetObject, newOps);
       }
     } else {
-      opsLanded = newOps.length;
-      console.log(`[DRY RUN] Would push ${newOps.length} ops`);
+      newScore = scoreHeuristic(canvasMarks, plan, targetObject, newOps);
     }
     
-    // Get updated marks + IDs for revert
-    let newMarkIds = [];
-    if (!config.dryRun) {
-      const numAdded = pushResult?.added || 0;
-      allMarks = await fetchAllMarks();
-      const updated = allMarks.filter(m => canvasAgents.includes(m.agentId) || m.agentId === 'system');
-      if (updated.length === 0) canvasMarks = allMarks;
-      else canvasMarks = updated;
-      if (numAdded > 0) newMarkIds = canvasMarks.slice(-numAdded).map(m => m.id);
-    }
-    
-    // Score FULL canvas
-    let newScore;
-    try {
-      newScore = await scoreComposition(canvasMarks, canvas, goals);
-    } catch (err) {
-      console.log(`⚠️  Scoring failed: ${err.message?.slice(0, 100)}`);
-      console.log('  Keeping marks (can\'t score, defaulting to keep)');
-      // Can't score — keep marks and move on rather than crash
-      if (i < config.maxIterations) await new Promise(r => setTimeout(r, config.delay));
-      continue;
-    }
     const improvement = newScore.average - currentScore.average;
-    console.log(`Score: ${newScore.average.toFixed(2)}/10 (${improvement >= 0 ? '+' : ''}${improvement.toFixed(2)})`);
-    console.log(`  ${newScore.reasoning?.slice(0, 120)}`);
+    console.log(`Score${useVision ? ' (vision)' : ''}: ${newScore.average.toFixed(2)}/10 (${improvement >= 0 ? '+' : ''}${improvement.toFixed(2)})`);
+    console.log(`  ${newScore.reasoning}`);
     
-    // STRICT keep/revert — must actually improve or hold
+    // Keep or revert
     const kept = improvement >= 0;
     if (kept) {
       console.log(`✅ KEEP`);
@@ -659,40 +790,12 @@ async function main() {
       params.opacityRange = [...iterParams.opacityRange];
       params.markCount = iterParams.markCount;
       params.clusterTightness = iterParams.clusterTightness;
-      params.dotRatio = iterParams.dotRatio;
-      params.lineRatio = iterParams.lineRatio;
-      params.textRatio = iterParams.textRatio;
     } else {
       console.log(`❌ REVERT (${improvement.toFixed(2)})`);
-      if (!config.dryRun) {
-        const revertOps = [];
-        
-        // Undo adds: remove newly added marks
-        if (newMarkIds.length > 0) {
-          for (const id of newMarkIds) revertOps.push({ op: 'remove', markId: id });
-        }
-        
-        // Undo removes: re-add the cached marks
-        for (const cached of revertCache.removed) {
-          revertOps.push({
-            op: 'add', type: cached.type, x: cached.x, y: cached.y,
-            size: cached.size, color: cached.color, opacity: cached.opacity,
-            text: cached.text, x2: cached.x2, y2: cached.y2, canvasId: canvas.id,
-          });
-        }
-        
-        // Undo moves: move marks back to original position
-        for (const cached of revertCache.moved) {
-          revertOps.push({ op: 'move', markId: cached.id, x: cached.x, y: cached.y });
-        }
-        
-        if (revertOps.length > 0) {
-          const revertResult = await pushMarksBatch(revertOps, config.apiKey);
-          const rAdded = revertResult.added || 0;
-          const rRemoved = revertResult.removed || 0;
-          const rMoved = revertResult.moved || 0;
-          console.log(`  Reverted: +${rAdded} -${rRemoved} ~${rMoved}`);
-        }
+      if (!config.dryRun && newMarkIds.length > 0) {
+        const revertOps = newMarkIds.map(id => ({ op: 'remove', markId: id }));
+        const revertResult = await pushMarksBatch(revertOps, config.apiKey);
+        console.log(`  Reverted: -${revertResult.removed || 0} marks`);
         
         allMarks = await fetchAllMarks();
         canvasMarks = allMarks.filter(m => canvasAgents.includes(m.agentId) || m.agentId === 'system');
@@ -700,7 +803,7 @@ async function main() {
       }
     }
     
-    params = updateParams(params, strategy, currentScore, newScore, kept);
+    params = updateParams(params, { object: targetObject.name }, currentScore, newScore, kept);
     saveParams(params);
     
     // Log
@@ -708,12 +811,11 @@ async function main() {
     log.iterations.push({
       iteration: params.totalIterations,
       timestamp: new Date().toISOString(),
-      params: { size: iterParams.sizeRange, opacity: iterParams.opacityRange, marks: iterParams.markCount, cluster: iterParams.clusterTightness },
+      targetObject: targetObject.name,
+      objectProgress: `${targetObject.currentMarkCount}/${targetObject.targetMarkCount}`,
+      params: { size: iterParams.sizeRange, opacity: iterParams.opacityRange, marks: iterParams.markCount },
       strategy: strategy.description?.slice(0, 200),
-      zone: strategy.zone,
-      colors: strategy.colors,
-      opsGenerated: { add: addOps.length, move: moveOps.length, remove: removeOps.length, total: newOps.length },
-      opsLanded,
+      marksGenerated: newOps.length,
       scoreBefore: (currentScore.average - improvement).toFixed(2),
       scoreAfter: newScore.average.toFixed(2),
       improvement: improvement.toFixed(2),
@@ -724,16 +826,18 @@ async function main() {
     fs.writeFileSync(LOG_FILE, JSON.stringify(log, null, 2));
     
     const wr = params.totalIterations > 0 ? (params.keptIterations / params.totalIterations * 100).toFixed(0) : '?';
-    console.log(`📊 Win rate: ${params.keptIterations}/${params.totalIterations} (${wr}%) | Best: ${params.bestScore.toFixed(1)}/10 | Marks: ${canvasMarks.length}\n`);
+    console.log(`📊 Win rate: ${params.keptIterations}/${params.totalIterations} (${wr}%) | Best: ${params.bestScore.toFixed(1)}/10\n`);
     
     if (i < config.maxIterations) await new Promise(r => setTimeout(r, config.delay));
   }
   
-  console.log(`\n🏁 DONE${budgetExhausted ? ' (budget exhausted)' : ''}`);
+  console.log(`\n🏁 DONE`);
   console.log(`Final: ${currentScore.average.toFixed(2)}/10 | ${canvasMarks.length} marks`);
   console.log(`${params.totalIterations} iterations: ${params.keptIterations} kept, ${params.revertedIterations} reverted`);
-  console.log(`Best: ${params.bestScore.toFixed(1)}/10 | size=${params.bestSizeRange} opacity=${params.bestOpacityRange}`);
-  if (budgetExhausted) console.log(`💡 To continue: add more credits or increase mark limit for this API key.`);
+  console.log(`Best: ${params.bestScore.toFixed(1)}/10`);
+  
+  // Save updated plan
+  fs.writeFileSync(PLAN_FILE, JSON.stringify(plan, null, 2));
 }
 
 main().catch(e => { console.error('Fatal:', e.message); process.exit(1); });

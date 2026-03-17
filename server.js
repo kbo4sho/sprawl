@@ -466,7 +466,7 @@ function assignHomeCoordinates(agentId) {
 
 // --- Agent Configuration (Free for Everyone) ---
 const AGENT_CONFIG = {
-  marksPerCanvas: 2000,
+  marksPerCanvas: 5000,
   dailyEvolves: 50,
   autoEvolve: true,
 };

@@ -1,0 +1,76 @@
+{
+  "iterations": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-03-17T04:01:24.855Z",
+      "targetObject": "wine-bottle-label",
+      "objectProgress": "28/18",
+      "params": {
+        "size": [
+          2,
+          7
+        ],
+        "opacity": [
+          0.15,
+          0.9
+        ],
+        "marks": 37
+      },
+      "strategy": "Dense fill of the wine bottle label — a rectangular cream patch on the dark bottle body. Pack marks tightly to create a solid, readable label shape that contrasts against the dark glass. Concentrate m",
+      "marksGenerated": 37,
+      "scoreBefore": "6.57",
+      "scoreAfter": "9.11",
+      "improvement": "2.54",
+      "kept": true,
+      "reasoning": "density=10.0 coverage=10.8 cluster=10.0 global=5.6"
+    },
+    {
+      "iteration": 2,
+      "timestamp": "2026-03-17T04:02:04.706Z",
+      "targetObject": "fruit-grapes",
+      "objectProgress": "73/40",
+      "params": {
+        "size": [
+          2,
+          7
+        ],
+        "opacity": [
+          0.1,
+          0.92
+        ],
+        "marks": 29
+      },
+      "strategy": "Deepen the grape cluster with tighter spherical sub-clusters to sell individual grape forms, plus add dark crevice marks between grapes for 3D separation",
+      "marksGenerated": 29,
+      "scoreBefore": "10.11",
+      "scoreAfter": "8.11",
+      "improvement": "-1.00",
+      "kept": false,
+      "reasoning": "density=10.0 coverage=6.8 cluster=10.0 global=5.6"
+    },
+    {
+      "iteration": 3,
+      "timestamp": "2026-03-17T04:03:04.744Z",
+      "targetObject": "fruit-grapes",
+      "objectProgress": "73/40",
+      "params": {
+        "size": [
+          1,
+          8
+        ],
+        "opacity": [
+          0.15,
+          0.9
+        ],
+        "marks": 30
+      },
+      "strategy": "Deepen grape cluster density — pack the cascade spilling over bowl's right edge with layered spherical forms, darkest darks in crevices between grapes, bright bloomy highlights on top-facing surfaces",
+      "marksGenerated": 30,
+      "scoreBefore": "9.91",
+      "scoreAfter": "8.31",
+      "improvement": "-0.80",
+      "kept": false,
+      "reasoning": "density=10.0 coverage=7.6 cluster=10.0 global=5.6"
+    }
+  ]
+}

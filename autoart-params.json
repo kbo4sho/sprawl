@@ -1,0 +1,33 @@
+{
+  "sizeRange": [
+    2,
+    7
+  ],
+  "opacityRange": [
+    0.15,
+    0.9
+  ],
+  "markCount": 37,
+  "clusterTightness": 64,
+  "bestScore": 9.11,
+  "bestSizeRange": [
+    2,
+    7
+  ],
+  "bestOpacityRange": [
+    0.15,
+    0.9
+  ],
+  "bestMarkCount": 37,
+  "bestClusterTightness": 64,
+  "totalIterations": 3,
+  "keptIterations": 1,
+  "revertedIterations": 2,
+  "winningPatterns": [
+    "wine-bottle-label"
+  ],
+  "losingPatterns": [
+    "fruit-grapes",
+    "fruit-grapes"
+  ]
+}

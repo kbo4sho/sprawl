@@ -9,37 +9,35 @@
 
 const crypto = require('crypto');
 
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-
-if (!ANTHROPIC_API_KEY) {
-  console.error('Need ANTHROPIC_API_KEY for evolution engine');
-  process.exit(1);
-}
+const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
+const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 
 /**
- * Call Anthropic API for agent evolution
+ * Call LLM via OpenClaw gateway (OpenAI-compatible endpoint)
  * @param {string} prompt - User prompt
  * @param {string} systemPrompt - System prompt
  * @returns {Promise<string>} LLM response
  */
 async function callLLM(prompt, systemPrompt) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
+      'Authorization': `Bearer ${GATEWAY_TOKEN}`,
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
+      model: 'anthropic/claude-sonnet-4-5',
       max_tokens: 8000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
     }),
   });
   
   const data = await res.json();
-  return data.content?.[0]?.text || '';
+  if (data.error) throw new Error(JSON.stringify(data.error).slice(0, 200));
+  return data.choices?.[0]?.message?.content || '';
 }
 
 /**
