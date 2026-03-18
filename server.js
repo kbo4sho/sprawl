@@ -858,6 +858,28 @@ app.get('/', (req, res) => {
   });
 });
 
+// Live canvas viewer — full-screen dot renderer with WebSocket, lerp, repel
+app.get('/live', (req, res) => {
+  const agentId = req.query.agent || 'autoart-painter';
+  res.render('live', { agentId, title: 'Sprawl — Live Canvas' });
+});
+
+// Replay API — triggers wave evolution speed run
+let replayRunning = false;
+app.post('/api/replay', (req, res) => {
+  if (replayRunning) return res.status(409).json({ error: 'Already running' });
+  replayRunning = true;
+  const { spawn } = require('child_process');
+  const child = spawn('node', ['curator-speedrun.js',
+    'curator-frames/wave-curl.png',
+    'curator-frames/wave-break.png',
+    'curator-frames/wave-foam.png',
+    'curator-frames/wave-retreat.png',
+  ], { cwd: __dirname, stdio: 'pipe' });
+  child.on('close', () => { replayRunning = false; });
+  res.json({ status: 'started', compositions: 4 });
+});
+
 // Canvas view page
 app.get('/canvas/:id', (req, res) => {
   const canvas = stmts.getCanvas.get(req.params.id);

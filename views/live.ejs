@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sprawl — Live Canvas</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #hud {
+    position: fixed; top: 16px; left: 16px; color: #666; font-size: 11px;
+    pointer-events: none; z-index: 10; line-height: 1.8;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  #hud .live { color: #4f4; }
+  #hud .count { color: #888; }
+  #hud .updates { color: #ff6; }
+  #controls {
+    position: fixed; bottom: 24px; right: 24px; z-index: 10;
+    display: flex; gap: 12px; align-items: center;
+  }
+  .ctrl-btn {
+    background: rgba(255,255,255,0.06); color: #aaa; border: 1px solid rgba(255,255,255,0.12);
+    padding: 10px 20px; font-family: inherit; font-size: 13px; cursor: pointer;
+    border-radius: 4px; backdrop-filter: blur(8px); transition: all 0.2s;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .ctrl-btn:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .ctrl-btn:active { transform: scale(0.97); }
+  .ctrl-btn.running { color: #ff6; border-color: rgba(255,200,0,0.3); pointer-events: none; }
+  #help {
+    position: fixed; bottom: 24px; left: 24px; color: #444; font-size: 10px;
+    font-family: inherit; letter-spacing: 0.5px; pointer-events: none; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div style="color:#555; font-size:10px; margin-bottom:4px;">SPRAWL</div>
+  <div class="live" id="status">connecting...</div>
+  <div class="count" id="markCount"></div>
+  <div class="updates" id="updateRate"></div>
+</div>
+<div id="controls">
+  <button class="ctrl-btn" id="replay" onclick="triggerReplay()">▶ evolve</button>
+</div>
+<div id="help">click to repel · scroll to zoom · shift+drag to pan · double-click to reset</div>
+<canvas id="c"></canvas>
+<script>
+const AGENT_ID = '<%= agentId %>';
+const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const markCountEl = document.getElementById('markCount');
+const updateRateEl = document.getElementById('updateRate');
+
+const marks = new Map();
+let updateCount = 0;
+let lastUpdateReset = Date.now();
+
+function resize() {
+  canvas.width = window.innerWidth * devicePixelRatio;
+  canvas.height = window.innerHeight * devicePixelRatio;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Pan/zoom
+let panX = 0, panY = 0, zoom = 1;
+let dragging = false, dragStartX, dragStartY, panStartX, panStartY;
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  const mx = e.clientX * devicePixelRatio;
+  const my = e.clientY * devicePixelRatio;
+  const wx = (mx - canvas.width/2) / zoom - panX;
+  const wy = (my - canvas.height/2) / zoom - panY;
+  zoom *= factor;
+  zoom = Math.max(0.1, Math.min(10, zoom));
+  panX = (mx - canvas.width/2) / zoom - wx;
+  panY = (my - canvas.height/2) / zoom - wy;
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  if (e.shiftKey || e.button === 1) {
+    dragging = true;
+    dragStartX = e.clientX * devicePixelRatio;
+    dragStartY = e.clientY * devicePixelRatio;
+    panStartX = panX; panStartY = panY;
+  }
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX * devicePixelRatio - dragStartX;
+  const dy = e.clientY * devicePixelRatio - dragStartY;
+  panX = panStartX + dx / zoom;
+  panY = panStartY + dy / zoom;
+});
+canvas.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('mouseleave', () => dragging = false);
+
+// Touch: two-finger zoom
+let lastTouchDist = 0;
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastTouchDist = Math.sqrt(dx*dx + dy*dy);
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (lastTouchDist > 0) zoom *= dist / lastTouchDist;
+    zoom = Math.max(0.1, Math.min(10, zoom));
+    lastTouchDist = dist;
+  }
+}, { passive: true });
+canvas.addEventListener('touchend', () => { lastTouchDist = 0; });
+canvas.addEventListener('dblclick', () => { panX = 0; panY = 0; zoom = 1; });
+
+// Color utils
+function hexToRgb(hex) {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v>>16)&255, (v>>8)&255, v&255];
+}
+function rgbToHex(r,g,b) {
+  return '#'+((1<<24)+(Math.round(r)<<16)+(Math.round(g)<<8)+Math.round(b)).toString(16).slice(1);
+}
+
+// Repel physics
+const REPEL_RADIUS = 120;
+const REPEL_STRENGTH = 800;
+const RETURN_SPEED = 0.03;
+const DAMPING = 0.92;
+const displacements = new Map();
+let mouseScreenX = -9999, mouseScreenY = -9999;
+let mouseDown = false;
+
+canvas.addEventListener('mousedown', e => { if (e.button === 0 && !e.shiftKey) mouseDown = true; });
+canvas.addEventListener('mouseup', e => { if (e.button === 0) mouseDown = false; });
+canvas.addEventListener('mousemove', e => { mouseScreenX = e.clientX * devicePixelRatio; mouseScreenY = e.clientY * devicePixelRatio; });
+canvas.addEventListener('mouseleave', () => { mouseDown = false; mouseScreenX = -9999; });
+
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) { mouseDown = true; mouseScreenX = e.touches[0].clientX * devicePixelRatio; mouseScreenY = e.touches[0].clientY * devicePixelRatio; }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 1 && mouseDown) { mouseScreenX = e.touches[0].clientX * devicePixelRatio; mouseScreenY = e.touches[0].clientY * devicePixelRatio; }
+}, { passive: true });
+canvas.addEventListener('touchend', () => { mouseDown = false; mouseScreenX = -9999; });
+
+const LERP_SPEED = 0.02;
+
+function physicsStep() {
+  const cx = canvas.width / 2 + panX * zoom;
+  const cy = canvas.height / 2 + panY * zoom;
+  for (const [id, m] of marks) {
+    m.x += (m.tx - m.x) * LERP_SPEED;
+    m.y += (m.ty - m.y) * LERP_SPEED;
+    m.r += (m.tr - m.r) * LERP_SPEED;
+    m.g += (m.tg - m.g) * LERP_SPEED;
+    m.b += (m.tb - m.b) * LERP_SPEED;
+    m.size += (m.tsize - m.size) * LERP_SPEED;
+    m.opacity += (m.topacity - m.opacity) * LERP_SPEED;
+    m.color = rgbToHex(m.r, m.g, m.b);
+    let d = displacements.get(id);
+    if (!d) { d = { dx: 0, dy: 0, vx: 0, vy: 0 }; displacements.set(id, d); }
+    const sx = cx + (m.x + d.dx) * zoom;
+    const sy = cy + (m.y + d.dy) * zoom;
+    if (mouseDown) {
+      const ddx = sx - mouseScreenX, ddy = sy - mouseScreenY;
+      const dist = Math.sqrt(ddx*ddx + ddy*ddy);
+      if (dist < REPEL_RADIUS && dist > 1) {
+        const force = REPEL_STRENGTH * (1 - dist / REPEL_RADIUS) / dist;
+        d.vx += (ddx * force) / zoom;
+        d.vy += (ddy * force) / zoom;
+      }
+    }
+    d.vx -= d.dx * RETURN_SPEED;
+    d.vy -= d.dy * RETURN_SPEED;
+    d.vx *= DAMPING; d.vy *= DAMPING;
+    d.dx += d.vx; d.dy += d.vy;
+    if (Math.abs(d.dx) < 0.01 && Math.abs(d.dy) < 0.01 && Math.abs(d.vx) < 0.001) {
+      d.dx = 0; d.dy = 0; d.vx = 0; d.vy = 0;
+    }
+  }
+}
+
+function render() {
+  const w = canvas.width, h = canvas.height;
+  physicsStep();
+  ctx.fillStyle = 'rgba(10, 10, 10, 0.15)';
+  ctx.fillRect(0, 0, w, h);
+  const cx = w / 2 + panX * zoom;
+  const cy = h / 2 + panY * zoom;
+  for (const [id, m] of marks) {
+    const d = displacements.get(id) || { dx: 0, dy: 0 };
+    const sx = cx + (m.x + d.dx) * zoom;
+    const sy = cy + (m.y + d.dy) * zoom;
+    if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) continue;
+    const r = Math.max(1, m.size * zoom * 0.5);
+    ctx.globalAlpha = m.opacity * 0.3;
+    ctx.fillStyle = m.color;
+    ctx.beginPath(); ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = m.opacity * 0.8;
+    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = m.opacity * 0.5;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(sx, sy, r * 0.3, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  const now = Date.now();
+  if (now - lastUpdateReset > 3000) {
+    const rate = Math.round(updateCount / ((now - lastUpdateReset) / 1000));
+    updateRateEl.textContent = rate > 0 ? `${rate}/s` : '';
+    updateCount = 0;
+    lastUpdateReset = now;
+  }
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// WebSocket
+function connect() {
+  statusEl.textContent = 'connecting...';
+  statusEl.style.color = '#ff6';
+  const ws = new WebSocket(WS_URL);
+  
+  function makeMark(m) {
+    const [r,g,b] = hexToRgb(m.color);
+    const s = m.size || 5, o = m.effectiveOpacity || m.opacity || 0.7;
+    return { x:m.x, y:m.y, r,g,b, color:m.color, size:s, opacity:o, tx:m.x, ty:m.y, tr:r, tg:g, tb:b, tsize:s, topacity:o };
+  }
+  
+  ws.onopen = () => { statusEl.textContent = '● live'; statusEl.style.color = '#4f4'; };
+  
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'init') {
+      marks.clear();
+      for (const m of data.marks) {
+        if (AGENT_ID && m.agentId !== AGENT_ID) continue;
+        marks.set(m.id, makeMark(m));
+      }
+      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+      if (marks.size > 0) {
+        let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+        for (const m of marks.values()) {
+          if (m.x < minX) minX = m.x; if (m.x > maxX) maxX = m.x;
+          if (m.y < minY) minY = m.y; if (m.y > maxY) maxY = m.y;
+        }
+        const rangeX = maxX - minX || 800, rangeY = maxY - minY || 800;
+        zoom = Math.min(canvas.width / (rangeX * 1.2), canvas.height / (rangeY * 1.2));
+        panX = -(minX + maxX) / 2;
+        panY = -(minY + maxY) / 2;
+      }
+    }
+    else if (data.type === 'mark:created') {
+      const m = data.mark;
+      if (AGENT_ID && m.agentId !== AGENT_ID) return;
+      marks.set(m.id, makeMark(m));
+      updateCount++;
+      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+    }
+    else if (data.type === 'mark:updated') {
+      const m = data.mark;
+      if (AGENT_ID && m.agentId !== AGENT_ID) return;
+      const existing = marks.get(m.id);
+      if (existing) {
+        const [r,g,b] = hexToRgb(m.color);
+        existing.tx = m.x; existing.ty = m.y;
+        existing.tr = r; existing.tg = g; existing.tb = b;
+        existing.tsize = m.size || existing.tsize;
+        existing.topacity = m.effectiveOpacity || m.opacity || existing.topacity;
+      } else {
+        marks.set(m.id, makeMark(m));
+      }
+      updateCount++;
+    }
+    else if (data.type === 'mark:deleted') {
+      marks.delete(data.id);
+      displacements.delete(data.id);
+      updateCount++;
+      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+    }
+    else if (data.type === 'marks:cleared') {
+      for (const [id] of marks) marks.delete(id);
+      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+    }
+  };
+  ws.onclose = () => { statusEl.textContent = '● reconnecting...'; statusEl.style.color = '#f44'; setTimeout(connect, 3000); };
+  ws.onerror = () => ws.close();
+}
+connect();
+
+async function triggerReplay() {
+  const btn = document.getElementById('replay');
+  btn.textContent = '⏳ evolving...';
+  btn.className = 'ctrl-btn running';
+  try {
+    const r = await fetch('/api/replay', { method: 'POST' });
+    const data = await r.json();
+    if (data.error) {
+      btn.textContent = '⏳ running';
+      setTimeout(() => { btn.textContent = '▶ evolve'; btn.className = 'ctrl-btn'; }, 3000);
+      return;
+    }
+    setTimeout(() => { btn.textContent = '▶ evolve'; btn.className = 'ctrl-btn'; }, 180000);
+  } catch (e) {
+    btn.textContent = '▶ evolve';
+    btn.className = 'ctrl-btn';
+  }
+}
+</script>
+</body>
+</html>
