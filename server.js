@@ -864,19 +864,16 @@ app.get('/live', (req, res) => {
   res.render('live', { agentId, title: 'Sprawl — Live Canvas' });
 });
 
-// Replay API — triggers wave evolution speed run
+// Replay API — triggers wave evolution from pre-computed targets (no canvas dep)
 let replayRunning = false;
 app.post('/api/replay', (req, res) => {
   if (replayRunning) return res.status(409).json({ error: 'Already running' });
   replayRunning = true;
   const { spawn } = require('child_process');
-  const child = spawn('node', ['curator-speedrun.js',
-    'curator-frames/wave-curl.png',
-    'curator-frames/wave-break.png',
-    'curator-frames/wave-foam.png',
-    'curator-frames/wave-retreat.png',
-  ], { cwd: __dirname, stdio: 'pipe' });
-  child.on('close', () => { replayRunning = false; });
+  const child = spawn('node', ['curator-replay.js'], { cwd: __dirname, stdio: 'pipe' });
+  child.stdout.on('data', d => console.log('[replay]', d.toString().trim()));
+  child.stderr.on('data', d => console.error('[replay]', d.toString().trim()));
+  child.on('close', (code) => { replayRunning = false; console.log(`[replay] finished (exit ${code})`); });
   res.json({ status: 'started', compositions: 4 });
 });
 
