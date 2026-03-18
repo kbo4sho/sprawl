@@ -2395,7 +2395,7 @@ app.post('/api/ext/marks/batch', requireApiKey, rateLimit, (req, res) => {
   
   const { ops } = req.body;
   if (!Array.isArray(ops)) return res.status(400).json({ error: 'ops array required' });
-  if (ops.length > 50) return res.status(400).json({ error: 'Max 50 operations per batch' });
+  if (ops.length > 500) return res.status(400).json({ error: 'Max 500 operations per batch' });
   
   const budget = getBudget(agentId);
   if (budget.frozen) return res.status(403).json({ error: 'Agent is frozen.', budget });
