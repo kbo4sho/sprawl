@@ -758,13 +758,14 @@ function connect() {
       const existing = marks.get(m.id);
       if (existing) {
         const [r,g,b] = hexToRgb(m.color);
-        existing.tx = m.x; existing.ty = m.y;
-        existing.tr = r; existing.tg = g; existing.tb = b;
-        existing.tsize = m.size || existing.tsize;
-        existing.topacity = m.effectiveOpacity || m.opacity || existing.topacity;
-        // Update live state too (unless replaying)
+        // Always update live state so we can restore after replay
+        liveTargets.set(m.id, { tx: m.x, ty: m.y, tr: r, tg: g, tb: b, tsize: m.size || existing.tsize, topacity: m.effectiveOpacity || m.opacity || existing.topacity });
+        // Only move dots if NOT replaying — otherwise replay targets get stomped
         if (!isReplaying) {
-          liveTargets.set(m.id, { tx: m.x, ty: m.y, tr: r, tg: g, tb: b, tsize: m.size || existing.tsize, topacity: m.effectiveOpacity || m.opacity || existing.topacity });
+          existing.tx = m.x; existing.ty = m.y;
+          existing.tr = r; existing.tg = g; existing.tb = b;
+          existing.tsize = m.size || existing.tsize;
+          existing.topacity = m.effectiveOpacity || m.opacity || existing.topacity;
         }
       } else {
         marks.set(m.id, makeMark(m));
