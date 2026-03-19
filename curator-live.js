@@ -27,9 +27,9 @@ const MODEL = 'anthropic/claude-sonnet-4-5'; // cheaper for curator decisions
 const CANVAS_SIZE = 800; // internal coord system
 const SPRAWL_RANGE = 400; // maps to -400..+400 on sprawl
 
-// Rate limit: 30 req/min, 50 ops/batch
-const BATCH_SIZE = 50;
-const BATCH_DELAY_MS = 2200; // ~27 req/min, safe margin
+// Rate limit: 500 req/min, 500 ops/batch (server batch limit bumped)
+const BATCH_SIZE = 500;
+const BATCH_DELAY_MS = 150; // fast transitions, matches speedrun script
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -582,7 +582,7 @@ async function main() {
         opacity: Math.round((0.4 + ((0.299 * d.r + 0.587 * d.g + 0.114 * d.b) / 255) * 0.4) * 100) / 100,
       }));
       
-      await sprawlFetch('/api/epochs', {
+      const epochRes = await sprawlFetch('/api/epochs', {
         method: 'POST',
         body: JSON.stringify({
           epoch_number: epochNum,
@@ -596,7 +596,12 @@ async function main() {
           targets: epochTargets,
         }),
       });
-      console.log('  ✅ Epoch data stored on server');
+      const epochResult = await epochRes.json();
+      if (epochRes.ok) {
+        console.log(`  ✅ Epoch data stored on server (id: ${epochResult.id})`);
+      } else {
+        console.log(`  ⚠️  Epoch store failed: ${JSON.stringify(epochResult)}`);
+      }
     } catch (e) {
       console.log(`  ⚠️  Failed to store epoch data: ${e.message}`);
     }
