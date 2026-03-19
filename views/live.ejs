@@ -4,62 +4,276 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sprawl — Live Canvas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0a0a0a; overflow: hidden; font-family: 'SF Mono', 'Fira Code', monospace; }
-  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
-  #hud {
-    position: fixed; top: 16px; left: 16px; color: #666; font-size: 11px;
-    pointer-events: none; z-index: 10; line-height: 1.8;
+  html, body {
+    width: 100%; height: 100vh; overflow: hidden;
+    background: #030306; color: #c8c8d0;
+    font-family: 'Space Mono', monospace;
+  }
+  
+  canvas {
+    display: block; position: absolute; top: 0; left: 0;
+    width: 100%; height: 100%; cursor: crosshair;
+  }
+  
+  /* Info Panel */
+  #info-panel {
+    position: fixed; right: 0; top: 0; bottom: 80px;
+    width: 320px; background: rgba(3, 3, 6, 0.95);
+    border-left: 1px solid rgba(200, 200, 208, 0.08);
+    backdrop-filter: blur(12px);
+    overflow-y: auto; z-index: 100;
+    transition: transform 0.3s ease;
+  }
+  #info-panel.collapsed { transform: translateX(100%); }
+  #info-panel::-webkit-scrollbar { width: 6px; }
+  #info-panel::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+  #info-panel::-webkit-scrollbar-thumb { background: rgba(200,200,208,0.15); border-radius: 3px; }
+  
+  .panel-section {
+    padding: 24px;
+    border-bottom: 1px solid rgba(200, 200, 208, 0.08);
+  }
+  
+  .panel-header {
+    font-family: 'Syne', sans-serif;
+    font-size: 24px; font-weight: 800;
+    color: #c8c8d0; letter-spacing: 2px;
+    margin-bottom: 4px;
+  }
+  .panel-subtitle {
+    font-size: 10px; color: #4a4a5a;
+    text-transform: uppercase; letter-spacing: 1.5px;
+  }
+  
+  .epoch-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px; font-weight: 700;
+    color: #c8c8d0; margin: 16px 0 8px;
+    line-height: 1.4;
+  }
+  .epoch-number {
+    font-size: 11px; color: #8b8ba0;
     text-transform: uppercase; letter-spacing: 1px;
   }
-  #hud .live { color: #4f4; }
-  #hud .count { color: #888; }
-  #hud .updates { color: #ff6; }
-  #controls {
-    position: fixed; bottom: 24px; right: 24px; z-index: 10;
-    display: flex; gap: 12px; align-items: center;
+  .journal-entry {
+    font-size: 13px; line-height: 1.7;
+    color: #8b8ba0; font-style: italic;
+    margin: 12px 0;
   }
-  .ctrl-btn {
-    background: rgba(255,255,255,0.06); color: #aaa; border: 1px solid rgba(255,255,255,0.12);
-    padding: 10px 20px; font-family: inherit; font-size: 13px; cursor: pointer;
-    border-radius: 4px; backdrop-filter: blur(8px); transition: all 0.2s;
-    letter-spacing: 1px; text-transform: uppercase;
+  .countdown {
+    font-size: 18px; font-weight: 700;
+    color: #c8c8d0; margin-top: 16px;
+    font-family: 'Syne', sans-serif;
   }
-  .ctrl-btn:hover { background: rgba(255,255,255,0.12); color: #fff; border-color: rgba(255,255,255,0.3); }
-  .ctrl-btn:active { transform: scale(0.97); }
-  .ctrl-btn.running { color: #ff6; border-color: rgba(255,200,0,0.3); pointer-events: none; }
-  #help {
-    position: fixed; bottom: 24px; left: 24px; color: #444; font-size: 10px;
-    font-family: inherit; letter-spacing: 0.5px; pointer-events: none; z-index: 10;
+  .countdown-label {
+    font-size: 10px; color: #4a4a5a;
+    text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 8px;
+  }
+  
+  .how-it-works {
+    font-size: 12px; line-height: 1.8;
+    color: #8b8ba0;
+  }
+  .how-it-works-title {
+    font-size: 11px; color: #4a4a5a;
+    text-transform: uppercase; letter-spacing: 1px;
+    margin-bottom: 12px;
+  }
+  
+  .empty-state {
+    font-size: 13px; color: #4a4a5a;
+    text-align: center; padding: 48px 24px;
+    font-style: italic;
+  }
+  
+  /* Timeline Bar */
+  #timeline {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 80px; background: rgba(3, 3, 6, 0.95);
+    border-top: 1px solid rgba(200, 200, 208, 0.08);
+    backdrop-filter: blur(12px);
+    display: flex; align-items: center;
+    padding: 0 24px; gap: 16px; z-index: 100;
+  }
+  
+  #play-all {
+    background: rgba(200, 200, 208, 0.08);
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    color: #8b8ba0; padding: 10px 18px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px;
+    cursor: pointer; border-radius: 4px;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  #play-all:hover { background: rgba(200, 200, 208, 0.15); color: #c8c8d0; }
+  #play-all:active { transform: scale(0.97); }
+  #play-all.playing { background: rgba(255, 200, 0, 0.12); color: #ff6; border-color: rgba(255, 200, 0, 0.3); }
+  
+  #timeline-track {
+    flex: 1; height: 40px;
+    display: flex; align-items: center; gap: 8px;
+    overflow-x: auto; overflow-y: hidden;
+  }
+  #timeline-track::-webkit-scrollbar { height: 4px; }
+  #timeline-track::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+  #timeline-track::-webkit-scrollbar-thumb { background: rgba(200,200,208,0.15); border-radius: 2px; }
+  
+  .epoch-marker {
+    width: 32px; height: 32px; flex-shrink: 0;
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    background: rgba(200, 200, 208, 0.05);
+    border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #4a4a5a;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .epoch-marker:hover {
+    background: rgba(200, 200, 208, 0.15);
+    border-color: rgba(200, 200, 208, 0.3);
+    color: #8b8ba0;
+  }
+  .epoch-marker.current {
+    background: rgba(255, 200, 0, 0.12);
+    border-color: rgba(255, 200, 0, 0.3);
+    color: #ff6;
+  }
+  .epoch-marker.playing {
+    background: rgba(139, 139, 160, 0.2);
+    border-color: rgba(139, 139, 160, 0.4);
+    color: #c8c8d0;
+  }
+  
+  .epoch-tooltip {
+    position: absolute; bottom: 100%; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 10, 10, 0.95);
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    padding: 8px 12px; margin-bottom: 8px;
+    font-size: 10px; color: #8b8ba0;
+    white-space: nowrap; pointer-events: none;
+    opacity: 0; transition: opacity 0.15s;
+    border-radius: 4px;
+  }
+  .epoch-marker:hover .epoch-tooltip { opacity: 1; }
+  
+  /* Replay Controls */
+  #replay-indicator {
+    position: fixed; top: 24px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 200, 0, 0.12);
+    border: 1px solid rgba(255, 200, 0, 0.3);
+    color: #ff6; padding: 12px 24px;
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1.5px;
+    border-radius: 4px; z-index: 110;
+    display: none;
+    backdrop-filter: blur(12px);
+  }
+  #replay-indicator.active { display: block; }
+  
+  #stop-replay {
+    background: rgba(200, 200, 208, 0.08);
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    color: #8b8ba0; padding: 6px 14px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px;
+    cursor: pointer; border-radius: 3px;
+    margin-left: 16px; transition: all 0.2s;
+  }
+  #stop-replay:hover { background: rgba(200, 200, 208, 0.15); color: #c8c8d0; }
+  
+  /* Toggle button */
+  #toggle-panel {
+    position: fixed; right: 16px; top: 16px; z-index: 105;
+    background: rgba(200, 200, 208, 0.08);
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    color: #8b8ba0; width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; cursor: pointer;
+    border-radius: 4px; transition: all 0.2s;
+  }
+  #toggle-panel:hover { background: rgba(200, 200, 208, 0.15); color: #c8c8d0; }
+  
+  /* Mobile adjustments */
+  @media (max-width: 768px) {
+    #info-panel {
+      width: 100%; bottom: 80px; top: auto;
+      max-height: 50vh; border-left: none;
+      border-top: 1px solid rgba(200, 200, 208, 0.08);
+      transform: translateY(0);
+    }
+    #info-panel.collapsed { transform: translateY(100%); }
+    #timeline { padding: 0 12px; gap: 8px; }
+    #play-all { padding: 8px 12px; font-size: 10px; }
   }
 </style>
 </head>
 <body>
-<div id="hud">
-  <div style="color:#555; font-size:10px; margin-bottom:4px;">SPRAWL</div>
-  <div class="live" id="status">connecting...</div>
-  <div class="count" id="markCount"></div>
-  <div class="updates" id="updateRate"></div>
-</div>
-<div id="controls">
-  <button class="ctrl-btn" id="replay" onclick="triggerReplay()">▶ evolve</button>
-</div>
-<div id="help">click to repel · scroll to zoom · shift+drag to pan · double-click to reset</div>
 <canvas id="c"></canvas>
+
+<button id="toggle-panel" title="Toggle Info Panel">☰</button>
+
+<div id="info-panel">
+  <div class="panel-section">
+    <div class="panel-header">SPRAWL</div>
+    <div class="panel-subtitle">Living Canvas</div>
+  </div>
+  
+  <div class="panel-section" id="current-epoch-section">
+    <!-- Current epoch info populated by JS -->
+  </div>
+  
+  <div class="panel-section">
+    <div class="how-it-works-title">How This Works</div>
+    <div class="how-it-works">
+      An AI curator wakes every hour. It reads its personality and journal — a record of every composition it has ever chosen — then decides what the painting becomes next. It generates a reference image locally, decomposes it into 20,000 dots via Voronoi stippling, and the dots drift to their new positions. The in-between states — those moments where the painting is neither one thing nor the other — are unique to this medium.
+    </div>
+  </div>
+</div>
+
+<div id="timeline">
+  <button id="play-all">▶ Play All</button>
+  <div id="timeline-track">
+    <!-- Epoch markers populated by JS -->
+  </div>
+</div>
+
+<div id="replay-indicator">
+  <span id="replay-text">Replaying</span>
+  <button id="stop-replay">Stop</button>
+</div>
+
 <script>
 const AGENT_ID = '<%= agentId %>';
 const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const statusEl = document.getElementById('status');
-const markCountEl = document.getElementById('markCount');
-const updateRateEl = document.getElementById('updateRate');
+const infoPanel = document.getElementById('info-panel');
+const currentEpochSection = document.getElementById('current-epoch-section');
+const timelineTrack = document.getElementById('timeline-track');
+const playAllBtn = document.getElementById('play-all');
+const replayIndicator = document.getElementById('replay-indicator');
+const replayText = document.getElementById('replay-text');
+const stopReplayBtn = document.getElementById('stop-replay');
+const togglePanelBtn = document.getElementById('toggle-panel');
+
+let epochs = [];
+let epochTargetsCache = {};
+let currentLiveEpoch = null;
+let isReplaying = false;
+let replayAborted = false;
 
 const marks = new Map();
-let updateCount = 0;
-let lastUpdateReset = Date.now();
 
 function resize() {
   canvas.width = window.innerWidth * devicePixelRatio;
@@ -196,7 +410,7 @@ function physicsStep() {
 function render() {
   const w = canvas.width, h = canvas.height;
   physicsStep();
-  ctx.fillStyle = 'rgba(10, 10, 10, 0.15)';
+  ctx.fillStyle = 'rgba(3, 3, 6, 0.15)';
   ctx.fillRect(0, 0, w, h);
   const cx = w / 2 + panX * zoom;
   const cy = h / 2 + panY * zoom;
@@ -216,21 +430,255 @@ function render() {
     ctx.beginPath(); ctx.arc(sx, sy, r * 0.3, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
-  const now = Date.now();
-  if (now - lastUpdateReset > 3000) {
-    const rate = Math.round(updateCount / ((now - lastUpdateReset) / 1000));
-    updateRateEl.textContent = rate > 0 ? `${rate}/s` : '';
-    updateCount = 0;
-    lastUpdateReset = now;
-  }
   requestAnimationFrame(render);
 }
 requestAnimationFrame(render);
 
-// WebSocket
+// Fetch epochs on load
+async function loadEpochs() {
+  try {
+    const res = await fetch('/api/epochs');
+    epochs = await res.json();
+    if (epochs.length > 0) {
+      currentLiveEpoch = epochs[epochs.length - 1];
+      updateCurrentEpochPanel(currentLiveEpoch);
+      renderTimeline();
+      startCountdown();
+    } else {
+      currentEpochSection.innerHTML = '<div class="empty-state">Awaiting first epoch...</div>';
+    }
+  } catch (e) {
+    console.error('Failed to load epochs:', e);
+    currentEpochSection.innerHTML = '<div class="empty-state">Failed to load epochs</div>';
+  }
+}
+
+function updateCurrentEpochPanel(epoch) {
+  const nextEpochTime = new Date(new Date(epoch.timestamp).getTime() + 60 * 60 * 1000);
+  currentEpochSection.innerHTML = `
+    <div class="epoch-number">Epoch ${epoch.epoch_number}</div>
+    <div class="epoch-title">${epoch.reference_prompt || 'Untitled'}</div>
+    ${epoch.note_to_self ? `<div class="journal-entry">"${epoch.note_to_self}"</div>` : ''}
+    ${epoch.painting_title ? `<div style="font-size:11px; color:#4a4a5a; margin-top:12px;">
+      <strong>${epoch.painting_title}</strong>${epoch.painting_artist ? ' by ' + epoch.painting_artist : ''}
+    </div>` : ''}
+    <div class="countdown-label">Next Epoch In</div>
+    <div class="countdown" id="countdown-timer">--:--</div>
+  `;
+}
+
+function startCountdown() {
+  const timer = document.getElementById('countdown-timer');
+  if (!timer || !currentLiveEpoch) return;
+  
+  setInterval(() => {
+    const nextEpochTime = new Date(new Date(currentLiveEpoch.timestamp).getTime() + 60 * 60 * 1000);
+    const now = new Date();
+    const diff = nextEpochTime - now;
+    
+    if (diff <= 0) {
+      timer.textContent = '00:00';
+    } else {
+      const minutes = Math.floor(diff / 60000);
+      const seconds = Math.floor((diff % 60000) / 1000);
+      timer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+  }, 1000);
+}
+
+function renderTimeline() {
+  timelineTrack.innerHTML = '';
+  epochs.forEach((epoch, idx) => {
+    const marker = document.createElement('div');
+    marker.className = 'epoch-marker';
+    if (idx === epochs.length - 1) marker.classList.add('current');
+    marker.textContent = epoch.epoch_number;
+    marker.dataset.epochId = epoch.id;
+    marker.dataset.epochNumber = epoch.epoch_number;
+    
+    const tooltip = document.createElement('div');
+    tooltip.className = 'epoch-tooltip';
+    tooltip.textContent = epoch.reference_prompt || `Epoch ${epoch.epoch_number}`;
+    marker.appendChild(tooltip);
+    
+    marker.addEventListener('click', () => replayEpoch(epoch));
+    timelineTrack.appendChild(marker);
+  });
+}
+
+async function fetchEpochTargets(epochId) {
+  if (epochTargetsCache[epochId]) return epochTargetsCache[epochId];
+  const res = await fetch(`/api/epochs/${epochId}/targets`);
+  const data = await res.json();
+  epochTargetsCache[epochId] = data.targets;
+  return data.targets;
+}
+
+async function replayEpoch(epoch) {
+  if (isReplaying) return;
+  isReplaying = true;
+  replayAborted = false;
+  saveLiveState();
+  
+  replayIndicator.classList.add('active');
+  replayText.textContent = `Replaying Epoch ${epoch.epoch_number}`;
+  
+  // Highlight playing marker
+  document.querySelectorAll('.epoch-marker').forEach(m => m.classList.remove('playing'));
+  document.querySelector(`[data-epoch-id="${epoch.id}"]`)?.classList.add('playing');
+  
+  // Update info panel
+  updateCurrentEpochPanel(epoch);
+  
+  // Fetch targets
+  const targets = await fetchEpochTargets(epoch.id);
+  
+  // Apply targets to marks (create temporary marks if needed)
+  const currentMarkIds = Array.from(marks.keys());
+  
+  // Set targets
+  for (let i = 0; i < Math.min(targets.length, currentMarkIds.length); i++) {
+    const id = currentMarkIds[i];
+    const t = targets[i];
+    const m = marks.get(id);
+    if (!m) continue;
+    
+    const [r,g,b] = hexToRgb(t.color);
+    m.tx = t.x; m.ty = t.y;
+    m.tr = r; m.tg = g; m.tb = b;
+    m.tsize = t.size;
+    m.topacity = t.opacity;
+  }
+  
+  // Hold for 37 seconds (4s settle + 33s hold)
+  await sleep(37000, () => replayAborted);
+  
+  if (!replayAborted) {
+    // Restore live state
+    restoreLiveState();
+    
+    // Restore current epoch display
+    if (currentLiveEpoch) {
+      updateCurrentEpochPanel(currentLiveEpoch);
+    }
+  }
+  
+  // Clear replay UI
+  document.querySelectorAll('.epoch-marker').forEach(m => m.classList.remove('playing'));
+  document.querySelector(`[data-epoch-id="${currentLiveEpoch?.id}"]`)?.classList.add('current');
+  replayIndicator.classList.remove('active');
+  isReplaying = false;
+}
+
+async function replayAll() {
+  if (isReplaying || epochs.length === 0) return;
+  isReplaying = true;
+  replayAborted = false;
+  playAllBtn.classList.add('playing');
+  playAllBtn.textContent = '⏸ Playing...';
+  
+  for (let i = 0; i < epochs.length; i++) {
+    if (replayAborted) break;
+    
+    const epoch = epochs[i];
+    replayIndicator.classList.add('active');
+    replayText.textContent = `Replaying Epoch ${epoch.epoch_number} (${i+1}/${epochs.length})`;
+    
+    // Highlight marker
+    document.querySelectorAll('.epoch-marker').forEach(m => m.classList.remove('playing'));
+    document.querySelector(`[data-epoch-id="${epoch.id}"]`)?.classList.add('playing');
+    
+    // Update panel
+    updateCurrentEpochPanel(epoch);
+    
+    // Fetch and apply targets
+    const targets = await fetchEpochTargets(epoch.id);
+    const currentMarkIds = Array.from(marks.keys());
+    for (let j = 0; j < Math.min(targets.length, currentMarkIds.length); j++) {
+      const id = currentMarkIds[j];
+      const t = targets[j];
+      const m = marks.get(id);
+      if (!m) continue;
+      const [r,g,b] = hexToRgb(t.color);
+      m.tx = t.x; m.ty = t.y;
+      m.tr = r; m.tg = g; m.tb = b;
+      m.tsize = t.size;
+      m.topacity = t.opacity;
+    }
+    
+    // Hold 37s
+    await sleep(37000, () => replayAborted);
+  }
+  
+  if (!replayAborted) {
+    restoreLiveState();
+    if (currentLiveEpoch) updateCurrentEpochPanel(currentLiveEpoch);
+  }
+  
+  document.querySelectorAll('.epoch-marker').forEach(m => m.classList.remove('playing'));
+  document.querySelector(`[data-epoch-id="${currentLiveEpoch?.id}"]`)?.classList.add('current');
+  replayIndicator.classList.remove('active');
+  playAllBtn.classList.remove('playing');
+  playAllBtn.textContent = '▶ Play All';
+  isReplaying = false;
+}
+
+// Store live state for restore after replay
+let liveTargets = new Map();
+function saveLiveState() {
+  for (const [id, m] of marks) {
+    liveTargets.set(id, { tx: m.tx, ty: m.ty, tr: m.tr, tg: m.tg, tb: m.tb, tsize: m.tsize, topacity: m.topacity });
+  }
+}
+function restoreLiveState() {
+  for (const [id, m] of marks) {
+    const saved = liveTargets.get(id);
+    if (saved) {
+      m.tx = saved.tx; m.ty = saved.ty;
+      m.tr = saved.tr; m.tg = saved.tg; m.tb = saved.tb;
+      m.tsize = saved.tsize; m.topacity = saved.topacity;
+    }
+  }
+}
+
+function sleep(ms, abortCheck) {
+  return new Promise(resolve => {
+    const interval = setInterval(() => {
+      if (abortCheck && abortCheck()) { clearInterval(interval); resolve(); }
+    }, 200);
+    setTimeout(() => { clearInterval(interval); resolve(); }, ms);
+  });
+}
+
+// Event listeners
+togglePanelBtn.addEventListener('click', () => {
+  infoPanel.classList.toggle('collapsed');
+  togglePanelBtn.textContent = infoPanel.classList.contains('collapsed') ? '☰' : '✕';
+});
+
+playAllBtn.addEventListener('click', () => {
+  if (isReplaying) {
+    replayAborted = true;
+  } else {
+    saveLiveState();
+    replayAll();
+  }
+});
+
+stopReplayBtn.addEventListener('click', () => {
+  replayAborted = true;
+  restoreLiveState();
+  if (currentLiveEpoch) updateCurrentEpochPanel(currentLiveEpoch);
+  document.querySelectorAll('.epoch-marker').forEach(m => m.classList.remove('playing'));
+  document.querySelector(`[data-epoch-id="${currentLiveEpoch?.id}"]`)?.classList.add('current');
+  replayIndicator.classList.remove('active');
+  playAllBtn.classList.remove('playing');
+  playAllBtn.textContent = '▶ Play All';
+  isReplaying = false;
+});
+
+// WebSocket connection
 function connect() {
-  statusEl.textContent = 'connecting...';
-  statusEl.style.color = '#ff6';
   const ws = new WebSocket(WS_URL);
   
   function makeMark(m) {
@@ -239,7 +687,7 @@ function connect() {
     return { x:m.x, y:m.y, r,g,b, color:m.color, size:s, opacity:o, tx:m.x, ty:m.y, tr:r, tg:g, tb:b, tsize:s, topacity:o };
   }
   
-  ws.onopen = () => { statusEl.textContent = '● live'; statusEl.style.color = '#4f4'; };
+  ws.onopen = () => { console.log('WebSocket connected'); };
   
   ws.onmessage = (e) => {
     const data = JSON.parse(e.data);
@@ -249,7 +697,7 @@ function connect() {
         if (AGENT_ID && m.agentId !== AGENT_ID) continue;
         marks.set(m.id, makeMark(m));
       }
-      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+      // Auto-frame
       if (marks.size > 0) {
         let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
         for (const m of marks.values()) {
@@ -261,13 +709,13 @@ function connect() {
         panX = -(minX + maxX) / 2;
         panY = -(minY + maxY) / 2;
       }
+      // Save initial live state
+      saveLiveState();
     }
     else if (data.type === 'mark:created') {
       const m = data.mark;
       if (AGENT_ID && m.agentId !== AGENT_ID) return;
       marks.set(m.id, makeMark(m));
-      updateCount++;
-      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
     }
     else if (data.type === 'mark:updated') {
       const m = data.mark;
@@ -279,45 +727,47 @@ function connect() {
         existing.tr = r; existing.tg = g; existing.tb = b;
         existing.tsize = m.size || existing.tsize;
         existing.topacity = m.effectiveOpacity || m.opacity || existing.topacity;
+        // Update live state too (unless replaying)
+        if (!isReplaying) {
+          liveTargets.set(m.id, { tx: m.x, ty: m.y, tr: r, tg: g, tb: b, tsize: m.size || existing.tsize, topacity: m.effectiveOpacity || m.opacity || existing.topacity });
+        }
       } else {
         marks.set(m.id, makeMark(m));
       }
-      updateCount++;
     }
     else if (data.type === 'mark:deleted') {
       marks.delete(data.id);
       displacements.delete(data.id);
-      updateCount++;
-      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+      liveTargets.delete(data.id);
     }
     else if (data.type === 'marks:cleared') {
-      for (const [id] of marks) marks.delete(id);
-      markCountEl.textContent = marks.size.toLocaleString() + ' dots';
+      marks.clear();
+      liveTargets.clear();
     }
   };
-  ws.onclose = () => { statusEl.textContent = '● reconnecting...'; statusEl.style.color = '#f44'; setTimeout(connect, 3000); };
+  ws.onclose = () => { console.log('WebSocket disconnected, reconnecting...'); setTimeout(connect, 3000); };
   ws.onerror = () => ws.close();
 }
 connect();
 
-async function triggerReplay() {
-  const btn = document.getElementById('replay');
-  btn.textContent = '⏳ evolving...';
-  btn.className = 'ctrl-btn running';
+// Load epochs on start
+loadEpochs();
+
+// Periodically refresh epochs (catch new curator transitions)
+setInterval(async () => {
+  if (isReplaying) return;
   try {
-    const r = await fetch('/api/replay', { method: 'POST' });
-    const data = await r.json();
-    if (data.error) {
-      btn.textContent = '⏳ running';
-      setTimeout(() => { btn.textContent = '▶ evolve'; btn.className = 'ctrl-btn'; }, 3000);
-      return;
+    const res = await fetch('/api/epochs');
+    const newEpochs = await res.json();
+    if (newEpochs.length > epochs.length) {
+      epochs = newEpochs;
+      currentLiveEpoch = epochs[epochs.length - 1];
+      updateCurrentEpochPanel(currentLiveEpoch);
+      renderTimeline();
+      saveLiveState();
     }
-    setTimeout(() => { btn.textContent = '▶ evolve'; btn.className = 'ctrl-btn'; }, 180000);
-  } catch (e) {
-    btn.textContent = '▶ evolve';
-    btn.className = 'ctrl-btn';
-  }
-}
+  } catch (e) {}
+}, 60000);
 </script>
 </body>
 </html>

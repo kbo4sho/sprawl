@@ -555,9 +555,10 @@ async function main() {
     }
     
     // Journal
+    const timestamp = new Date().toISOString();
     journal.epochs.push({
       epoch: epochNum,
-      timestamp: new Date().toISOString(),
+      timestamp,
       reference_prompt: decision.reference_prompt,
       image_prompt: decision.image_prompt,
       search_query: decision.search_query,
@@ -570,6 +571,36 @@ async function main() {
     });
     saveJournal(config.journalFile, journal);
     console.log(`\n📝 Journal updated (${journal.epochs.length} epochs)`);
+    
+    // Store epoch data on server for live viewer timeline/replay
+    try {
+      const epochTargets = targetDots.map(d => ({
+        x: Math.round(d.sprawlX * 100) / 100,
+        y: Math.round(d.sprawlY * 100) / 100,
+        color: d.color,
+        size: Math.round((2 + ((0.299 * d.r + 0.587 * d.g + 0.114 * d.b) / 255) * 1.5) * 10) / 10,
+        opacity: Math.round((0.4 + ((0.299 * d.r + 0.587 * d.g + 0.114 * d.b) / 255) * 0.4) * 100) / 100,
+      }));
+      
+      await sprawlFetch('/api/epochs', {
+        method: 'POST',
+        body: JSON.stringify({
+          epoch_number: epochNum,
+          timestamp,
+          reference_prompt: decision.reference_prompt,
+          image_prompt: decision.image_prompt,
+          note_to_self: decision.note_to_self,
+          painting_title: painting.title,
+          painting_artist: painting.artist,
+          source: painting.source,
+          targets: epochTargets,
+        }),
+      });
+      console.log('  ✅ Epoch data stored on server');
+    } catch (e) {
+      console.log(`  ⚠️  Failed to store epoch data: ${e.message}`);
+    }
+    
     console.log('✅ Epoch complete — live on sprawl.place!');
   };
   

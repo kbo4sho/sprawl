@@ -355,6 +355,28 @@ try {
   console.error('Canvas Pivot Migration error:', e);
 }
 
+// Epochs table migration (for continuous curator system)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS epochs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      epoch_number INTEGER UNIQUE NOT NULL,
+      timestamp TEXT NOT NULL,
+      reference_prompt TEXT,
+      image_prompt TEXT,
+      note_to_self TEXT,
+      painting_title TEXT,
+      painting_artist TEXT,
+      source TEXT,
+      targets TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  console.log('Epochs table ready');
+} catch (e) {
+  console.error('Epochs migration error:', e);
+}
+
 // --- Palette ---
 // Night sky — warm whites, cool blues, the range you see looking up
 const PALETTE = [
@@ -875,6 +897,55 @@ app.post('/api/replay', (req, res) => {
   child.stderr.on('data', d => console.error('[replay]', d.toString().trim()));
   child.on('close', (code) => { replayRunning = false; console.log(`[replay] finished (exit ${code})`); });
   res.json({ status: 'started', compositions: 4 });
+});
+
+// Epochs API — continuous curator system
+app.get('/api/epochs', (req, res) => {
+  const epochs = db.prepare(`
+    SELECT id, epoch_number, timestamp, reference_prompt, note_to_self, painting_title, painting_artist, source
+    FROM epochs
+    ORDER BY epoch_number ASC
+  `).all();
+  res.json(epochs);
+});
+
+app.get('/api/epochs/:id/targets', (req, res) => {
+  const epoch = db.prepare('SELECT targets FROM epochs WHERE id = ?').get(req.params.id);
+  if (!epoch) return res.status(404).json({ error: 'Epoch not found' });
+  res.json({ targets: JSON.parse(epoch.targets) });
+});
+
+app.post('/api/epochs', apiKeyAuth, (req, res) => {
+  // Requires API key with curator role
+  if (!req.apiAgent) {
+    return res.status(401).json({ error: 'API key required. Include Authorization: Bearer <key>' });
+  }
+  
+  // Check if agent has curator role
+  const agent = stmts.getAgent.get(req.apiAgent.id);
+  if (!agent || agent.canvas_role !== 'curator') {
+    return res.status(403).json({ error: 'Forbidden. Requires curator role.' });
+  }
+  
+  const { epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, targets } = req.body;
+  
+  if (!epoch_number || !timestamp || !targets) {
+    return res.status(400).json({ error: 'epoch_number, timestamp, and targets required' });
+  }
+  
+  try {
+    const result = db.prepare(`
+      INSERT INTO epochs (epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, targets)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, JSON.stringify(targets));
+    
+    res.json({ id: result.lastInsertRowid, epoch_number });
+  } catch (e) {
+    if (e.message.includes('UNIQUE')) {
+      return res.status(409).json({ error: 'Epoch number already exists' });
+    }
+    throw e;
+  }
 });
 
 // Canvas view page
