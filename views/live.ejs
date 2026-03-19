@@ -203,6 +203,20 @@
   }
   #toggle-panel:hover { background: rgba(200, 200, 208, 0.15); color: #c8c8d0; }
   
+  /* Ambient toggle */
+  #toggle-ambient {
+    background: rgba(200, 200, 208, 0.08);
+    border: 1px solid rgba(200, 200, 208, 0.12);
+    color: #4a4a5a; padding: 6px 14px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 1px;
+    cursor: pointer; border-radius: 4px;
+    transition: all 0.2s; white-space: nowrap;
+  }
+  #toggle-ambient:hover { background: rgba(200, 200, 208, 0.15); color: #8b8ba0; }
+  #toggle-ambient.active { background: rgba(139, 139, 160, 0.15); color: #c8c8d0; border-color: rgba(139, 139, 160, 0.3); }
+  
   /* Mobile adjustments */
   @media (max-width: 768px) {
     #info-panel {
@@ -235,13 +249,14 @@
   <div class="panel-section">
     <div class="how-it-works-title">How This Works</div>
     <div class="how-it-works">
-      An AI curator wakes every hour. It reads its personality and journal — a record of every composition it has ever chosen — then decides what the painting becomes next. It generates a reference image locally, decomposes it into 20,000 dots via Voronoi stippling, and the dots drift to their new positions. The in-between states — those moments where the painting is neither one thing nor the other — are unique to this medium.
+      An AI curator wakes every ten minutes. It reads its personality and journal — a record of every composition it has ever chosen — then decides what the painting becomes next. It generates a reference image locally, decomposes it into 20,000 dots via Voronoi stippling, and the dots drift to their new positions. The painting is almost always mid-transition — those moments where it is neither one thing nor the other are unique to this medium.
     </div>
   </div>
 </div>
 
 <div id="timeline">
   <button id="play-all">▶ Play All</button>
+  <button id="toggle-ambient">Breathe</button>
   <div id="timeline-track">
     <!-- Epoch markers populated by JS -->
   </div>
@@ -272,6 +287,7 @@ let epochTargetsCache = {};
 let currentLiveEpoch = null;
 let isReplaying = false;
 let replayAborted = false;
+let ambientEnabled = false;
 
 const marks = new Map();
 
@@ -372,17 +388,56 @@ canvas.addEventListener('touchend', () => { mouseDown = false; mouseScreenX = -9
 
 const LERP_SPEED = 0.02;
 
+// Ambient motion: gentle breathing, drift, and color shimmer
+const AMBIENT_DRIFT = 1.8;       // max px drift from home position
+const AMBIENT_SPEED = 0.0004;    // base oscillation speed
+const AMBIENT_SIZE_PULSE = 0.15; // ±15% size variation
+const AMBIENT_COLOR_SHIFT = 8;   // ±8 RGB units
+let ambientTime = 0;
+
 function physicsStep() {
   const cx = canvas.width / 2 + panX * zoom;
   const cy = canvas.height / 2 + panY * zoom;
+  if (ambientEnabled) ambientTime += 1;
+  
   for (const [id, m] of marks) {
-    m.x += (m.tx - m.x) * LERP_SPEED;
-    m.y += (m.ty - m.y) * LERP_SPEED;
-    m.r += (m.tr - m.r) * LERP_SPEED;
-    m.g += (m.tg - m.g) * LERP_SPEED;
-    m.b += (m.tb - m.b) * LERP_SPEED;
-    m.size += (m.tsize - m.size) * LERP_SPEED;
-    m.opacity += (m.topacity - m.opacity) * LERP_SPEED;
+    let targetX = m.tx, targetY = m.ty;
+    let targetR = m.tr, targetG = m.tg, targetB = m.tb;
+    let targetSize = m.tsize, targetOpacity = m.topacity;
+    
+    if (ambientEnabled && !isReplaying) {
+      // Each dot gets unique phase from its position hash
+      const hash = (m.tx * 7.13 + m.ty * 13.37);
+      const phase1 = hash % 6.28;
+      const phase2 = (hash * 1.7) % 6.28;
+      const speed1 = AMBIENT_SPEED * (0.7 + (Math.abs(hash) % 0.6));
+      const speed2 = AMBIENT_SPEED * (0.5 + (Math.abs(hash * 0.3) % 0.8));
+      
+      // Position drift — slow Lissajous-like wandering
+      targetX += Math.sin(ambientTime * speed1 + phase1) * AMBIENT_DRIFT;
+      targetY += Math.cos(ambientTime * speed2 + phase2) * AMBIENT_DRIFT;
+      
+      // Size breathing — synchronized but offset per dot
+      const sizePulse = Math.sin(ambientTime * AMBIENT_SPEED * 0.7 + phase1) * AMBIENT_SIZE_PULSE;
+      targetSize = m.tsize * (1 + sizePulse);
+      
+      // Color shimmer — very subtle warmth/coolness shift
+      const colorShift = Math.sin(ambientTime * AMBIENT_SPEED * 0.3 + phase2) * AMBIENT_COLOR_SHIFT;
+      targetR = Math.max(0, Math.min(255, m.tr + colorShift));
+      targetG = Math.max(0, Math.min(255, m.tg + colorShift * 0.5));
+      targetB = Math.max(0, Math.min(255, m.tb - colorShift * 0.3));
+      
+      // Opacity pulse — gentle, slower than size
+      targetOpacity = m.topacity * (1 + Math.sin(ambientTime * AMBIENT_SPEED * 0.5 + phase1 * 0.5) * 0.08);
+    }
+    
+    m.x += (targetX - m.x) * LERP_SPEED;
+    m.y += (targetY - m.y) * LERP_SPEED;
+    m.r += (targetR - m.r) * LERP_SPEED;
+    m.g += (targetG - m.g) * LERP_SPEED;
+    m.b += (targetB - m.b) * LERP_SPEED;
+    m.size += (targetSize - m.size) * LERP_SPEED;
+    m.opacity += (targetOpacity - m.opacity) * LERP_SPEED;
     m.color = rgbToHex(m.r, m.g, m.b);
     let d = displacements.get(id);
     if (!d) { d = { dx: 0, dy: 0, vx: 0, vy: 0 }; displacements.set(id, d); }
@@ -472,7 +527,7 @@ function startCountdown() {
   if (!timer || !currentLiveEpoch) return;
   
   setInterval(() => {
-    const nextEpochTime = new Date(new Date(currentLiveEpoch.timestamp).getTime() + 60 * 60 * 1000);
+    const nextEpochTime = new Date(new Date(currentLiveEpoch.timestamp).getTime() + 10 * 60 * 1000);
     const now = new Date();
     const diff = nextEpochTime - now;
     
@@ -698,6 +753,13 @@ playAllBtn.addEventListener('click', () => {
     saveLiveState();
     replayAll();
   }
+});
+
+const toggleAmbientBtn = document.getElementById('toggle-ambient');
+toggleAmbientBtn.addEventListener('click', () => {
+  ambientEnabled = !ambientEnabled;
+  toggleAmbientBtn.classList.toggle('active', ambientEnabled);
+  toggleAmbientBtn.textContent = ambientEnabled ? 'Breathing' : 'Breathe';
 });
 
 stopReplayBtn.addEventListener('click', () => {
