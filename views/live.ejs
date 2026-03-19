@@ -514,6 +514,73 @@ async function fetchEpochTargets(epochId) {
   return data.targets;
 }
 
+// Nearest-neighbor matching: assigns each mark to its closest target
+function matchMarksToTargets(markEntries, targets) {
+  const assignments = new Map(); // markId → target index
+  const used = new Set();
+  
+  // Build grid for spatial lookup
+  const gridSize = 50;
+  const gridKey = (x, y) => `${Math.floor(x / gridSize)},${Math.floor(y / gridSize)}`;
+  const targetGrid = {};
+  targets.forEach((t, i) => {
+    const k = gridKey(t.x, t.y);
+    if (!targetGrid[k]) targetGrid[k] = [];
+    targetGrid[k].push(i);
+  });
+  
+  for (const [id, m] of markEntries) {
+    let bestJ = -1, bestDist = Infinity;
+    const gx = Math.floor(m.x / gridSize), gy = Math.floor(m.y / gridSize);
+    
+    // Check nearby grid cells first
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -3; dy <= 3; dy++) {
+        const bucket = targetGrid[`${gx+dx},${gy+dy}`];
+        if (!bucket) continue;
+        for (const j of bucket) {
+          if (used.has(j)) continue;
+          const ddx = m.x - targets[j].x, ddy = m.y - targets[j].y;
+          const dist = ddx*ddx + ddy*ddy;
+          if (dist < bestDist) { bestDist = dist; bestJ = j; }
+        }
+      }
+    }
+    
+    // Fallback: scan all
+    if (bestJ === -1) {
+      for (let j = 0; j < targets.length; j++) {
+        if (used.has(j)) continue;
+        const ddx = m.x - targets[j].x, ddy = m.y - targets[j].y;
+        const dist = ddx*ddx + ddy*ddy;
+        if (dist < bestDist) { bestDist = dist; bestJ = j; }
+      }
+    }
+    
+    if (bestJ !== -1) {
+      assignments.set(id, bestJ);
+      used.add(bestJ);
+    }
+  }
+  return assignments;
+}
+
+function applyTargetsToMarks(targets) {
+  const markEntries = Array.from(marks.entries());
+  const assignments = matchMarksToTargets(markEntries, targets);
+  
+  for (const [id, targetIdx] of assignments) {
+    const m = marks.get(id);
+    const t = targets[targetIdx];
+    if (!m || !t) continue;
+    const [r,g,b] = hexToRgb(t.color);
+    m.tx = t.x; m.ty = t.y;
+    m.tr = r; m.tg = g; m.tb = b;
+    m.tsize = t.size;
+    m.topacity = t.opacity;
+  }
+}
+
 async function replayEpoch(epoch) {
   if (isReplaying) return;
   isReplaying = true;
@@ -530,37 +597,16 @@ async function replayEpoch(epoch) {
   // Update info panel
   updateCurrentEpochPanel(epoch);
   
-  // Fetch targets
+  // Fetch targets and apply with spatial matching
   const targets = await fetchEpochTargets(epoch.id);
-  
-  // Apply targets to marks (create temporary marks if needed)
-  const currentMarkIds = Array.from(marks.keys());
-  
-  // Set targets
-  for (let i = 0; i < Math.min(targets.length, currentMarkIds.length); i++) {
-    const id = currentMarkIds[i];
-    const t = targets[i];
-    const m = marks.get(id);
-    if (!m) continue;
-    
-    const [r,g,b] = hexToRgb(t.color);
-    m.tx = t.x; m.ty = t.y;
-    m.tr = r; m.tg = g; m.tb = b;
-    m.tsize = t.size;
-    m.topacity = t.opacity;
-  }
+  applyTargetsToMarks(targets);
   
   // Hold for 37 seconds (4s settle + 33s hold)
   await sleep(37000, () => replayAborted);
   
   if (!replayAborted) {
-    // Restore live state
     restoreLiveState();
-    
-    // Restore current epoch display
-    if (currentLiveEpoch) {
-      updateCurrentEpochPanel(currentLiveEpoch);
-    }
+    if (currentLiveEpoch) updateCurrentEpochPanel(currentLiveEpoch);
   }
   
   // Clear replay UI
@@ -591,20 +637,9 @@ async function replayAll() {
     // Update panel
     updateCurrentEpochPanel(epoch);
     
-    // Fetch and apply targets
+    // Fetch and apply targets with spatial matching
     const targets = await fetchEpochTargets(epoch.id);
-    const currentMarkIds = Array.from(marks.keys());
-    for (let j = 0; j < Math.min(targets.length, currentMarkIds.length); j++) {
-      const id = currentMarkIds[j];
-      const t = targets[j];
-      const m = marks.get(id);
-      if (!m) continue;
-      const [r,g,b] = hexToRgb(t.color);
-      m.tx = t.x; m.ty = t.y;
-      m.tr = r; m.tg = g; m.tb = b;
-      m.tsize = t.size;
-      m.topacity = t.opacity;
-    }
+    applyTargetsToMarks(targets);
     
     // Hold 37s
     await sleep(37000, () => replayAborted);
