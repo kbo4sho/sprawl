@@ -386,9 +386,7 @@ canvas.addEventListener('touchmove', e => {
 }, { passive: true });
 canvas.addEventListener('touchend', () => { mouseDown = false; mouseScreenX = -9999; });
 
-let LERP_SPEED = 0.02;
-const LERP_SPEED_NORMAL = 0.02;
-const LERP_SPEED_REPLAY = 0.10;
+const LERP_SPEED = 0.02;
 
 // Ambient motion: gentle breathing, drift, and color shimmer
 const AMBIENT_DRIFT = 1.8;       // max px drift from home position
@@ -654,15 +652,13 @@ async function replayEpoch(epoch) {
   // Update info panel
   updateCurrentEpochPanel(epoch);
   
-  // Fetch targets and apply with spatial matching (fast lerp for replay)
-  LERP_SPEED = LERP_SPEED_REPLAY;
+  // Fetch targets and apply with spatial matching
   const targets = await fetchEpochTargets(epoch.id);
   applyTargetsToMarks(targets);
   
-  // Hold for 8 seconds (fast settle + brief hold)
-  await sleep(8000, () => replayAborted);
+  // Settle (3s) + brief hold (4s)
+  await sleep(7000, () => replayAborted);
   
-  LERP_SPEED = LERP_SPEED_NORMAL;
   if (!replayAborted) {
     restoreLiveState();
     if (currentLiveEpoch) updateCurrentEpochPanel(currentLiveEpoch);
@@ -696,16 +692,14 @@ async function replayAll() {
     // Update panel
     updateCurrentEpochPanel(epoch);
     
-    // Fetch and apply targets with spatial matching (fast lerp for replay)
-    LERP_SPEED = LERP_SPEED_REPLAY;
+    // Fetch and apply targets with spatial matching
     const targets = await fetchEpochTargets(epoch.id);
     applyTargetsToMarks(targets);
     
-    // Hold 8s per epoch during replay
-    await sleep(8000, () => replayAborted);
+    // Settle + brief hold per epoch
+    await sleep(7000, () => replayAborted);
   }
   
-  LERP_SPEED = LERP_SPEED_NORMAL;
   if (!replayAborted) {
     restoreLiveState();
     if (currentLiveEpoch) updateCurrentEpochPanel(currentLiveEpoch);
