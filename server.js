@@ -934,16 +934,22 @@ app.post('/api/epochs', apiKeyAuth, (req, res) => {
   }
   
   try {
-    const result = db.prepare(`
-      INSERT INTO epochs (epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, targets)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, JSON.stringify(targets));
-    
-    res.json({ id: result.lastInsertRowid, epoch_number });
-  } catch (e) {
-    if (e.message.includes('UNIQUE')) {
-      return res.status(409).json({ error: 'Epoch number already exists' });
+    // Upsert: replace if epoch_number already exists
+    const existing = db.prepare('SELECT id FROM epochs WHERE epoch_number = ?').get(epoch_number);
+    if (existing) {
+      db.prepare(`
+        UPDATE epochs SET timestamp=?, reference_prompt=?, image_prompt=?, note_to_self=?, painting_title=?, painting_artist=?, source=?, targets=?
+        WHERE epoch_number=?
+      `).run(timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, JSON.stringify(targets), epoch_number);
+      res.json({ id: existing.id, epoch_number, updated: true });
+    } else {
+      const result = db.prepare(`
+        INSERT INTO epochs (epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, targets)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(epoch_number, timestamp, reference_prompt, image_prompt, note_to_self, painting_title, painting_artist, source, JSON.stringify(targets));
+      res.json({ id: result.lastInsertRowid, epoch_number });
     }
+  } catch (e) {
     throw e;
   }
 });
