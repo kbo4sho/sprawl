@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sprawl — Live Canvas</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0a; overflow: hidden; font-family: monospace; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #hud {
+    position: fixed; top: 16px; left: 16px; color: #888; font-size: 12px;
+    pointer-events: none; z-index: 10; line-height: 1.6;
+  }
+  #hud .live { color: #4f4; }
+  #hud .count { color: #aaa; }
+  #hud .updates { color: #ff6; }
+  #replay {
+    position: fixed; bottom: 32px; right: 32px; z-index: 10;
+    background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.2);
+    padding: 14px 28px; font-family: monospace; font-size: 16px; cursor: pointer;
+    border-radius: 6px; backdrop-filter: blur(8px); transition: all 0.2s;
+    letter-spacing: 1px;
+  }
+  #replay:hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4); }
+  #replay:active { transform: scale(0.96); }
+  #replay.running { color: #ff6; border-color: #ff6; pointer-events: none; }
+  #replay.done { color: #4f4; border-color: #4f4; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div>SPRAWL LIVE VIEWER</div>
+  <div class="live" id="status">connecting...</div>
+  <div class="count" id="markCount">marks: —</div>
+  <div class="updates" id="updateRate">updates: —</div>
+</div>
+<button id="replay" onclick="triggerReplay()">▶ REPLAY</button>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const markCountEl = document.getElementById('markCount');
+const updateRateEl = document.getElementById('updateRate');
+
+// State
+// Each mark: {x, y, color, size, opacity, tx, ty, tcolor, tsize, topacity}
+// x/y = current render position, tx/ty = target (from server)
+const marks = new Map();
+let updateCount = 0;
+let lastUpdateReset = Date.now();
+
+// Canvas sizing
+function resize() {
+  canvas.width = window.innerWidth * devicePixelRatio;
+  canvas.height = window.innerHeight * devicePixelRatio;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Pan/zoom
+let panX = 0, panY = 0, zoom = 1;
+let dragging = false, dragStartX, dragStartY, panStartX, panStartY;
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  // Zoom toward mouse
+  const mx = e.clientX * devicePixelRatio;
+  const my = e.clientY * devicePixelRatio;
+  const wx = (mx - canvas.width/2) / zoom - panX;
+  const wy = (my - canvas.height/2) / zoom - panY;
+  zoom *= factor;
+  zoom = Math.max(0.1, Math.min(10, zoom));
+  panX = (mx - canvas.width/2) / zoom - wx;
+  panY = (my - canvas.height/2) / zoom - wy;
+}, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  if (e.shiftKey || e.button === 1) { // shift+click or middle button = pan
+    dragging = true;
+    dragStartX = e.clientX * devicePixelRatio;
+    dragStartY = e.clientY * devicePixelRatio;
+    panStartX = panX; panStartY = panY;
+  }
+  // bare click = repel (handled in repel physics section)
+});
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.clientX * devicePixelRatio - dragStartX;
+  const dy = e.clientY * devicePixelRatio - dragStartY;
+  panX = panStartX + dx / zoom;
+  panY = panStartY + dy / zoom;
+});
+canvas.addEventListener('mouseup', () => dragging = false);
+canvas.addEventListener('mouseleave', () => dragging = false);
+
+// Touch support
+let lastTouchDist = 0;
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    // Single finger = repel (handled in repel physics section)
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    lastTouchDist = Math.sqrt(dx*dx + dy*dy);
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 2) {
+    const dx = e.touches[0].clientX - e.touches[1].clientX;
+    const dy = e.touches[0].clientY - e.touches[1].clientY;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    if (lastTouchDist > 0) zoom *= dist / lastTouchDist;
+    zoom = Math.max(0.1, Math.min(10, zoom));
+    lastTouchDist = dist;
+  }
+}, { passive: true });
+canvas.addEventListener('touchend', () => { dragging = false; lastTouchDist = 0; });
+
+// Double-click to reset view
+canvas.addEventListener('dblclick', () => { panX = 0; panY = 0; zoom = 1; });
+
+// Color utils
+function hexToRgb(hex) {
+  const v = parseInt(hex.slice(1), 16);
+  return [(v>>16)&255, (v>>8)&255, v&255];
+}
+function rgbToHex(r,g,b) {
+  return '#'+((1<<24)+(Math.round(r)<<16)+(Math.round(g)<<8)+Math.round(b)).toString(16).slice(1);
+}
+
+// Repel physics
+const REPEL_RADIUS = 120;     // pixels on screen
+const REPEL_STRENGTH = 800;   // force multiplier
+const RETURN_SPEED = 0.03;    // how fast dots drift back (0-1)
+const DAMPING = 0.92;         // velocity decay
+
+// Track displacement per dot: id → {dx, dy, vx, vy}
+const displacements = new Map();
+let mouseScreenX = -9999, mouseScreenY = -9999;
+let mouseDown = false;
+
+canvas.addEventListener('mousedown', e => {
+  if (e.button === 0 && !e.shiftKey) mouseDown = true;
+});
+canvas.addEventListener('mouseup', e => {
+  if (e.button === 0) mouseDown = false;
+});
+canvas.addEventListener('mousemove', e => {
+  mouseScreenX = e.clientX * devicePixelRatio;
+  mouseScreenY = e.clientY * devicePixelRatio;
+});
+canvas.addEventListener('mouseleave', () => { mouseDown = false; mouseScreenX = -9999; });
+
+// Touch repel
+canvas.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    mouseDown = true;
+    mouseScreenX = e.touches[0].clientX * devicePixelRatio;
+    mouseScreenY = e.touches[0].clientY * devicePixelRatio;
+  }
+}, { passive: true });
+canvas.addEventListener('touchmove', e => {
+  if (e.touches.length === 1 && mouseDown) {
+    mouseScreenX = e.touches[0].clientX * devicePixelRatio;
+    mouseScreenY = e.touches[0].clientY * devicePixelRatio;
+  }
+}, { passive: true });
+canvas.addEventListener('touchend', () => { mouseDown = false; mouseScreenX = -9999; });
+
+const LERP_SPEED = 0.02; // how fast dots drift to target (0-1 per frame, ~60fps)
+
+function physicsStep() {
+  const cx = canvas.width / 2 + panX * zoom;
+  const cy = canvas.height / 2 + panY * zoom;
+  
+  for (const [id, m] of marks) {
+    // Lerp position/color/size/opacity toward target
+    m.x += (m.tx - m.x) * LERP_SPEED;
+    m.y += (m.ty - m.y) * LERP_SPEED;
+    m.r += (m.tr - m.r) * LERP_SPEED;
+    m.g += (m.tg - m.g) * LERP_SPEED;
+    m.b += (m.tb - m.b) * LERP_SPEED;
+    m.size += (m.tsize - m.size) * LERP_SPEED;
+    m.opacity += (m.topacity - m.opacity) * LERP_SPEED;
+    m.color = rgbToHex(m.r, m.g, m.b);
+    
+    let d = displacements.get(id);
+    if (!d) { d = { dx: 0, dy: 0, vx: 0, vy: 0 }; displacements.set(id, d); }
+    
+    // Screen position of this dot (home + displacement)
+    const sx = cx + (m.x + d.dx) * zoom;
+    const sy = cy + (m.y + d.dy) * zoom;
+    
+    // Repel from mouse
+    if (mouseDown) {
+      const ddx = sx - mouseScreenX;
+      const ddy = sy - mouseScreenY;
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+      if (dist < REPEL_RADIUS && dist > 1) {
+        const force = REPEL_STRENGTH * (1 - dist / REPEL_RADIUS) / dist;
+        d.vx += (ddx * force) / zoom;
+        d.vy += (ddy * force) / zoom;
+      }
+    }
+    
+    // Spring back to home
+    d.vx -= d.dx * RETURN_SPEED;
+    d.vy -= d.dy * RETURN_SPEED;
+    
+    // Damping
+    d.vx *= DAMPING;
+    d.vy *= DAMPING;
+    
+    // Integrate
+    d.dx += d.vx;
+    d.dy += d.vy;
+    
+    // Kill tiny motion
+    if (Math.abs(d.dx) < 0.01 && Math.abs(d.dy) < 0.01 && Math.abs(d.vx) < 0.001) {
+      d.dx = 0; d.dy = 0; d.vx = 0; d.vy = 0;
+    }
+  }
+}
+
+// Render
+function render() {
+  const w = canvas.width, h = canvas.height;
+  
+  physicsStep();
+  
+  // Fade trail effect — previous frame lingers
+  ctx.fillStyle = 'rgba(10, 10, 10, 0.15)';
+  ctx.fillRect(0, 0, w, h);
+  
+  const cx = w / 2 + panX * zoom;
+  const cy = h / 2 + panY * zoom;
+  
+  for (const [id, m] of marks) {
+    const d = displacements.get(id) || { dx: 0, dy: 0 };
+    const sx = cx + (m.x + d.dx) * zoom;
+    const sy = cy + (m.y + d.dy) * zoom;
+    
+    // Skip off-screen
+    if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) continue;
+    
+    const r = Math.max(1, m.size * zoom * 0.5);
+    
+    // Glow
+    ctx.globalAlpha = m.opacity * 0.3;
+    ctx.fillStyle = m.color;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Core
+    ctx.globalAlpha = m.opacity * 0.8;
+    ctx.beginPath();
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Hot center
+    ctx.globalAlpha = m.opacity * 0.5;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(sx, sy, r * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  
+  ctx.globalAlpha = 1;
+  
+  // HUD
+  const now = Date.now();
+  if (now - lastUpdateReset > 3000) {
+    const rate = Math.round(updateCount / ((now - lastUpdateReset) / 1000));
+    updateRateEl.textContent = `updates: ${rate}/s`;
+    updateCount = 0;
+    lastUpdateReset = now;
+  }
+  
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+// WebSocket
+function connect() {
+  statusEl.textContent = 'connecting...';
+  statusEl.style.color = '#ff6';
+  
+  const ws = new WebSocket('wss://sprawl.place');
+  
+  ws.onopen = () => {
+    statusEl.textContent = '● LIVE';
+    statusEl.style.color = '#4f4';
+  };
+  
+  function makeMark(m) {
+    const [r,g,b] = hexToRgb(m.color);
+    const s = m.size || 5, o = m.effectiveOpacity || m.opacity || 0.7;
+    return { x:m.x, y:m.y, r,g,b, color:m.color, size:s, opacity:o, tx:m.x, ty:m.y, tr:r, tg:g, tb:b, tsize:s, topacity:o };
+  }
+  
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    
+    const AGENT_ID = 'autoart-painter';
+    
+    if (data.type === 'init') {
+      marks.clear();
+      for (const m of data.marks) {
+        if (m.agentId && m.agentId !== AGENT_ID) continue;
+        marks.set(m.id, makeMark(m));
+      }
+      markCountEl.textContent = `marks: ${marks.size.toLocaleString()}`;
+      if (marks.size > 0) {
+        let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+        for (const m of marks.values()) {
+          if (m.x < minX) minX = m.x; if (m.x > maxX) maxX = m.x;
+          if (m.y < minY) minY = m.y; if (m.y > maxY) maxY = m.y;
+        }
+        const rangeX = maxX - minX || 800;
+        const rangeY = maxY - minY || 800;
+        zoom = Math.min(canvas.width / (rangeX * 1.2), canvas.height / (rangeY * 1.2));
+        panX = -(minX + maxX) / 2;
+        panY = -(minY + maxY) / 2;
+      }
+    }
+    
+    else if (data.type === 'mark:created') {
+      const m = data.mark;
+      if (m.agentId !== AGENT_ID) return;
+      marks.set(m.id, makeMark(m));
+      updateCount++;
+      markCountEl.textContent = `marks: ${marks.size.toLocaleString()}`;
+    }
+    
+    else if (data.type === 'mark:updated') {
+      const m = data.mark;
+      if (m.agentId !== AGENT_ID) return;
+      const existing = marks.get(m.id);
+      if (existing) {
+        // Set TARGET — don't snap. Render loop will lerp.
+        const [r,g,b] = hexToRgb(m.color);
+        existing.tx = m.x; existing.ty = m.y;
+        existing.tr = r; existing.tg = g; existing.tb = b;
+        existing.tsize = m.size || existing.tsize;
+        existing.topacity = m.effectiveOpacity || m.opacity || existing.topacity;
+      } else {
+        marks.set(m.id, makeMark(m));
+      }
+      updateCount++;
+    }
+    
+    else if (data.type === 'mark:deleted') {
+      marks.delete(data.id);
+      displacements.delete(data.id);
+      updateCount++;
+      markCountEl.textContent = `marks: ${marks.size.toLocaleString()}`;
+    }
+    
+    else if (data.type === 'marks:cleared') {
+      // Remove all marks for an agent
+      for (const [id, m] of marks) {
+        if (data.agentId) marks.delete(id); // simplified
+      }
+      markCountEl.textContent = `marks: ${marks.size.toLocaleString()}`;
+    }
+  };
+  
+  ws.onclose = () => {
+    statusEl.textContent = '● DISCONNECTED — reconnecting...';
+    statusEl.style.color = '#f44';
+    setTimeout(connect, 3000);
+  };
+  
+  ws.onerror = () => ws.close();
+}
+
+connect();
+
+async function triggerReplay() {
+  const btn = document.getElementById('replay');
+  btn.textContent = '🌊 WAVE EVOLUTION';
+  btn.className = 'running';
+  try {
+    const r = await fetch('/replay', { method: 'POST' });
+    const data = await r.json();
+    if (data.error) {
+      btn.textContent = '⏳ ALREADY RUNNING';
+      setTimeout(() => { btn.textContent = '▶ REPLAY'; btn.className = ''; }, 3000);
+      return;
+    }
+    // Replay takes ~2.5 min, re-enable after
+    setTimeout(() => { btn.textContent = '▶ REPLAY'; btn.className = ''; }, 180000);
+  } catch (e) {
+    btn.textContent = '❌ ERROR';
+    btn.className = '';
+    setTimeout(() => { btn.textContent = '▶ REPLAY'; btn.className = ''; }, 3000);
+  }
+}
+</script>
+</body>
+</html>

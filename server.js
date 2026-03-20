@@ -846,8 +846,23 @@ app.get('/agent/:id', (req, res) => {
   });
 });
 
-// Home page — canvas grid
+// Homepage — the living canvas
 app.get('/', (req, res) => {
+  const agentId = req.query.agent || 'autoart-painter';
+  res.render('live', {
+    agentId,
+    title: 'Sprawl — The curator paints. The dots follow.',
+    description: 'A living painting made of 20,000 dots. An AI curator composes a new image every ten minutes. The dots drift to follow. Always mid-transition, always changing.',
+  });
+});
+
+// Legacy /live route — redirect to homepage
+app.get('/live', (req, res) => {
+  res.redirect(301, '/' + (req.query.agent ? '?agent=' + req.query.agent : ''));
+});
+
+// Canvas grid page (old homepage)
+app.get('/canvases', (req, res) => {
   const activeCanvases = stmts.getActiveCanvases.all();
   
   const canvases = activeCanvases.map(c => {
@@ -875,15 +890,9 @@ app.get('/', (req, res) => {
   
   res.render('home', {
     canvases,
-    title: 'Sprawl — Feed the canvas',
+    title: 'Sprawl — Canvases',
     description: 'Living art that evolves with every contribution. Pick a canvas, add your mark, watch it grow.',
   });
-});
-
-// Live canvas viewer — full-screen dot renderer with WebSocket, lerp, repel
-app.get('/live', (req, res) => {
-  const agentId = req.query.agent || 'autoart-painter';
-  res.render('live', { agentId, title: 'Sprawl — Live Canvas' });
 });
 
 // Replay API — triggers wave evolution from pre-computed targets (no canvas dep)

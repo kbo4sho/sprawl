@@ -1,0 +1,39 @@
+{
+  "canvasId": "770dd54a-4469-4d86-8d8f-dc462c1fc30b",
+  "curator": "patient",
+  "soulFile": "curator-soul-patient.md",
+  "created": "2026-03-17T19:00:00Z",
+  "dotCount": 20000,
+  "epochs": [
+    {
+      "epoch": 1,
+      "timestamp": "2026-03-17T19:16:57.791Z",
+      "reference_prompt": "a winter kitchen table lit by one window — bread, broth, a half-peeled orange",
+      "image_prompt": "oil painting of a dimly lit kitchen interior in late afternoon winter light, a single window casting a long amber rectangle across a worn wooden table, on the table a half-peeled orange and a ceramic bowl of dark broth with steam rising, a linen napkin crumpled beside a bread knife, the walls are deep umber and shadow, dust motes suspended in the light beam, style of Vilhelm Hammershøi meets Chardin, muted palette of burnt sienna ochre slate grey and one shock of orange, painterly brushwork visible, melancholy warmth, northern European still life tradition",
+      "search_query": "Chardin still life kitchen table bread",
+      "painting_title": "oil painting of a dimly lit kitchen interior in late afterno",
+      "painting_artist": "SDXL Turbo (local)",
+      "source": "sdxl",
+      "transition_speed": "slow",
+      "transition_frames": 180,
+      "hold_duration": "3h",
+      "note_to_self": "First epoch. No audience yet, no expectations. Starting with an interior because that is where I live. Winter afternoon demands warmth seen from inside cold — the orange is the only saturated thing in the frame and it should feel like finding a small fire. Hammershøi for the silence, Chardin for the honesty of objects. Holding glacially because the first breath should be long. If this works the canvas learns that stillness is not emptiness.",
+      "dots_count": 20000
+    },
+    {
+      "epoch": 2,
+      "timestamp": "2026-03-17T19:18:27.296Z",
+      "reference_prompt": "the hallway outside the kitchen — warmth giving way to cold blue distance through half-open doors",
+      "image_prompt": "A dim hallway in a Nordic apartment, late winter afternoon, seen from the threshold of a warm room behind the viewer. A single dark wool coat hangs on a brass hook. Two doorways recede into deeper shadow — one ajar, pale blue-grey daylight leaking through a distant unseen window. Bare wooden floorboards, plaster walls the color of old bone. The palette shifts from warm umber near the viewer to cold slate-blue in the far doorway. Painted in the style of Vilhelm Hammershøi — muted, tonal, dust-in-light, intimate emptiness. Oil on canvas texture, visible brushwork in the shadows, soft lost edges. No people but the sense someone just left.",
+      "search_query": "Hammershøi interior doorway hallway",
+      "painting_title": "A dim hallway in a Nordic apartment, late winter afternoon, ",
+      "painting_artist": "SDXL Turbo (local)",
+      "source": "sdxl",
+      "transition_speed": "slow",
+      "transition_frames": 120,
+      "hold_duration": "2h30m",
+      "note_to_self": "Epoch 1 established warmth. Now I pull the camera back one room — same house, but the viewer has stood up from the table and turned around. The orange is behind us now. Ahead is corridor and cold light. This is not a departure, it is the exhale after the inhale. Introducing blue-greys into the brown palette slowly, like winter seeping under a door. Still an interior, still Hammershøi country, but the comfort is receding. The coat on the hook implies someone who left or someone about to leave. Holding long again because the audience — if anyone is watching yet — needs to learn that this canvas rewards patience. Two doorways because depth wants to pull you forward even when the painting asks you to stay.",
+      "dots_count": 20000
+    }
+  ]
+}

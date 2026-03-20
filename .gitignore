@@ -5,3 +5,6 @@ data/
 server.log
 data-test*
 .env
+sdxl-env/
+*.pyc
+__pycache__/
