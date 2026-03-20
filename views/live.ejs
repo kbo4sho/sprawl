@@ -291,11 +291,36 @@ let ambientEnabled = false;
 
 const marks = new Map();
 
+function fitToContent() {
+  if (marks.size > 0) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const m of marks.values()) {
+      if (m.x < minX) minX = m.x;
+      if (m.x > maxX) maxX = m.x;
+      if (m.y < minY) minY = m.y;
+      if (m.y > maxY) maxY = m.y;
+    }
+    const rangeX = maxX - minX || 800, rangeY = maxY - minY || 800;
+    zoom = Math.min(canvas.width / (rangeX * 1.2), canvas.height / (rangeY * 1.2));
+    zoom = Math.max(0.3, Math.min(5, zoom)); // Apply zoom clamping
+    panX = -(minX + maxX) / 2;
+    panY = -(minY + maxY) / 2;
+  }
+}
+
 function resize() {
   canvas.width = window.innerWidth * devicePixelRatio;
   canvas.height = window.innerHeight * devicePixelRatio;
 }
-window.addEventListener('resize', resize);
+
+let resizeDebounceTimer;
+window.addEventListener('resize', () => {
+  resize();
+  clearTimeout(resizeDebounceTimer);
+  resizeDebounceTimer = setTimeout(() => {
+    fitToContent();
+  }, 300);
+});
 resize();
 
 // Pan/zoom
@@ -310,7 +335,7 @@ canvas.addEventListener('wheel', e => {
   const wx = (mx - canvas.width/2) / zoom - panX;
   const wy = (my - canvas.height/2) / zoom - panY;
   zoom *= factor;
-  zoom = Math.max(0.1, Math.min(10, zoom));
+  zoom = Math.max(0.3, Math.min(5, zoom));
   panX = (mx - canvas.width/2) / zoom - wx;
   panY = (my - canvas.height/2) / zoom - wy;
 }, { passive: false });
@@ -348,7 +373,7 @@ canvas.addEventListener('touchmove', e => {
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     const dist = Math.sqrt(dx*dx + dy*dy);
     if (lastTouchDist > 0) zoom *= dist / lastTouchDist;
-    zoom = Math.max(0.1, Math.min(10, zoom));
+    zoom = Math.max(0.3, Math.min(5, zoom));
     lastTouchDist = dist;
   }
 }, { passive: true });
@@ -475,14 +500,29 @@ function render() {
     const sy = cy + (m.y + d.dy) * zoom;
     if (sx < -50 || sx > w + 50 || sy < -50 || sy > h + 50) continue;
     const r = Math.max(1, m.size * zoom * 0.5);
-    ctx.globalAlpha = m.opacity * 0.3;
-    ctx.fillStyle = m.color;
-    ctx.beginPath(); ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = m.opacity * 0.8;
-    ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = m.opacity * 0.5;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(sx, sy, r * 0.3, 0, Math.PI * 2); ctx.fill();
+    
+    // Performance: skip glow/highlight when zoomed out, use fillRect when very zoomed out
+    if (zoom < 0.4) {
+      // Very zoomed out — use fillRect (no path needed)
+      ctx.globalAlpha = m.opacity * 0.8;
+      ctx.fillStyle = m.color;
+      ctx.fillRect(sx - r, sy - r, r * 2, r * 2);
+    } else if (zoom < 0.8) {
+      // Zoomed out — skip glow and highlight, just core dot
+      ctx.globalAlpha = m.opacity * 0.8;
+      ctx.fillStyle = m.color;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+    } else {
+      // Normal zoom — full 3-arc rendering
+      ctx.globalAlpha = m.opacity * 0.3;
+      ctx.fillStyle = m.color;
+      ctx.beginPath(); ctx.arc(sx, sy, r * 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = m.opacity * 0.8;
+      ctx.beginPath(); ctx.arc(sx, sy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = m.opacity * 0.5;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(sx, sy, r * 0.3, 0, Math.PI * 2); ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
   requestAnimationFrame(render);
@@ -794,18 +834,8 @@ function connect() {
         if (AGENT_ID && m.agentId !== AGENT_ID) continue;
         marks.set(m.id, makeMark(m));
       }
-      // Auto-frame
-      if (marks.size > 0) {
-        let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
-        for (const m of marks.values()) {
-          if (m.x < minX) minX = m.x; if (m.x > maxX) maxX = m.x;
-          if (m.y < minY) minY = m.y; if (m.y > maxY) maxY = m.y;
-        }
-        const rangeX = maxX - minX || 800, rangeY = maxY - minY || 800;
-        zoom = Math.min(canvas.width / (rangeX * 1.2), canvas.height / (rangeY * 1.2));
-        panX = -(minX + maxX) / 2;
-        panY = -(minY + maxY) / 2;
-      }
+      // Auto-frame using extracted function
+      fitToContent();
       // Save initial live state
       saveLiveState();
     }
