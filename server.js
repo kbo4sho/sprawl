@@ -851,7 +851,7 @@ app.get('/', (req, res) => {
   const agentId = req.query.agent || 'autoart-painter';
   res.render('live', {
     agentId,
-    title: 'Sprawl — The curator paints. The dots follow.',
+    title: "Sprawl — A painting that's never finished.",
     description: 'A living painting made of 20,000 dots. An AI curator composes a new image every ten minutes. The dots drift to follow. Always mid-transition, always changing.',
   });
 });

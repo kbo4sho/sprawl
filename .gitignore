@@ -8,3 +8,4 @@ data-test*
 sdxl-env/
 *.pyc
 __pycache__/
+curator-frames/
