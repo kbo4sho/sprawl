@@ -368,6 +368,31 @@ resize();
 let panX = 0, panY = 0, zoom = 1;
 let dragging = false, dragStartX, dragStartY, panStartX, panStartY;
 
+// Content bounds — updated on init and epoch changes
+let contentBounds = { minX: -400, maxX: 400, minY: -400, maxY: 400 };
+
+function updateContentBounds() {
+  if (marks.size === 0) return;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const m of marks.values()) {
+    if (m.tx < minX) minX = m.tx; if (m.tx > maxX) maxX = m.tx;
+    if (m.ty < minY) minY = m.ty; if (m.ty > maxY) maxY = m.ty;
+  }
+  contentBounds = { minX, maxX, minY, maxY };
+}
+
+function clampPan() {
+  const margin = 0.25; // 25% screen margin allowed
+  const rangeX = contentBounds.maxX - contentBounds.minX || 800;
+  const rangeY = contentBounds.maxY - contentBounds.minY || 800;
+  const centerX = (contentBounds.minX + contentBounds.maxX) / 2;
+  const centerY = (contentBounds.minY + contentBounds.maxY) / 2;
+  const allowX = (rangeX / 2) + (canvas.width * margin) / zoom;
+  const allowY = (rangeY / 2) + (canvas.height * margin) / zoom;
+  panX = Math.max(-centerX - allowX, Math.min(-centerX + allowX, panX));
+  panY = Math.max(-centerY - allowY, Math.min(-centerY + allowY, panY));
+}
+
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
   const factor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -379,6 +404,7 @@ canvas.addEventListener('wheel', e => {
   zoom = Math.max(0.8, Math.min(3, zoom));
   panX = (mx - canvas.width/2) / zoom - wx;
   panY = (my - canvas.height/2) / zoom - wy;
+  clampPan();
 }, { passive: false });
 
 canvas.addEventListener('mousedown', e => {
@@ -395,6 +421,7 @@ canvas.addEventListener('mousemove', e => {
   const dy = e.clientY * devicePixelRatio - dragStartY;
   panX = panStartX + dx / zoom;
   panY = panStartY + dy / zoom;
+  clampPan();
 });
 canvas.addEventListener('mouseup', () => dragging = false);
 canvas.addEventListener('mouseleave', () => dragging = false);
@@ -416,10 +443,11 @@ canvas.addEventListener('touchmove', e => {
     if (lastTouchDist > 0) zoom *= dist / lastTouchDist;
     zoom = Math.max(0.8, Math.min(3, zoom));
     lastTouchDist = dist;
+    clampPan();
   }
 }, { passive: true });
 canvas.addEventListener('touchend', () => { lastTouchDist = 0; });
-canvas.addEventListener('dblclick', () => { panX = 0; panY = 0; zoom = 1; });
+canvas.addEventListener('dblclick', () => { fitToContent(); });
 
 // Color utils
 function hexToRgb(hex) {
@@ -715,6 +743,7 @@ function applyTargetsToMarks(targets) {
     m.tsize = t.size;
     m.topacity = t.opacity;
   }
+  updateContentBounds();
 }
 
 async function replayEpoch(epoch) {
@@ -876,6 +905,7 @@ function connect() {
         marks.set(m.id, makeMark(m));
       }
       // Auto-frame using extracted function
+      updateContentBounds();
       fitToContent();
       // Save initial live state
       saveLiveState();
