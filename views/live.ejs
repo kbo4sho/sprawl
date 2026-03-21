@@ -343,7 +343,7 @@ function fitToContent() {
     }
     const rangeX = maxX - minX || 800, rangeY = maxY - minY || 800;
     zoom = Math.min(canvas.width / (rangeX * 1.2), canvas.height / (rangeY * 1.2));
-    zoom = Math.max(0.8, Math.min(3, zoom)); // Apply zoom clamping
+    zoom = Math.max(0.95, Math.min(3, zoom)); // Allow only slight zoom-out
     panX = -(minX + maxX) / 2;
     panY = -(minY + maxY) / 2;
   }
@@ -401,7 +401,7 @@ canvas.addEventListener('wheel', e => {
   const wx = (mx - canvas.width/2) / zoom - panX;
   const wy = (my - canvas.height/2) / zoom - panY;
   zoom *= factor;
-  zoom = Math.max(0.8, Math.min(3, zoom));
+  zoom = Math.max(0.95, Math.min(3, zoom));
   panX = (mx - canvas.width/2) / zoom - wx;
   panY = (my - canvas.height/2) / zoom - wy;
   clampPan();
@@ -441,7 +441,7 @@ canvas.addEventListener('touchmove', e => {
     const dy = e.touches[0].clientY - e.touches[1].clientY;
     const dist = Math.sqrt(dx*dx + dy*dy);
     if (lastTouchDist > 0) zoom *= dist / lastTouchDist;
-    zoom = Math.max(0.8, Math.min(3, zoom));
+    zoom = Math.max(0.95, Math.min(3, zoom));
     lastTouchDist = dist;
     clampPan();
   }
