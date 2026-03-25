@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title><%= experiment.premise %> — Sprawl</title>
+  
+  <meta property="og:title" content="<%= experiment.premise %>">
+  <meta property="og:description" content="A Sprawl experiment — what happens when you ask an AI a generous question?">
+  <% if (experiment.thumbnail_url) { %>
+  <meta property="og:image" content="<%= experiment.thumbnail_url %>">
+  <% } %>
+  <meta property="og:type" content="website">
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #030306; color: #c8c8d0; font-family: 'Space Mono', monospace; }
+    
+    /* Fullscreen canvas */
+    #canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+    #text-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+    
+    .webgl-unsupported {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      background: #030306; color: #ffffff30;
+      font-family: 'Space Mono', monospace; font-size: 12px;
+      display: none; align-items: center; justify-content: center;
+    }
+
+    /* === OVERLAY UI === */
+    
+    /* Top-left: back link + premise */
+    .overlay-top-left {
+      position: fixed; top: 24px; left: 28px; z-index: 10;
+      pointer-events: auto; max-width: 500px;
+    }
+    
+    .back-link {
+      display: inline-block;
+      font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+      color: #ffffff18; text-decoration: none;
+      margin-bottom: 16px;
+      transition: color 0.4s;
+    }
+    .back-link:hover { color: #ffffff50; }
+    
+    .premise {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700; font-size: 22px; line-height: 1.3;
+      color: #ffffff12;
+      transition: color 0.4s;
+    }
+    
+    /* Top-right: status */
+    .overlay-top-right {
+      position: fixed; top: 24px; right: 28px; z-index: 10;
+      text-align: right;
+    }
+    
+    .status-line {
+      font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+      color: #ffffff15;
+      display: flex; align-items: center; gap: 8px;
+      justify-content: flex-end;
+    }
+    
+    .status-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #4a9eff20;
+      flex-shrink: 0;
+    }
+    .status-dot.running {
+      background: #4a9eff40;
+      animation: breathe 3s ease-in-out infinite;
+    }
+    .status-dot.complete { background: #10b98140; }
+    
+    @keyframes breathe {
+      0%, 100% { opacity: 1; box-shadow: 0 0 4px #4a9eff20; }
+      50% { opacity: 0.3; box-shadow: none; }
+    }
+    
+    .axis-tag {
+      display: inline-block; margin-top: 6px;
+      font-size: 8px; letter-spacing: 2px; text-transform: uppercase;
+      color: #ffffff10;
+      border: 1px solid #ffffff08; border-radius: 2px;
+      padding: 3px 8px;
+    }
+    
+    /* Bottom-left: confidence + evolution */
+    .overlay-bottom-left {
+      position: fixed; bottom: 28px; left: 28px; z-index: 10;
+      width: 200px;
+    }
+    
+    .confidence-track {
+      width: 100%; height: 2px;
+      background: #ffffff06; border-radius: 1px;
+      overflow: hidden; margin-bottom: 6px;
+    }
+    .confidence-fill {
+      height: 100%;
+      background: #ffffff18;
+      transition: width 1s ease-out;
+    }
+    
+    .confidence-meta {
+      display: flex; justify-content: space-between;
+      font-size: 8px; letter-spacing: 2px; text-transform: uppercase;
+      color: #ffffff10;
+    }
+    
+    /* Bottom-right: reflection */
+    .overlay-bottom-right {
+      position: fixed; bottom: 28px; right: 28px; z-index: 10;
+      max-width: 360px; text-align: right;
+    }
+    
+    .reflection {
+      font-size: 11px; font-style: italic; line-height: 1.6;
+      color: #ffffff0c;
+      transition: color 0.4s;
+    }
+    
+    /* Bottom-center: share */
+    .overlay-bottom-center {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%);
+      z-index: 10;
+    }
+    
+    .share-btn {
+      background: #08081090; border: 1px solid #ffffff08;
+      color: #ffffff20; font-family: 'Space Mono', monospace;
+      font-size: 9px; letter-spacing: 2px; text-transform: uppercase;
+      padding: 8px 18px; border-radius: 3px; cursor: pointer;
+      backdrop-filter: blur(12px); transition: all 0.3s;
+    }
+    .share-btn:hover { color: #ffffff50; border-color: #ffffff18; }
+    .overlay-bottom-center { display: flex; gap: 8px; }
+    
+    /* Summary overlay (when complete) */
+    .summary-overlay {
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+      z-index: 10; max-width: 500px; width: calc(100% - 56px);
+      background: #08081070; border: 1px solid #ffffff06;
+      border-radius: 4px; padding: 20px 24px;
+      backdrop-filter: blur(20px);
+      font-size: 12px; line-height: 1.7; color: #ffffff25;
+    }
+    .summary-overlay h3 {
+      font-family: 'Syne', sans-serif; font-weight: 700;
+      font-size: 9px; letter-spacing: 4px; text-transform: uppercase;
+      color: #ffffff12; margin-bottom: 10px;
+    }
+    
+    /* Timelapse overlay */
+    .timelapse-overlay {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 20; max-width: 600px; width: calc(100% - 56px);
+      display: none;
+    }
+    .timelapse-overlay.active { display: block; }
+    .timelapse-overlay video {
+      width: 100%; border-radius: 4px; border: 1px solid #ffffff08;
+    }
+    
+    /* Hover: UI brightens */
+    body:hover .premise { color: #ffffff25; }
+    body:hover .reflection { color: #ffffff18; }
+    body:hover .back-link { color: #ffffff30; }
+    
+    /* Mobile */
+    @media (max-width: 600px) {
+      .premise { font-size: 16px; }
+      .overlay-bottom-right { max-width: 200px; }
+      .overlay-bottom-right .reflection { font-size: 10px; }
+      .overlay-bottom-left { width: 140px; }
+      .summary-overlay { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+<canvas id="text-canvas"></canvas>
+<div class="webgl-unsupported">WebGL2 required</div>
+
+<!-- Overlay: top-left -->
+<div class="overlay-top-left">
+  <a href="/experiments" class="back-link">← experiments</a>
+  <h1 class="premise"><%= experiment.premise %></h1>
+</div>
+
+<!-- Overlay: top-right -->
+<div class="overlay-top-right">
+  <div class="status-line">
+    <span id="status-text"><%= experiment.status === 'complete' ? 'Complete' : 'Evolving' %></span>
+    <span>·</span>
+    <span id="evolution-num"><%= experiment.evolutions %></span>
+    <div class="status-dot <%= experiment.status %>"></div>
+  </div>
+  <% if (experiment.axes) {
+    const axes = typeof experiment.axes === 'string' ? JSON.parse(experiment.axes) : experiment.axes;
+    if (axes && axes.length > 0) { axes.forEach(axis => { %>
+      <span class="axis-tag"><%= axis %></span>
+  <% }); } } %>
+</div>
+
+<!-- Overlay: bottom-left -->
+<div class="overlay-bottom-left">
+  <div class="confidence-track">
+    <div class="confidence-fill" id="confidence-fill" style="width: <%= experiment.confidence * 100 %>%"></div>
+  </div>
+  <div class="confidence-meta">
+    <span>confidence</span>
+    <span id="confidence-pct"><%= Math.round(experiment.confidence * 100) %>%</span>
+  </div>
+</div>
+
+<!-- Overlay: bottom-right -->
+<div class="overlay-bottom-right">
+  <div class="reflection" id="reflection"><%= experiment.reflection || '' %></div>
+</div>
+
+<!-- Overlay: bottom-center -->
+<div class="overlay-bottom-center">
+  <button class="share-btn" id="listen-btn" onclick="toggleSound()">listen</button>
+  <button class="share-btn" onclick="shareExperiment()">share</button>
+</div>
+
+<% if (experiment.summary) { %>
+<div class="summary-overlay">
+  <h3>What happened</h3>
+  <%= experiment.summary %>
+</div>
+<% } %>
+
+<% if (experiment.status === 'complete' && experiment.timelapse_url) { %>
+<div class="timelapse-overlay active">
+  <video controls autoplay loop muted>
+    <source src="<%= experiment.timelapse_url %>" type="video/mp4">
+  </video>
+</div>
+<% } %>
+
+<script>
+// ============================================================
+// SPRAWL EXPERIMENT — Fullscreen WebGL Shader Renderer
+// ============================================================
+
+const canvasId = '<%= canvas.id %>';
+const experimentSlug = '<%= experiment.slug %>';
+const canvas = document.getElementById('canvas');
+const textCanvas = document.getElementById('text-canvas');
+
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
+if (!gl) {
+  document.querySelector('.webgl-unsupported').style.display = 'flex';
+  canvas.style.display = 'none';
+  textCanvas.style.display = 'none';
+  throw new Error('WebGL2 not supported');
+}
+
+const tCtx = textCanvas.getContext('2d');
+
+let W, H, DPR;
+let marks = [];
+let physicsState = {};
+let marksById = {};
+let ws = null;
+
+// ============================================================
+// SHADERS
+// ============================================================
+
+const quadVS = `#version 300 es
+in vec2 a_pos;
+out vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0, 1);
+}`;
+
+const backgroundFS = `#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+out vec4 fragColor;
+void main() {
+  vec2 pixel = gl_FragCoord.xy;
+  vec2 uv = pixel / u_resolution;
+  vec3 bg = vec3(0.012, 0.012, 0.024);
+  float gridAlpha = 0.012 + 0.005 * sin(u_time * 0.3);
+  float gridX = smoothstep(0.97, 1.0, cos(pixel.x * 3.14159 / 80.0));
+  float gridY = smoothstep(0.97, 1.0, cos(pixel.y * 3.14159 / 80.0));
+  bg += vec3(gridAlpha) * max(gridX, gridY);
+  vec2 vc = (uv - 0.5) * 2.0;
+  bg *= 1.0 - dot(vc, vc) * 0.35;
+  float grain = fract(sin(dot(pixel + u_time * 100.0, vec2(12.9898, 78.233))) * 43758.5453);
+  bg += (grain - 0.5) * 0.006;
+  fragColor = vec4(bg, 1.0);
+}`;
+
+const markFS = `#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform sampler2D u_markData;
+uniform int u_markCount;
+out vec4 fragColor;
+
+vec4 _fetch(int idx, int row) { return texelFetch(u_markData, ivec2(idx, row), 0); }
+vec2 getMarkPos(int i) { return _fetch(i, 0).xy; }
+float getMarkSize(int i) { return _fetch(i, 0).z; }
+vec3 getMarkColor(int i) { return _fetch(i, 1).rgb; }
+float getMarkOpacity(int i) { return _fetch(i, 1).a; }
+float getMarkPhase(int i) { return _fetch(i, 2).y; }
+float getMarkScale(int i) { return _fetch(i, 2).w; }
+
+void main() {
+  vec2 pixel = gl_FragCoord.xy;
+  vec3 totalLight = vec3(0.0);
+  
+  for (int i = 0; i < 600; i++) {
+    if (i >= u_markCount) break;
+    
+    vec2 markPos = getMarkPos(i);
+    float sz = getMarkSize(i) * getMarkScale(i);
+    if (sz < 0.5) continue;
+    
+    vec3 color = getMarkColor(i);
+    float opacity = getMarkOpacity(i);
+    float phase = getMarkPhase(i);
+    
+    vec2 diff = pixel - markPos;
+    float dist = length(diff);
+    
+    if (dist > sz * 3.0) continue;
+    
+    vec2 uv = diff / sz;
+    float d = length(uv);
+    if (d > 2.0) continue;
+    
+    // Bright core with soft bloom
+    float core = pow(max(0.0, 1.0 - d * 0.7), 2.5) * 1.0;
+    // Pulsing ring
+    float ringPhase = sin(u_time * 1.5 + phase * 6.28) * 0.15 + 0.85;
+    float ring = smoothstep(0.08, 0.0, abs(d - ringPhase)) * 0.5;
+    // Wide bloom halo
+    float bloom = smoothstep(2.0, 0.3, d) * 0.2;
+    // Shimmer
+    float shimmer = 0.85 + 0.15 * sin(u_time * 2.5 + phase * 12.0 + d * 4.0);
+    
+    totalLight += color * (core + ring + bloom) * shimmer * opacity;
+  }
+  
+  fragColor = vec4(totalLight, 1.0);
+}`;
+
+const tonemapFS = `#version 300 es
+precision highp float;
+uniform sampler2D u_scene;
+uniform vec2 u_resolution;
+out vec4 fragColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec3 c = texture(u_scene, uv).rgb;
+  c = min(c, vec3(3.0));
+  c = (c * (2.51 * c + 0.03)) / (c * (2.43 * c + 0.59) + 0.14);
+  fragColor = vec4(c, 1.0);
+}`;
+
+// ============================================================
+// GL HELPERS
+// ============================================================
+
+function compileShader(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('Shader compile error:', gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+
+function createProgram(vs, fs) {
+  const vShader = compileShader(vs, gl.VERTEX_SHADER);
+  const fShader = compileShader(fs, gl.FRAGMENT_SHADER);
+  if (!vShader || !fShader) return null;
+  const p = gl.createProgram();
+  gl.attachShader(p, vShader);
+  gl.attachShader(p, fShader);
+  gl.linkProgram(p);
+  gl.deleteShader(vShader);
+  gl.deleteShader(fShader);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error('Program link error:', gl.getProgramInfoLog(p));
+    gl.deleteProgram(p);
+    return null;
+  }
+  return p;
+}
+
+function getUniforms(prog, ...names) {
+  const u = {};
+  for (const n of names) u[n] = gl.getUniformLocation(prog, n);
+  return u;
+}
+
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+function drawQuad(prog) {
+  const loc = gl.getAttribLocation(prog, 'a_pos');
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ============================================================
+// PROGRAMS
+// ============================================================
+
+const bgProg = createProgram(quadVS, backgroundFS);
+const bgU = getUniforms(bgProg, 'u_resolution', 'u_time');
+
+const markProg = createProgram(quadVS, markFS);
+const markU = getUniforms(markProg, 'u_resolution', 'u_time', 'u_markData', 'u_markCount');
+
+const tonemapProg = createProgram(quadVS, tonemapFS);
+const tonemapU = getUniforms(tonemapProg, 'u_scene', 'u_resolution');
+
+// ============================================================
+// FRAMEBUFFERS
+// ============================================================
+
+let sceneFBO, sceneTexture;
+const floatExt = gl.getExtension('EXT_color_buffer_float');
+const canFloat = !!floatExt;
+
+function createFBO(w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  if (canFloat) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+  } else {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  }
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+  if (status !== gl.FRAMEBUFFER_COMPLETE) {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { fbo, tex };
+}
+
+function createFramebuffers() {
+  const s = createFBO(canvas.width, canvas.height);
+  sceneFBO = s.fbo;
+  sceneTexture = s.tex;
+}
+
+// ============================================================
+// RESIZE (fullscreen)
+// ============================================================
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth;
+  H = window.innerHeight;
+  
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  
+  textCanvas.width = W * DPR;
+  textCanvas.height = H * DPR;
+  textCanvas.style.width = W + 'px';
+  textCanvas.style.height = H + 'px';
+  
+  tCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  createFramebuffers();
+}
+window.addEventListener('resize', resize);
+
+// ============================================================
+// MARK DATA TEXTURE
+// ============================================================
+
+const MAX_MARKS = 600;
+const markDataWidth = MAX_MARKS;
+const markDataHeight = 3;
+const markDataArray = new Float32Array(markDataWidth * markDataHeight * 4);
+let markDataTex = gl.createTexture();
+
+function worldToScreen(wx, wy) {
+  // Map -500..500 to screen, preserving aspect ratio
+  const dim = Math.min(W, H);
+  const ox = (W - dim) / 2;
+  const oy = (H - dim) / 2;
+  const nx = (wx + 500) / 1000;
+  const ny = (wy + 500) / 1000;
+  return { sx: ox + nx * dim, sy: oy + ny * dim };
+}
+
+function updateMarkDataTexture() {
+  markDataArray.fill(0);
+  let idx = 0;
+  for (const m of marks) {
+    if (idx >= MAX_MARKS) break;
+    const p = physicsState[m.id];
+    if (!p) continue;
+    
+    const base0 = idx * 4;
+    const base1 = (markDataWidth + idx) * 4;
+    const base2 = (markDataWidth * 2 + idx) * 4;
+    
+    const scr = worldToScreen(p.px, p.py);
+    const sizeMul = Math.min(W, H) / 1000; // scale sizes to viewport
+    
+    markDataArray[base0]     = scr.sx * DPR;
+    markDataArray[base0 + 1] = (H - scr.sy) * DPR; // flip Y
+    markDataArray[base0 + 2] = Math.max(m.size * sizeMul * DPR * p.scale, 3 * DPR); // min size
+    markDataArray[base0 + 3] = 0;
+    
+    const [r, g, b] = hexToRgb(m.color);
+    markDataArray[base1]     = r / 255;
+    markDataArray[base1 + 1] = g / 255;
+    markDataArray[base1 + 2] = b / 255;
+    markDataArray[base1 + 3] = Math.max(m.opacity, 0.35); // min opacity
+    
+    markDataArray[base2]     = 0;
+    markDataArray[base2 + 1] = p.phase;
+    markDataArray[base2 + 2] = 0;
+    markDataArray[base2 + 3] = p.scale;
+    
+    idx++;
+  }
+  
+  gl.bindTexture(gl.TEXTURE_2D, markDataTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, markDataWidth, markDataHeight, 0, gl.RGBA, gl.FLOAT, markDataArray);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  
+  return idx;
+}
+
+function hexToRgb(hex) {
+  if (!hex || hex[0] !== '#') return [255, 255, 255];
+  return [parseInt(hex.slice(1,3),16)||0, parseInt(hex.slice(3,5),16)||0, parseInt(hex.slice(5,7),16)||0];
+}
+
+// ============================================================
+// PHYSICS
+// ============================================================
+
+function hashStr(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+function seededRandom(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function initPhysics(mark) {
+  if (physicsState[mark.id]) return;
+  const seed = hashStr(mark.id);
+  physicsState[mark.id] = {
+    px: mark.x, py: mark.y,
+    vx: 0, vy: 0,
+    phase: seededRandom(seed) * Math.PI * 2,
+    spawnTime: performance.now(),
+    scale: 0,
+  };
+}
+
+function updatePhysics(mark, dt, t) {
+  const p = physicsState[mark.id];
+  if (!p) return;
+  const age = (performance.now() - p.spawnTime) / 1000;
+  p.scale = Math.min(1, age / 0.8);
+}
+
+// ============================================================
+// TEXT OVERLAY
+// ============================================================
+
+function drawTextOverlay(t) {
+  tCtx.clearRect(0, 0, W, H);
+  for (const mark of marks) {
+    if (mark.type !== 'text' || !mark.text) continue;
+    const p = physicsState[mark.id];
+    if (!p || p.scale < 0.01) continue;
+    
+    const scr = worldToScreen(p.px, p.py);
+    const [r, g, b] = hexToRgb(mark.color);
+    const sizeMul = Math.min(W, H) / 1000;
+    const sz = mark.size * sizeMul * p.scale;
+    const a = Math.max(mark.opacity, 0.35) * p.scale;
+    
+    tCtx.save();
+    tCtx.textAlign = 'center';
+    tCtx.textBaseline = 'middle';
+    // Shadow glow
+    tCtx.font = `${sz * 1.05}px 'Space Mono', monospace`;
+    tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.25})`;
+    tCtx.fillText(mark.text, scr.sx, scr.sy);
+    // Main text
+    tCtx.font = `${sz}px 'Space Mono', monospace`;
+    tCtx.fillStyle = `rgba(${r},${g},${b},${a * 0.9})`;
+    tCtx.fillText(mark.text, scr.sx, scr.sy);
+    tCtx.restore();
+  }
+}
+
+// ============================================================
+// DATA FETCHING
+// ============================================================
+
+async function fetchMarks() {
+  try {
+    const res = await fetch(`/api/marks?canvasId=${canvasId}`);
+    marks = await res.json();
+    marks.forEach(initPhysics);
+    rebuildIndex();
+  } catch (e) { console.error('Failed to fetch marks:', e); }
+}
+
+async function fetchExperimentStatus() {
+  try {
+    const res = await fetch(`/api/experiments/${experimentSlug}`);
+    const data = await res.json();
+    
+    document.getElementById('evolution-num').textContent = data.evolutions;
+    document.getElementById('confidence-pct').textContent = Math.round(data.confidence * 100) + '%';
+    document.getElementById('confidence-fill').style.width = `${data.confidence * 100}%`;
+    
+    if (data.reflection) {
+      document.getElementById('reflection').textContent = data.reflection;
+    }
+    
+    if (data.status === 'complete') {
+      document.querySelector('.status-dot').className = 'status-dot complete';
+      document.getElementById('status-text').textContent = 'Complete';
+    }
+  } catch (e) { console.error('Failed to fetch status:', e); }
+}
+
+function rebuildIndex() {
+  marksById = {};
+  for (const m of marks) marksById[m.id] = m;
+}
+
+// ============================================================
+// WEBSOCKET
+// ============================================================
+
+function connectWebSocket() {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${protocol}//${window.location.host}`);
+  
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'subscribe', canvasId }));
+  };
+  
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    if (data.type === 'mark:created') {
+      marks.push(data.mark);
+      initPhysics(data.mark);
+      rebuildIndex();
+    } else if (data.type === 'mark:updated') {
+      const idx = marks.findIndex(m => m.id === data.mark.id);
+      if (idx >= 0) { marks[idx] = data.mark; marksById[data.mark.id] = data.mark; }
+    } else if (data.type === 'mark:deleted') {
+      marks = marks.filter(m => m.id !== data.id);
+      delete physicsState[data.id];
+      delete marksById[data.id];
+    }
+    fetchExperimentStatus();
+  };
+  
+  ws.onclose = () => { setTimeout(connectWebSocket, 2000); };
+}
+
+// ============================================================
+// RENDER
+// ============================================================
+
+let lastTime = 0;
+
+function render(now) {
+  const dt = Math.min(0.05, (now - lastTime) / 1000);
+  lastTime = now;
+  const t = now * 0.001;
+  
+  for (const mark of marks) updatePhysics(mark, dt, t);
+  const markCount = updateMarkDataTexture();
+  
+  const cw = canvas.width, ch = canvas.height;
+  
+  // Scene FBO
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFBO);
+  gl.viewport(0, 0, cw, ch);
+  
+  // Background
+  gl.disable(gl.BLEND);
+  gl.useProgram(bgProg);
+  gl.uniform2f(bgU.u_resolution, cw, ch);
+  gl.uniform1f(bgU.u_time, t);
+  drawQuad(bgProg);
+  
+  // Marks
+  if (markCount > 0) {
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.useProgram(markProg);
+    gl.uniform2f(markU.u_resolution, cw, ch);
+    gl.uniform1f(markU.u_time, t);
+    gl.uniform1i(markU.u_markCount, markCount);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, markDataTex);
+    gl.uniform1i(markU.u_markData, 0);
+    drawQuad(markProg);
+    gl.disable(gl.BLEND);
+  }
+  
+  // Tonemap to screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, cw, ch);
+  gl.useProgram(tonemapProg);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, sceneTexture);
+  gl.uniform1i(tonemapU.u_scene, 0);
+  gl.uniform2f(tonemapU.u_resolution, cw, ch);
+  drawQuad(tonemapProg);
+  
+  drawTextOverlay(t);
+  requestAnimationFrame(render);
+}
+
+// ============================================================
+// SHARE
+// ============================================================
+
+function shareExperiment() {
+  const url = window.location.href;
+  if (navigator.share) {
+    navigator.share({ title: document.querySelector('.premise').textContent, url }).catch(() => {});
+  } else {
+    navigator.clipboard.writeText(url).then(() => {
+      const btn = event.target;
+      const orig = btn.textContent;
+      btn.textContent = 'copied';
+      setTimeout(() => btn.textContent = orig, 2000);
+    });
+  }
+}
+
+// ============================================================
+// SONIFICATION (Strudel)
+// ============================================================
+
+let strudelLoaded = false;
+let soundPlaying = false;
+
+function loadStrudel() {
+  return new Promise((resolve) => {
+    if (strudelLoaded) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/@strudel/web@latest';
+    s.onload = () => { strudelLoaded = true; initStrudel(); resolve(); };
+    document.head.appendChild(s);
+  });
+}
+
+function marksToPattern() {
+  if (marks.length === 0) return null;
+  
+  // Sort marks by y position (top to bottom = time sequence)
+  const sorted = [...marks].filter(m => m.type === 'dot').sort((a, b) => a.y - b.y);
+  if (sorted.length === 0) return null;
+  
+  // Map marks to notes
+  // x: -500..500 → MIDI 40..80 (E2 to G#5)
+  // size: volume (0.1-0.8)
+  // color hue: warm=sawtooth, cool=sine
+  const notes = sorted.slice(0, 32).map(m => {
+    const midi = Math.round(40 + ((m.x + 500) / 1000) * 40);
+    return midi;
+  });
+  
+  // Build a strudel pattern string
+  const noteStr = notes.join(' ');
+  return noteStr;
+}
+
+async function toggleSound() {
+  const btn = document.getElementById('listen-btn');
+  
+  if (soundPlaying) {
+    hush();
+    soundPlaying = false;
+    btn.textContent = 'listen';
+    return;
+  }
+  
+  await loadStrudel();
+  
+  const noteStr = marksToPattern();
+  if (!noteStr) return;
+  
+  // Play: ambient generative pattern derived from canvas marks
+  const sorted = [...marks].filter(m => m.type === 'dot').sort((a, b) => a.y - b.y);
+  const midiNotes = sorted.slice(0, 32).map(m => Math.round(40 + ((m.x + 500) / 1000) * 40));
+  const gains = sorted.slice(0, 32).map(m => (0.15 + (m.size / 20) * 0.4).toFixed(2));
+  
+  // Create a dreamy ambient pattern
+  note(midiNotes.slice(0, 8).join(' '))
+    .s('triangle')
+    .slow(4)
+    .room(2)
+    .gain(0.3)
+    .lpf(sine.range(400, 3000).slow(8))
+    .delay(0.5)
+    .play();
+    
+  soundPlaying = true;
+  btn.textContent = 'hush';
+}
+
+// ============================================================
+// INIT
+// ============================================================
+
+resize();
+fetchMarks().then(() => { requestAnimationFrame(render); });
+connectWebSocket();
+setInterval(fetchExperimentStatus, 10000);
+</script>
+</body>
+</html>

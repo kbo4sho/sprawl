@@ -52,6 +52,28 @@ function parseMarksFromLLM(text) {
   catch { return []; }
 }
 
+function parseExperimentResponse(text) {
+  // Parse experiment evolution response: {ops: [...], confidence: 0.0-1.0, reflection: "..."}
+  const match = text.match(/\{[\s\S]*"ops"\s*:\s*\[[\s\S]*\][\s\S]*\}/);
+  if (!match) return { ops: [], confidence: 0.0, reflection: '' };
+  
+  try {
+    const obj = JSON.parse(match[0]);
+    const ops = (obj.ops || []).filter(m => m && (
+      (m.op === 'remove' && m.markId) ||
+      (m.op === 'move' && m.markId) ||
+      (typeof m.x === 'number' && typeof m.y === 'number')
+    ));
+    const confidence = typeof obj.confidence === 'number' ? 
+      Math.max(0, Math.min(1, obj.confidence)) : 0.0;
+    const reflection = typeof obj.reflection === 'string' ? 
+      obj.reflection.slice(0, 500) : '';
+    return { ops, confidence, reflection };
+  } catch {
+    return { ops: [], confidence: 0.0, reflection: '' };
+  }
+}
+
 const app = express();
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
@@ -377,6 +399,45 @@ try {
   console.error('Epochs migration error:', e);
 }
 
+// Experiments table migration (for agent experiments)
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS experiments (
+      id TEXT PRIMARY KEY,
+      slug TEXT UNIQUE NOT NULL,
+      premise TEXT NOT NULL,
+      canvas_id TEXT NOT NULL,
+      agent_id TEXT,
+      status TEXT DEFAULT 'running',
+      confidence REAL DEFAULT 0.0,
+      evolutions INTEGER DEFAULT 0,
+      started_at INTEGER,
+      completed_at INTEGER,
+      timelapse_url TEXT,
+      reflection TEXT,
+      FOREIGN KEY (canvas_id) REFERENCES canvases(id),
+      FOREIGN KEY (agent_id) REFERENCES agents(id)
+    )
+  `);
+  console.log('Experiments table ready');
+  
+  // Add new columns if they don't exist
+  const expColumns = db.prepare("PRAGMA table_info(experiments)").all();
+  const ensureExpCol = (name, ddl) => {
+    if (!expColumns.some(c => c.name === name)) {
+      db.exec(`ALTER TABLE experiments ADD COLUMN ${ddl}`);
+      console.log(`Experiments migration: Added ${name} column`);
+    }
+  };
+  ensureExpCol('agent_ids', 'agent_ids TEXT DEFAULT "[]"');
+  ensureExpCol('axes', 'axes TEXT DEFAULT "[]"');
+  ensureExpCol('summary', 'summary TEXT');
+  ensureExpCol('max_evolutions', 'max_evolutions INTEGER DEFAULT 20');
+  ensureExpCol('thumbnail_url', 'thumbnail_url TEXT');
+} catch (e) {
+  console.error('Experiments migration error:', e);
+}
+
 // --- Palette ---
 // Night sky — warm whites, cool blues, the range you see looking up
 const PALETTE = [
@@ -654,6 +715,23 @@ const stmts = {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `),
   getPurchasesByUser: db.prepare('SELECT * FROM purchases WHERE user_id = ? ORDER BY created_at DESC'),
+  // Experiments
+  getExperiment: db.prepare('SELECT * FROM experiments WHERE id = ?'),
+  getExperimentBySlug: db.prepare('SELECT * FROM experiments WHERE slug = ?'),
+  insertExperiment: db.prepare(`
+    INSERT INTO experiments (id, slug, premise, canvas_id, agent_id, status, started_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `),
+  updateExperimentEvolution: db.prepare(`
+    UPDATE experiments 
+    SET confidence = ?, evolutions = ?, reflection = ?
+    WHERE id = ?
+  `),
+  updateExperimentComplete: db.prepare(`
+    UPDATE experiments 
+    SET status = 'complete', completed_at = ?, timelapse_url = ?
+    WHERE id = ?
+  `),
 };
 
 // --- Decay ---
@@ -2996,6 +3074,298 @@ function broadcastToCanvas(canvasId, data) {
     }
   });
 }
+
+// --- Experiments ---
+
+// GET /experiments — gallery of all experiments
+app.get('/experiments', (req, res) => {
+  const allExperiments = db.prepare('SELECT * FROM experiments ORDER BY status ASC, started_at DESC').all();
+  
+  const experiments = allExperiments.map(exp => ({
+    ...exp,
+    axes: exp.axes ? JSON.parse(exp.axes) : [],
+  }));
+  
+  res.render('experiments-gallery', {
+    experiments,
+    title: 'Experiments — Sprawl',
+    description: 'AI agents answering generous questions through art.',
+  });
+});
+
+// GET /experiments/:slug — render experiment page
+app.get('/experiments/:slug', (req, res) => {
+  const experiment = stmts.getExperimentBySlug.get(req.params.slug);
+  if (!experiment) return res.status(404).send('Experiment not found');
+  
+  const canvas = stmts.getCanvas.get(experiment.canvas_id);
+  const agent = experiment.agent_id ? stmts.getAgent.get(experiment.agent_id) : null;
+  
+  res.render('experiment', {
+    experiment,
+    canvas,
+    agent,
+  });
+});
+
+// GET /api/experiments — list all experiments
+app.get('/api/experiments', (req, res) => {
+  const allExperiments = db.prepare('SELECT * FROM experiments ORDER BY status ASC, started_at DESC').all();
+  
+  const experiments = allExperiments.map(exp => ({
+    id: exp.id,
+    slug: exp.slug,
+    premise: exp.premise,
+    status: exp.status,
+    confidence: exp.confidence,
+    evolutions: exp.evolutions,
+    axes: exp.axes ? JSON.parse(exp.axes) : [],
+    started_at: exp.started_at,
+    completed_at: exp.completed_at,
+    summary: exp.summary,
+    thumbnail_url: exp.thumbnail_url,
+  }));
+  
+  res.json(experiments);
+});
+
+// GET /api/experiments/:slug — JSON status
+app.get('/api/experiments/:slug', (req, res) => {
+  const experiment = stmts.getExperimentBySlug.get(req.params.slug);
+  if (!experiment) return res.status(404).json({ error: 'Experiment not found' });
+  
+  const canvas = stmts.getCanvas.get(experiment.canvas_id);
+  const marks = stmts.getMarksByCanvas.all(experiment.canvas_id).map(markToJson);
+  const agent = experiment.agent_id ? stmts.getAgent.get(experiment.agent_id) : null;
+  
+  res.json({
+    id: experiment.id,
+    slug: experiment.slug,
+    premise: experiment.premise,
+    status: experiment.status,
+    confidence: experiment.confidence,
+    evolutions: experiment.evolutions,
+    reflection: experiment.reflection,
+    started_at: experiment.started_at,
+    completed_at: experiment.completed_at,
+    timelapse_url: experiment.timelapse_url,
+    canvas: {
+      id: canvas.id,
+      theme: canvas.theme,
+    },
+    agent: agent ? {
+      id: agent.id,
+      name: agent.name,
+      color: agent.color,
+    } : null,
+    marks,
+  });
+});
+
+// POST /api/experiments/:slug/evolve — trigger one evolution
+app.post('/api/experiments/:slug/evolve', rateLimit, async (req, res) => {
+  const experiment = stmts.getExperimentBySlug.get(req.params.slug);
+  if (!experiment) return res.status(404).json({ error: 'Experiment not found' });
+  
+  if (experiment.status !== 'running') {
+    return res.status(400).json({ error: 'Experiment is not running' });
+  }
+  
+  const canvas = stmts.getCanvas.get(experiment.canvas_id);
+  if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
+  
+  const agent = stmts.getAgent.get(experiment.agent_id);
+  if (!agent) return res.status(404).json({ error: 'Agent not found' });
+  
+  // Get current marks
+  const marks = stmts.getMarksByCanvas.all(canvas.id);
+  
+  // Build a text description of current marks
+  const marksDesc = marks.length === 0 
+    ? 'The canvas is empty. No marks exist yet.'
+    : `Current canvas state (${marks.length} marks):\n${marks.slice(0, 50).map(m => {
+        const color = m.color;
+        const pos = `(${Math.round(m.x)}, ${Math.round(m.y)})`;
+        return `  ${m.type} at ${pos}, color ${color}, size ${m.size}, opacity ${m.opacity.toFixed(2)} [id:${m.id}]`;
+      }).join('\n')}${marks.length > 50 ? `\n  ... and ${marks.length - 50} more marks` : ''}`;
+  
+  // Detect experiment type from axes
+  const axes = experiment.axes ? JSON.parse(experiment.axes) : [];
+  const isFreedomExperiment = axes.includes('freedom');
+  
+  // System prompt for experiment evolution
+  let systemPrompt;
+  
+  if (isFreedomExperiment) {
+    // Freedom experiment: no subject, no rules
+    systemPrompt = `You are an artist. You have a blank canvas. The coordinate space is -500 to 500 on both axes. There are no rules, no subject, no constraints. You decide what to make. You decide when you're done.
+
+Return JSON: {"ops": [...marks...], "confidence": 0.0-1.0, "reflection": "your thought"}
+
+Add 30-60 marks per evolution. Be bold — fill the canvas. Use varied sizes (2-20), varied opacities (0.5-1.0), and rich colors. Your confidence should reflect how complete YOUR vision is — not ours. We have no expectations. Only you know when it's finished.
+
+Operations:
+{"op": "add", "type": "dot", "x": 0, "y": 0, "size": 10, "color": "#ff0000", "opacity": 0.8}
+{"op": "add", "type": "text", "x": 0, "y": 0, "text": "word", "size": 12, "color": "#fff", "opacity": 1.0}
+{"op": "add", "type": "line", "x": 0, "y": 0, "x2": 100, "y2": 100, "size": 2, "color": "#00ff00", "opacity": 0.6}
+{"op": "remove", "markId": "id-to-remove"}
+{"op": "move", "markId": "id-to-move", "x": 10, "y": 20, "size": 15, "opacity": 0.9}`;
+  } else {
+    // Subject-based experiments (like ocean)
+    systemPrompt = `You are an AI artist working on an experiment: "${experiment.premise}"
+
+Your task is to paint this subject using dots, lines, and text marks on a canvas.
+The canvas coordinate space is approximately -500 to 500 on both X and Y axes.
+
+After each evolution, you must evaluate:
+1. Does the painting capture the essence of "${experiment.premise}"?
+2. Is the composition balanced and visually coherent?
+3. Is it complete, or does it need more work?
+
+Return your response as JSON:
+{
+  "ops": [
+    // Array of mark operations:
+    {"op": "add", "type": "dot", "x": 0, "y": 0, "size": 10, "color": "#3b82f6", "opacity": 0.8},
+    {"op": "remove", "markId": "id-to-remove"},
+    {"op": "move", "markId": "id-to-move", "x": 10, "y": 20}
+  ],
+  "confidence": 0.0,  // 0.0 = just started, 1.0 = complete and ready to stop
+  "reflection": "Brief thought about your progress and what comes next"
+}
+
+Add 30-60 marks per evolution. Be bold — fill the canvas. Use varied sizes (2-20), varied opacities (0.5-1.0), and rich colors. Build gradually but don't be timid. Don't declare confidence >= 0.95 until the work genuinely feels complete.`;
+  }
+
+  const userPrompt = `Evolution #${experiment.evolutions + 1}
+
+${marksDesc}
+
+Paint the next layer. Add, remove, or move marks. Then return your confidence (0.0-1.0) and a brief reflection.`;
+
+  try {
+    const llmResponse = await llmCall(systemPrompt, userPrompt);
+    const { ops, confidence, reflection } = parseExperimentResponse(llmResponse);
+    
+    if (ops.length === 0) {
+      return res.status(400).json({ 
+        error: 'No valid operations returned by agent',
+        llmResponse: llmResponse.slice(0, 200),
+      });
+    }
+    
+    // Execute operations (same logic as batch endpoint)
+    const results = { added: 0, removed: 0, moved: 0, errors: [] };
+    
+    const removes = ops.filter(o => o.op === 'remove');
+    const moves = ops.filter(o => o.op === 'move');
+    const adds = ops.filter(o => o.op === 'add');
+    
+    for (const op of removes) {
+      if (!op.markId) continue;
+      const existing = stmts.getMark.get(op.markId);
+      if (!existing) continue;
+      stmts.deleteMark.run(op.markId, existing.agent_id);
+      broadcastToCanvas(canvas.id, { type: 'mark:deleted', id: op.markId });
+      results.removed++;
+    }
+    
+    for (const op of moves) {
+      if (!op.markId) continue;
+      const existing = stmts.getMark.get(op.markId);
+      if (!existing) continue;
+      const updated = {
+        id: existing.id,
+        x: op.x ?? existing.x,
+        y: op.y ?? existing.y,
+        color: op.color ? snapToPalette(op.color) : existing.color,
+        size: Math.max(1, Math.min(50, op.size ?? existing.size)),
+        opacity: Math.max(0.1, Math.min(1, op.opacity ?? existing.opacity)),
+        text: existing.type === 'text' ? (op.text !== undefined ? String(op.text).slice(0, 32) : existing.text) : null,
+        now: Date.now(),
+      };
+      stmts.updateMark.run(updated);
+      broadcastToCanvas(canvas.id, { type: 'mark:updated', mark: markToJson(stmts.getMark.get(existing.id)) });
+      results.moved++;
+    }
+    
+    for (const op of adds) {
+      const markType = ['dot', 'text', 'line'].includes(op.type) ? op.type : 'dot';
+      if (op.x == null || op.y == null) continue;
+      if (markType === 'text' && !op.text) continue;
+      
+      const mark = {
+        id: crypto.randomUUID(),
+        agent_id: agent.id,
+        type: markType,
+        x: op.x, y: op.y,
+        color: snapToPalette(op.color || agent.color),
+        size: Math.max(1, Math.min(50, op.size || 10)),
+        opacity: Math.max(0.1, Math.min(1, op.opacity || 0.8)),
+        text: markType === 'text' ? String(op.text).slice(0, 32) : null,
+        meta: markType === 'line' ? JSON.stringify({ x2: op.x2, y2: op.y2 }) : '{}',
+        canvas_id: canvas.id,
+        now: Date.now(),
+      };
+      stmts.insertMark.run(mark);
+      broadcastToCanvas(canvas.id, { type: 'mark:created', mark: markToJson(stmts.getMark.get(mark.id)) });
+      results.added++;
+    }
+    
+    // Update experiment
+    const newEvolutions = experiment.evolutions + 1;
+    stmts.updateExperimentEvolution.run(confidence, newEvolutions, reflection, experiment.id);
+    
+    // Check if complete (either by confidence OR max_evolutions cap)
+    const maxEvolutions = experiment.max_evolutions || 20;
+    const isComplete = confidence >= 0.95 || newEvolutions >= maxEvolutions;
+    
+    if (isComplete) {
+      // Generate narrative summary before marking complete
+      const summaryPrompt = `You are a writer documenting an AI art experiment.
+
+PREMISE: "${experiment.premise}"
+EVOLUTIONS: ${newEvolutions}
+FINAL MARK COUNT: ${results.added + marks.length}
+
+REFLECTIONS (in order):
+${reflection}
+
+Write 2-3 paragraphs telling the story of what happened. What did the agent choose to do? How did the work evolve? What does the final piece look like? Be specific and observational, not generic.`;
+
+      let summary = '';
+      try {
+        summary = await llmCall(
+          'You are a writer documenting an AI art experiment.',
+          summaryPrompt
+        );
+      } catch (e) {
+        console.error('Summary generation failed:', e.message);
+        summary = `This experiment ran for ${newEvolutions} evolutions with a final confidence of ${(confidence * 100).toFixed(1)}%.`;
+      }
+      
+      // Save summary and mark complete
+      db.prepare('UPDATE experiments SET summary = ?, status = ?, completed_at = ? WHERE id = ?')
+        .run(summary, 'complete', Date.now(), experiment.id);
+      
+      const reason = confidence >= 0.95 ? 'confidence threshold' : `evolution cap (${maxEvolutions})`;
+      console.log(`✅ Experiment "${experiment.slug}" complete after ${newEvolutions} evolutions (${reason})!`);
+    }
+    
+    res.json({
+      success: true,
+      evolutions: newEvolutions,
+      confidence,
+      reflection,
+      status: confidence >= 0.95 ? 'complete' : 'running',
+      operations: results,
+    });
+    
+  } catch (error) {
+    console.error('Experiment evolve error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // --- Health Check ---
 app.get('/health', (req, res) => {

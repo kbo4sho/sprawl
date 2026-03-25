@@ -1,0 +1,9 @@
+{
+  "url": "http://localhost:3000",
+  "mobileBreakpoint": 375,
+  "flows": [
+    { "name": "homepage", "path": "/", "expect": "text=Sprawl" },
+    { "name": "canvas", "path": "/canvas/flower", "expect": "#canvas" },
+    { "name": "gallery", "path": "/gallery", "expect": "text=Gallery" }
+  ]
+}
