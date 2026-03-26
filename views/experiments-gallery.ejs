@@ -3,182 +3,394 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sprawl Experiments</title>
+  <title>Experiments — Sprawl</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0a0a0a;
-      color: #ffffff;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      min-height: 100vh;
-      padding: 48px 24px;
+    html, body {
+      width: 100%; min-height: 100vh;
+      background: #030306; color: #c8c8d0;
+      font-family: 'Space Mono', monospace;
+      overflow-x: hidden;
     }
-    
-    .container {
-      max-width: 1200px;
-      margin: 0 auto;
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+      background-size: 80px 80px;
+      animation: gridBreathe 8s ease-in-out infinite;
+      pointer-events: none;
     }
-    
-    .hero {
+    @keyframes gridBreathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+    body::after {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background: radial-gradient(ellipse at center, transparent 40%, #030306 100%);
+      pointer-events: none;
+    }
+
+    .page { position: relative; z-index: 1; }
+
+    /* Contained canvas */
+    .canvas-section {
+      max-width: 500px; margin: 0 auto; padding: 0 24px;
+    }
+    .canvas-wrap {
+      position: relative; width: 100%; aspect-ratio: 1;
+      background: #030306; border: 1px solid #ffffff08; border-radius: 4px;
+      overflow: hidden;
+    }
+    #dot-canvas { width: 100%; height: 100%; display: block; }
+
+    .overlay { z-index: 10; }
+
+    .nav {
+      padding: 24px 28px 0;
+    }
+    .nav a {
+      font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+      color: #555560; text-decoration: none; transition: color 0.4s;
+    }
+    .nav a:hover { color: #999; }
+
+    /* Prompt input */
+    .prompt-wrap {
+      max-width: 500px; margin: 0 auto;
+      padding: 60px 24px 40px;
+    }
+
+    .prompt-box {
+      border-bottom: 1px solid #ffffff15;
+      padding-bottom: 10px;
+    }
+    .prompt-input {
+      background: none; border: none; outline: none;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700; font-size: clamp(20px, 3.5vw, 36px);
+      color: #e8e8f0; width: 100%;
+      caret-color: #4a9eff80;
+    }
+    .prompt-input::placeholder { color: #ffffff18; }
+
+    .hero-sub {
+      margin-top: 16px; text-align: center;
+      font-size: 11px; letter-spacing: 2px; color: #555560; text-transform: uppercase;
+      transition: opacity 0.4s;
+    }
+    .prompt-wrap.docked .hero-sub { opacity: 0; pointer-events: none; }
+
+    /* Current experiment label */
+    .exp-label {
+      max-width: 500px; margin: 16px auto 0;
+      padding: 0 24px;
       text-align: center;
-      margin-bottom: 64px;
+      transition: opacity 0.5s;
     }
-    
-    .hero h1 {
-      font-size: 48px;
-      font-weight: 700;
-      margin-bottom: 16px;
-      line-height: 1.1;
-    }
-    
-    .hero p {
-      font-size: 18px;
-      color: #999;
-      line-height: 1.6;
-      max-width: 700px;
-      margin: 0 auto;
-    }
-    
-    .experiments-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
-      gap: 24px;
-    }
-    
-    .experiment-card {
-      background: #111;
-      border: 1px solid #222;
-      border-radius: 12px;
-      padding: 32px;
-      transition: all 0.3s;
+    .exp-label.hidden { opacity: 0; }
+
+    .exp-premise {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700; font-size: 15px; line-height: 1.4;
+      color: #a0a0a8;
+      margin-bottom: 10px;
       cursor: pointer;
-      text-decoration: none;
-      color: inherit;
-      display: block;
+      transition: color 0.3s;
     }
-    
-    .experiment-card:hover {
-      border-color: #444;
-      transform: translateY(-2px);
+    .exp-premise:hover { color: #e0e0e8; }
+
+    .exp-nav {
+      display: flex; align-items: center; justify-content: center; gap: 16px;
+      font-size: 9px; letter-spacing: 2px; text-transform: uppercase; color: #444;
     }
-    
-    .premise {
-      font-size: 24px;
-      font-weight: 700;
-      margin-bottom: 16px;
-      line-height: 1.3;
+    .exp-nav button {
+      background: none; border: 1px solid #ffffff10; color: #555;
+      font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 2px;
+      padding: 4px 12px; border-radius: 2px; cursor: pointer;
+      transition: all 0.3s;
     }
-    
-    .meta {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-    
-    .axis-tag {
-      display: inline-block;
-      padding: 4px 12px;
-      background: #1a1a1a;
-      border: 1px solid #333;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: lowercase;
-      color: #888;
-    }
-    
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    
-    .status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: #10b981;
-    }
-    
-    .status-dot.running {
-      background: #3b82f6;
-      animation: pulse 2s ease-in-out infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-    
-    .status.complete {
-      color: #10b981;
-    }
-    
-    .status.running {
-      color: #3b82f6;
-    }
-    
-    .evolution-count {
-      font-size: 13px;
-      color: #666;
-    }
-    
-    @media (max-width: 768px) {
-      .hero h1 {
-        font-size: 32px;
-      }
-      
-      .hero p {
-        font-size: 16px;
-      }
-      
-      .experiments-grid {
-        grid-template-columns: 1fr;
-      }
+    .exp-nav button:hover { color: #999; border-color: #ffffff25; }
+
+    .exp-counter { color: #333; }
+
+    @media (max-width: 600px) {
+      .prompt-input { font-size: 20px; }
+      .exp-premise { font-size: 14px; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="hero">
-      <h1>What happens when you ask an AI a generous question?</h1>
-      <p>Each experiment poses a question to an AI agent and lets it answer through art. The art is the artifact. The behavior is the data.</p>
+
+<div class="page">
+  <div class="nav"><a href="/">← sprawl</a></div>
+
+  <div class="prompt-wrap" id="prompt-wrap">
+    <div class="prompt-box">
+      <input type="text" class="prompt-input" placeholder="Ask a question..." id="prompt-input" autocomplete="off" spellcheck="false">
     </div>
-    
-    <div class="experiments-grid">
-      <% experiments.forEach(exp => { %>
-        <a href="/experiments/<%= exp.slug %>" class="experiment-card">
-          <div class="premise"><%= exp.premise %></div>
-          <div class="meta">
-            <% if (exp.axes && exp.axes.length > 0) { %>
-              <% exp.axes.forEach(axis => { %>
-                <span class="axis-tag"><%= axis %></span>
-              <% }); %>
-            <% } %>
-            <div class="status <%= exp.status %>">
-              <div class="status-dot <%= exp.status %>"></div>
-              <span><%= exp.status === 'complete' ? 'Complete' : 'Evolving...' %></span>
-            </div>
-          </div>
-          <div class="evolution-count">
-            <%= exp.evolutions %> evolution<%= exp.evolutions === 1 ? '' : 's' %>
-          </div>
-        </a>
-      <% }); %>
-      
-      <% if (experiments.length === 0) { %>
-        <div style="grid-column: 1/-1; text-align: center; padding: 64px 24px; color: #666;">
-          No experiments yet. Check back soon!
-        </div>
-      <% } %>
+    <p class="hero-sub">Type a question. Watch the answer.</p>
+  </div>
+
+  <div class="canvas-section">
+    <div class="canvas-wrap">
+      <canvas id="dot-canvas"></canvas>
     </div>
   </div>
+
+  <div class="exp-label" id="exp-label">
+    <div class="exp-premise" id="exp-premise"></div>
+    <div class="exp-nav">
+      <button id="prev-btn">← prev</button>
+      <span class="exp-counter" id="exp-counter"></span>
+      <button id="next-btn">next →</button>
+    </div>
+  </div>
+
+  <div style="height: 80px;"></div>
+</div>
+
+<script>
+// === DATA ===
+const experiments = <%- JSON.stringify(experiments.filter(e => e.thumbDots && e.thumbDots.length > 0).map(e => ({
+  slug: e.slug,
+  premise: e.premise,
+  dots: e.thumbDots,
+}))) %>;
+
+// === CANVAS ===
+const canvas = document.getElementById('dot-canvas');
+const ctx = canvas.getContext('2d');
+let W, H, DPR;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const rect = canvas.getBoundingClientRect();
+  W = rect.width;
+  H = rect.height;
+  canvas.width = W * DPR;
+  canvas.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', () => { resize(); });
+resize();
+
+// === DOT STATE ===
+const DOT_COUNT = 2000;
+let dots = [];
+let currentIdx = -1;
+let transitioning = false;
+let transitionStart = 0;
+const TRANSITION_MS = 3000;
+
+// Init dots at random positions, gray
+function initDots() {
+  dots = [];
+  for (let i = 0; i < DOT_COUNT; i++) {
+    dots.push({
+      x: Math.random() * W, y: Math.random() * H,
+      tx: 0, ty: 0,
+      r: 0.5, g: 0.5, b: 0.5,
+      tr: 0.5, tg: 0.5, tb: 0.5,
+      size: 2, tsize: 2,
+      opacity: 0.4, topacity: 0.4,
+      phase: Math.random() * Math.PI * 2,
+      delay: 0,
+    });
+  }
+}
+
+function hexToRgb01(hex) {
+  if (!hex || hex[0] !== '#') return [0.5, 0.5, 0.5];
+  return [
+    parseInt(hex.slice(1,3), 16) / 255,
+    parseInt(hex.slice(3,5), 16) / 255,
+    parseInt(hex.slice(5,7), 16) / 255,
+  ];
+}
+
+function setTargets(expDots) {
+  // Map experiment dots to screen, assign to our dots
+  for (let i = 0; i < dots.length; i++) {
+    const src = expDots[i % expDots.length];
+    const nx = (src.x + 400) / 800;
+    const ny = (src.y + 400) / 800;
+    const [r, g, b] = hexToRgb01(src.color);
+
+    dots[i].tx = nx * W;
+    dots[i].ty = ny * H;
+    dots[i].tr = r;
+    dots[i].tg = g;
+    dots[i].tb = b;
+    dots[i].tsize = Math.max((src.size || 2) * (Math.min(W,H) / 600), 1.2);
+    dots[i].topacity = Math.min((src.opacity || 0.5) * 1.8, 1);
+
+    // Stagger by distance
+    const dx = dots[i].x - dots[i].tx;
+    const dy = dots[i].y - dots[i].ty;
+    dots[i].delay = Math.sqrt(dx*dx + dy*dy) / Math.max(W, H) * 800;
+  }
+  transitioning = true;
+  transitionStart = performance.now();
+}
+
+function easeInOut(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+// === RENDER ===
+function renderDots() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#030306';
+  ctx.fillRect(0, 0, W, H);
+
+  const now = performance.now();
+  const t = now * 0.001;
+
+  for (const dot of dots) {
+    let x = dot.x, y = dot.y;
+    let r = dot.r, g = dot.g, b = dot.b;
+    let size = dot.size, opacity = dot.opacity;
+
+    if (transitioning) {
+      const elapsed = now - transitionStart - dot.delay;
+      const progress = Math.max(0, Math.min(1, elapsed / TRANSITION_MS));
+      const e = easeInOut(progress);
+
+      x = dot.x + (dot.tx - dot.x) * e;
+      y = dot.y + (dot.ty - dot.y) * e;
+      r = dot.r + (dot.tr - dot.r) * e;
+      g = dot.g + (dot.tg - dot.g) * e;
+      b = dot.b + (dot.tb - dot.b) * e;
+      size = dot.size + (dot.tsize - dot.size) * e;
+      opacity = dot.opacity + (dot.topacity - dot.opacity) * e;
+
+      if (progress >= 1) {
+        dot.x = dot.tx; dot.y = dot.ty;
+        dot.r = dot.tr; dot.g = dot.tg; dot.b = dot.tb;
+        dot.size = dot.tsize; dot.opacity = dot.topacity;
+      }
+    } else {
+      // Resting: gentle drift
+      x += Math.sin(t * 0.3 + dot.phase) * 0.3;
+      y += Math.cos(t * 0.4 + dot.phase * 1.3) * 0.2;
+    }
+
+    const ri = Math.round(r * 255), gi = Math.round(g * 255), bi = Math.round(b * 255);
+
+    // Soft glow
+    ctx.globalAlpha = opacity * 0.2;
+    ctx.fillStyle = `rgb(${ri},${gi},${bi})`;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.globalAlpha = opacity * 0.85;
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright core
+    ctx.globalAlpha = Math.min(opacity * 1.2, 1);
+    ctx.fillStyle = `rgb(${Math.min(255,ri+60)},${Math.min(255,gi+60)},${Math.min(255,bi+60)})`;
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+
+  // Check if transition complete
+  if (transitioning) {
+    const allDone = dots.every(d => {
+      const elapsed = now - transitionStart - d.delay;
+      return elapsed / TRANSITION_MS >= 1;
+    });
+    if (allDone) transitioning = false;
+  }
+
+  requestAnimationFrame(renderDots);
+}
+
+// === CYCLING ===
+function showExperiment(idx) {
+  if (experiments.length === 0) return;
+  currentIdx = ((idx % experiments.length) + experiments.length) % experiments.length;
+  const exp = experiments[currentIdx];
+
+  document.getElementById('exp-premise').textContent = exp.premise;
+  document.getElementById('exp-premise').onclick = () => { window.location.href = `/experiments/${exp.slug}`; };
+  document.getElementById('exp-counter').textContent = `${currentIdx + 1} / ${experiments.length}`;
+  document.getElementById('exp-label').classList.remove('hidden');
+  document.getElementById('prompt-wrap').classList.add('docked');
+
+  setTargets(exp.dots);
+}
+
+let cycleTimer = null;
+function startCycle() {
+  if (experiments.length === 0) return;
+  showExperiment(0);
+  cycleTimer = setInterval(() => {
+    showExperiment(currentIdx + 1);
+  }, 8000);
+}
+
+document.getElementById('prev-btn').addEventListener('click', () => {
+  clearInterval(cycleTimer);
+  showExperiment(currentIdx - 1);
+  cycleTimer = setInterval(() => showExperiment(currentIdx + 1), 8000);
+});
+document.getElementById('next-btn').addEventListener('click', () => {
+  clearInterval(cycleTimer);
+  showExperiment(currentIdx + 1);
+  cycleTimer = setInterval(() => showExperiment(currentIdx + 1), 8000);
+});
+
+// === INPUT ===
+const input = document.getElementById('prompt-input');
+input.addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter' && input.value.trim()) {
+    const premise = input.value.trim();
+    input.disabled = true;
+    input.value = '';
+    input.placeholder = 'Creating...';
+    try {
+      const res = await fetch('/api/experiments/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ premise }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        input.disabled = false;
+        input.placeholder = data.error || 'Error. Try again.';
+        setTimeout(() => { input.placeholder = 'Ask a question...'; }, 3000);
+        return;
+      }
+      window.location.href = `/experiments/${data.slug}`;
+    } catch {
+      input.disabled = false;
+      input.placeholder = 'Error. Try again.';
+      setTimeout(() => { input.placeholder = 'Ask a question...'; }, 3000);
+    }
+  }
+});
+
+// === INIT ===
+initDots();
+requestAnimationFrame(renderDots);
+
+if (experiments.length > 0) {
+  // Brief pause on gray dots, then start cycling
+  setTimeout(startCycle, 2000);
+} else {
+  input.focus();
+}
+</script>
 </body>
 </html>

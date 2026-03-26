@@ -9,3 +9,4 @@ sdxl-env/
 *.pyc
 __pycache__/
 curator-frames/
+public/experiments/*.png
