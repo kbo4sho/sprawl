@@ -83,6 +83,20 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.PORT || 3500;
 const DATA_DIR = process.env.RAILWAY_VOLUME_MOUNT_PATH || path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+// Cleanup old frames to free disk space (Railway volumes fill up)
+const FRAMES_DIR = path.join(DATA_DIR, 'curator-frames');
+if (fs.existsSync(FRAMES_DIR)) {
+  try {
+    const files = fs.readdirSync(FRAMES_DIR);
+    if (files.length > 100) {
+      console.log(`Cleaning ${files.length} old curator frames...`);
+      files.forEach(f => { try { fs.unlinkSync(path.join(FRAMES_DIR, f)); } catch {} });
+      console.log('Curator frames cleaned');
+    }
+  } catch (e) { console.error('Cleanup error:', e.message); }
+}
+
 const DB_PATH = path.join(DATA_DIR, 'sprawl.db');
 
 // Import snapshot and gardener modules
@@ -727,34 +741,28 @@ const stmts = {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `),
   getPurchasesByUser: db.prepare('SELECT * FROM purchases WHERE user_id = ? ORDER BY created_at DESC'),
-  // Experiments
-  getExperiment: db.prepare('SELECT * FROM experiments WHERE id = ?'),
-  getExperimentBySlug: db.prepare('SELECT * FROM experiments WHERE slug = ?'),
-  insertExperiment: db.prepare(`
-    INSERT INTO experiments (id, slug, premise, canvas_id, agent_id, status, started_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `),
-  updateExperimentEvolution: db.prepare(`
-    UPDATE experiments 
-    SET confidence = ?, evolutions = ?, reflection = ?
-    WHERE id = ?
-  `),
-  updateExperimentComplete: db.prepare(`
-    UPDATE experiments 
-    SET status = 'complete', completed_at = ?, timelapse_url = ?
-    WHERE id = ?
-  `),
-  // Ask experiments
-  insertAskExperiment: db.prepare(`
-    INSERT INTO experiments (id, slug, premise, canvas_id, type, status, started_at)
-    VALUES (?, ?, ?, ?, 'ask', 'generating', ?)
-  `),
-  updateAskExperimentReady: db.prepare(`
-    UPDATE experiments 
-    SET status = 'ready', image_url = ?, dots_json = ?, image_prompt = ?, completed_at = ?
-    WHERE id = ?
-  `),
 };
+
+// Experiments prepared statements (lazy — only init if table exists)
+let expStmts = null;
+function getExpStmts() {
+  if (expStmts) return expStmts;
+  try {
+    expStmts = {
+      getExperiment: db.prepare('SELECT * FROM experiments WHERE id = ?'),
+      getExperimentBySlug: db.prepare('SELECT * FROM experiments WHERE slug = ?'),
+      insertExperiment: db.prepare(`INSERT INTO experiments (id, slug, premise, canvas_id, agent_id, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)`),
+      updateExperimentEvolution: db.prepare(`UPDATE experiments SET confidence = ?, evolutions = ?, reflection = ? WHERE id = ?`),
+      updateExperimentComplete: db.prepare(`UPDATE experiments SET status = 'complete', completed_at = ?, timelapse_url = ? WHERE id = ?`),
+      insertAskExperiment: db.prepare(`INSERT INTO experiments (id, slug, premise, canvas_id, type, status, started_at) VALUES (?, ?, ?, ?, 'ask', 'generating', ?)`),
+      updateAskExperimentReady: db.prepare(`UPDATE experiments SET status = 'ready', image_url = ?, dots_json = ?, image_prompt = ?, completed_at = ? WHERE id = ?`),
+    };
+    return expStmts;
+  } catch (e) {
+    console.error('Experiments stmts not available:', e.message);
+    return null;
+  }
+}
 
 // --- Decay ---
 function getDecayMultiplier(agentId) {
@@ -3140,7 +3148,7 @@ app.get('/experiments', (req, res) => {
 
 // GET /experiments/:slug — render experiment page
 app.get('/experiments/:slug', (req, res) => {
-  const experiment = stmts.getExperimentBySlug.get(req.params.slug);
+  const experiment = getExpStmts()?.getExperimentBySlug.get(req.params.slug);
   if (!experiment) return res.status(404).send('Experiment not found');
   
   const canvas = stmts.getCanvas.get(experiment.canvas_id);
@@ -3177,7 +3185,7 @@ app.get('/api/experiments', (req, res) => {
 
 // GET /api/experiments/:slug — JSON status
 app.get('/api/experiments/:slug', (req, res) => {
-  const experiment = stmts.getExperimentBySlug.get(req.params.slug);
+  const experiment = getExpStmts()?.getExperimentBySlug.get(req.params.slug);
   if (!experiment) return res.status(404).json({ error: 'Experiment not found' });
   
   const canvas = stmts.getCanvas.get(experiment.canvas_id);
@@ -3269,7 +3277,7 @@ app.post('/api/experiments/ask', express.json(), rateLimit, async (req, res) => 
   });
   
   // Create experiment
-  stmts.insertAskExperiment.run(experimentId, slug, premise.trim(), canvasId, now);
+  getExpStmts()?.insertAskExperiment.run(experimentId, slug, premise.trim(), canvasId, now);
   
   // 5. Return slug immediately for redirect
   res.json({ slug });
@@ -3321,7 +3329,7 @@ app.post('/api/experiments/ask', express.json(), rateLimit, async (req, res) => 
       const dotsJson = JSON.stringify(clientDots);
       
       // e. Update status to 'ready'
-      stmts.updateAskExperimentReady.run(
+      getExpStmts()?.updateAskExperimentReady.run(
         `/experiments/${slug}.png`,
         dotsJson,
         imagePrompt.trim().slice(0, 500),
@@ -3345,7 +3353,7 @@ app.post('/api/experiments/ask', express.json(), rateLimit, async (req, res) => 
 
 // POST /api/experiments/:slug/evolve — trigger one evolution
 app.post('/api/experiments/:slug/evolve', rateLimit, async (req, res) => {
-  const experiment = stmts.getExperimentBySlug.get(req.params.slug);
+  const experiment = getExpStmts()?.getExperimentBySlug.get(req.params.slug);
   if (!experiment) return res.status(404).json({ error: 'Experiment not found' });
   
   if (experiment.status !== 'running') {
@@ -3495,7 +3503,7 @@ Paint the next layer. Add, remove, or move marks. Then return your confidence (0
     
     // Update experiment
     const newEvolutions = experiment.evolutions + 1;
-    stmts.updateExperimentEvolution.run(confidence, newEvolutions, reflection, experiment.id);
+    getExpStmts()?.updateExperimentEvolution.run(confidence, newEvolutions, reflection, experiment.id);
     
     // Check if complete (either by confidence OR max_evolutions cap)
     const maxEvolutions = experiment.max_evolutions || 20;
