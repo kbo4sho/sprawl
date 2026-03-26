@@ -406,7 +406,7 @@ try {
       id TEXT PRIMARY KEY,
       slug TEXT UNIQUE NOT NULL,
       premise TEXT NOT NULL,
-      canvas_id TEXT NOT NULL,
+      canvas_id TEXT,
       agent_id TEXT,
       status TEXT DEFAULT 'running',
       confidence REAL DEFAULT 0.0,
@@ -415,8 +415,7 @@ try {
       completed_at INTEGER,
       timelapse_url TEXT,
       reflection TEXT,
-      FOREIGN KEY (canvas_id) REFERENCES canvases(id),
-      FOREIGN KEY (agent_id) REFERENCES agents(id)
+      -- canvas_id and agent_id are nullable for 'ask' type experiments
     )
   `);
   console.log('Experiments table ready');
@@ -440,7 +439,16 @@ try {
   ensureExpCol('dots_json', 'dots_json TEXT');
   ensureExpCol('image_prompt', 'image_prompt TEXT');
 } catch (e) {
-  console.error('Experiments migration error:', e);
+  console.error('Experiments migration error:', e.message);
+  // Ensure table exists even if migration partially failed
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS experiments (
+      id TEXT PRIMARY KEY, slug TEXT UNIQUE, premise TEXT,
+      canvas_id TEXT, agent_id TEXT, status TEXT DEFAULT 'running',
+      confidence REAL DEFAULT 0.0, evolutions INTEGER DEFAULT 0,
+      started_at INTEGER, completed_at INTEGER, timelapse_url TEXT, reflection TEXT
+    )`);
+  } catch (e2) { console.error('Experiments fallback create error:', e2.message); }
 }
 
 // --- Palette ---
