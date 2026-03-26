@@ -414,8 +414,7 @@ try {
       started_at INTEGER,
       completed_at INTEGER,
       timelapse_url TEXT,
-      reflection TEXT,
-      -- canvas_id and agent_id are nullable for 'ask' type experiments
+      reflection TEXT
     )
   `);
   console.log('Experiments table ready');
