@@ -10,3 +10,5 @@ sdxl-env/
 __pycache__/
 curator-frames/
 public/experiments/*.png
+server.js.backup-refactor
+server.js.backup
