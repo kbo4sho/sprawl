@@ -67,6 +67,8 @@
     .prompt-box {
       border-bottom: 1px solid #ffffff15;
       padding-bottom: 10px;
+      position: relative;
+      z-index: 100;
     }
     .prompt-input {
       background: none; border: none; outline: none;
@@ -74,6 +76,9 @@
       font-weight: 700; font-size: clamp(20px, 3.5vw, 36px);
       color: #e8e8f0; width: 100%;
       caret-color: #4a9eff80;
+      position: relative;
+      z-index: 100;
+      will-change: contents;
     }
     .prompt-input::placeholder { color: #ffffff18; }
 
