@@ -5,6 +5,9 @@
  *        npm run push-experiment "what does loneliness look like?"
  */
 
+const path = require('path');
+const fs = require('fs');
+
 const LOCAL = 'http://localhost:3500';
 const REMOTE = 'https://sprawl.place';
 
@@ -67,6 +70,17 @@ async function main() {
   });
   const result = await pushRes.json();
   if (result.error) { console.error('Push failed:', result.error); process.exit(1); }
+
+  // 5. Commit + push the image so Railway can serve it
+  const imagePath = path.join(__dirname, '..', 'public', 'experiments', `${slug}.png`);
+  if (fs.existsSync(imagePath)) {
+    console.log('📸 Committing image to repo...');
+    const { execSync } = require('child_process');
+    execSync(`git add public/experiments/${slug}.png && git commit -m "img: ${slug}" && git push`, {
+      cwd: path.join(__dirname, '..'), stdio: 'pipe',
+    });
+    console.log('✅ Image pushed to repo');
+  }
 
   console.log(`\n✅ Live at: ${REMOTE}/experiments/${slug}\n`);
 }

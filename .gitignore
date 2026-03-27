@@ -9,6 +9,6 @@ sdxl-env/
 *.pyc
 __pycache__/
 curator-frames/
-public/experiments/*.png
+# public/experiments/*.png — images committed manually via push-experiment script
 server.js.backup-refactor
 server.js.backup
