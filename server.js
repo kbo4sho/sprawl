@@ -3160,12 +3160,12 @@ app.get('/experiments/:slug', (req, res) => {
   const experiment = getExpStmts()?.getExperimentBySlug.get(req.params.slug);
   if (!experiment) return res.status(404).send('Experiment not found');
   
-  const canvas = stmts.getCanvas.get(experiment.canvas_id);
+  const canvas = experiment.canvas_id ? stmts.getCanvas.get(experiment.canvas_id) : null;
   const agent = experiment.agent_id ? stmts.getAgent.get(experiment.agent_id) : null;
   
   res.render('experiment', {
     experiment,
-    canvas,
+    canvas: canvas || { id: experiment.canvas_id || 'unknown', theme: 'ask' },
     agent,
   });
 });
@@ -3607,14 +3607,14 @@ app.post('/api/admin/import-experiment', express.json(), async (req, res) => {
     // Insert experiment (minimal schema for Railway compat)
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO experiments (
-        id, slug, premise, status, type, confidence, started_at, completed_at, dots_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, slug, premise, canvas_id, status, type, confidence, started_at, completed_at, dots_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
-      experiment.id, experiment.slug, experiment.premise, experiment.status || 'ready',
-      experiment.type || 'ask', experiment.confidence || 0, experiment.started_at, experiment.completed_at,
-      JSON.stringify(dots)
+      experiment.id, experiment.slug, experiment.premise, canvas.id,
+      experiment.status || 'ready', experiment.type || 'ask', experiment.confidence || 0,
+      experiment.started_at, experiment.completed_at, JSON.stringify(dots)
     );
     
     res.json({ success: true, slug: experiment.slug });
