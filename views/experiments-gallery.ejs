@@ -389,15 +389,22 @@ input.addEventListener('keydown', async (e) => {
 });
 
 // === INIT ===
-initDots();
-requestAnimationFrame(renderDots);
-
-if (experiments.length > 0) {
-  // Brief pause on gray dots, then start cycling
-  setTimeout(startCycle, 2000);
-} else {
-  input.focus();
+function start() {
+  resize();
+  // If canvas has no size yet (layout not ready), retry
+  if (W === 0 || H === 0) {
+    requestAnimationFrame(start);
+    return;
+  }
+  initDots();
+  requestAnimationFrame(renderDots);
+  if (experiments.length > 0) {
+    setTimeout(startCycle, 2000);
+  } else if (document.getElementById('prompt-input')) {
+    document.getElementById('prompt-input').focus();
+  }
 }
+requestAnimationFrame(start);
 </script>
 </body>
 </html>
