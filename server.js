@@ -3129,7 +3129,7 @@ function broadcastToCanvas(canvasId, data) {
 
 // GET /experiments — gallery of all experiments
 app.get('/experiments', (req, res) => {
-  const allExperiments = db.prepare('SELECT * FROM experiments ORDER BY status ASC, started_at DESC').all();
+  const allExperiments = db.prepare("SELECT * FROM experiments WHERE status = 'ready' ORDER BY started_at DESC").all();
   
   const experiments = allExperiments.map(exp => {
     // Downsample dots for gallery thumbnails (every 4th dot)
