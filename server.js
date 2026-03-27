@@ -3596,19 +3596,17 @@ app.post('/api/admin/import-experiment', express.json(), async (req, res) => {
       });
     }
     
-    // Insert experiment (skip variation column for Railway compat)
+    // Insert experiment (minimal schema for Railway compat)
     const stmt = db.prepare(`
-      INSERT INTO experiments (
-        id, slug, premise, canvas_id, agent_id, status, confidence, started_at, completed_at,
-        thumbnail_url, public_url, axes, notes, created_by, target_marks, dots_json, type, image_url, caption
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT OR REPLACE INTO experiments (
+        id, slug, premise, status, type, confidence, started_at, completed_at, dots_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
-      experiment.id, experiment.slug, experiment.premise, experiment.canvas_id, experiment.agent_id,
-      experiment.status, experiment.confidence, experiment.started_at, experiment.completed_at,
-      experiment.thumbnail_url, experiment.public_url, experiment.axes, experiment.notes, experiment.created_by,
-      experiment.target_marks, JSON.stringify(dots), experiment.type, experiment.image_url, experiment.caption
+      experiment.id, experiment.slug, experiment.premise, experiment.status || 'ready',
+      experiment.type || 'ask', experiment.confidence || 0, experiment.started_at, experiment.completed_at,
+      JSON.stringify(dots)
     );
     
     res.json({ success: true, slug: experiment.slug });
