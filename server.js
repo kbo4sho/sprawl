@@ -3582,16 +3582,19 @@ app.post('/api/admin/import-experiment', express.json(), async (req, res) => {
   }
   
   try {
-    // Insert canvas first
-    stmts.insertCanvas.run({
-      id: canvas.id,
-      theme: canvas.theme,
-      subthemes: canvas.subthemes,
-      spatial_guide: canvas.spatial_guide,
-      week_of: canvas.week_of,
-      status: canvas.status,
-      created_at: canvas.created_at,
-    });
+    // Insert canvas if it doesn't exist
+    const existing = db.prepare('SELECT id FROM canvases WHERE id = ?').get(canvas.id);
+    if (!existing) {
+      stmts.insertCanvas.run({
+        id: canvas.id,
+        theme: canvas.theme,
+        subthemes: canvas.subthemes,
+        spatial_guide: canvas.spatial_guide,
+        week_of: canvas.week_of,
+        status: canvas.status,
+        created_at: canvas.created_at,
+      });
+    }
     
     // Insert experiment (skip variation column for Railway compat)
     const stmt = db.prepare(`
