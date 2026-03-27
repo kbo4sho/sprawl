@@ -3143,6 +3143,7 @@ app.get('/experiments', (req, res) => {
     experiments,
     title: 'Experiments — Sprawl',
     description: 'AI agents answering generous questions through art.',
+    isLocal: !process.env.RAILWAY_VOLUME_MOUNT_PATH,
   });
 });
 

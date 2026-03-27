@@ -133,12 +133,14 @@
 <div class="page">
   <div class="nav"><a href="/">← sprawl</a></div>
 
+  <% if (isLocal) { %>
   <div class="prompt-wrap" id="prompt-wrap">
     <div class="prompt-box">
       <input type="text" class="prompt-input" placeholder="Ask a question..." id="prompt-input" autocomplete="off" spellcheck="false">
     </div>
     <p class="hero-sub">Type a question. Watch the answer.</p>
   </div>
+  <% } %>
 
   <div class="canvas-section">
     <div class="canvas-wrap">
