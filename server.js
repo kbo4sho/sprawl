@@ -3187,6 +3187,7 @@ app.get('/api/experiments', (req, res) => {
     completed_at: exp.completed_at,
     summary: exp.summary,
     thumbnail_url: exp.thumbnail_url,
+    dots: exp.dots_json ? JSON.parse(exp.dots_json) : [],
   }));
   
   res.json(experiments);
@@ -3197,8 +3198,8 @@ app.get('/api/experiments/:slug', (req, res) => {
   const experiment = getExpStmts()?.getExperimentBySlug.get(req.params.slug);
   if (!experiment) return res.status(404).json({ error: 'Experiment not found' });
   
-  const canvas = stmts.getCanvas.get(experiment.canvas_id);
-  const marks = stmts.getMarksByCanvas.all(experiment.canvas_id).map(markToJson);
+  const canvas = experiment.canvas_id ? stmts.getCanvas.get(experiment.canvas_id) : null;
+  const marks = experiment.canvas_id ? stmts.getMarksByCanvas.all(experiment.canvas_id).map(markToJson) : [];
   const agent = experiment.agent_id ? stmts.getAgent.get(experiment.agent_id) : null;
   
   const response = {
@@ -3213,10 +3214,10 @@ app.get('/api/experiments/:slug', (req, res) => {
     completed_at: experiment.completed_at,
     timelapse_url: experiment.timelapse_url,
     type: experiment.type || 'evolve',
-    canvas: {
+    canvas: canvas ? {
       id: canvas.id,
       theme: canvas.theme,
-    },
+    } : { id: experiment.canvas_id || 'unknown', theme: 'ask' },
     agent: agent ? {
       id: agent.id,
       name: agent.name,
