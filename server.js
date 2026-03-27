@@ -17,7 +17,7 @@ const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4c
 async function llmCall(systemPrompt, userPrompt, model = 'openclaw/dashboard-chat') {
   // Route through local gateway with 30s timeout
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const timeout = setTimeout(() => controller.abort(), 120000);
   try {
     const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
       method: 'POST',
@@ -3297,11 +3297,10 @@ app.post('/api/experiments/ask', express.json(), rateLimit, async (req, res) => 
       const { generateImage } = require('./lib/image-gen');
       const { processReference } = require('./lib/stipple');
       
-      // a. Sonnet call to turn question into image prompt
+      // a. LLM call to turn question into image prompt
       const imagePrompt = await llmCall(
         "You are an artist. Turn this question into a vivid visual scene description for a painting. Be evocative and painterly. One paragraph, 2-3 sentences max. Focus on color, mood, composition.",
-        premise.trim(),
-        'anthropic/claude-sonnet-4-5'
+        premise.trim()
       );
       
       console.log(`[Ask ${slug}] Image prompt: ${imagePrompt.slice(0, 100)}...`);
