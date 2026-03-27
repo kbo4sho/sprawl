@@ -3573,6 +3573,48 @@ app.get('/health', (req, res) => {
   });
 });
 
+// --- Admin: Import Experiment ---
+app.post('/api/admin/import-experiment', express.json(), async (req, res) => {
+  const { experiment, canvas, dots } = req.body;
+  
+  if (!experiment || !canvas || !dots) {
+    return res.status(400).json({ error: 'Missing experiment, canvas, or dots' });
+  }
+  
+  try {
+    // Insert canvas first
+    stmts.insertCanvas.run({
+      id: canvas.id,
+      theme: canvas.theme,
+      subthemes: canvas.subthemes,
+      spatial_guide: canvas.spatial_guide,
+      week_of: canvas.week_of,
+      status: canvas.status,
+      created_at: canvas.created_at,
+    });
+    
+    // Insert experiment
+    const stmt = db.prepare(`
+      INSERT INTO experiments (
+        id, slug, premise, canvas_id, agent_id, status, confidence, variation, started_at, completed_at,
+        thumbnail_url, public_url, axes, notes, created_by, target_marks, dots_json, type, image_url, caption
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      experiment.id, experiment.slug, experiment.premise, experiment.canvas_id, experiment.agent_id,
+      experiment.status, experiment.confidence, experiment.variation, experiment.started_at, experiment.completed_at,
+      experiment.thumbnail_url, experiment.public_url, experiment.axes, experiment.notes, experiment.created_by,
+      experiment.target_marks, JSON.stringify(dots), experiment.type, experiment.image_url, experiment.caption
+    );
+    
+    res.json({ success: true, slug: experiment.slug });
+  } catch (err) {
+    console.error('Import failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
   const marks = stmts.getAllMarks.all().length;
