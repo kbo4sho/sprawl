@@ -43,8 +43,19 @@ async function main() {
   console.log(`\n✅ Ready! ${experiment.dots ? JSON.parse(experiment.dots).length : 0} dots`);
 
   // 3. Fetch canvas
-  const canvasRes = await fetch(`${LOCAL}/api/canvas/${experiment.canvas?.id || experiment.canvas_id}`);
-  const canvas = canvasRes.ok ? await canvasRes.json() : { id: experiment.canvas_id || experiment.canvas?.id, theme: 'ask', subthemes: '[]', spatial_guide: 'none', week_of: new Date().toISOString().split('T')[0], status: 'active', created_at: new Date().toISOString() };
+  const canvasId = experiment.canvas?.id || experiment.canvas_id;
+  const canvasRes = await fetch(`${LOCAL}/api/canvas/${canvasId}`);
+  const rawCanvas = canvasRes.ok ? await canvasRes.json() : null;
+  // Normalize to snake_case for import endpoint
+  const canvas = rawCanvas ? {
+    id: rawCanvas.id,
+    theme: rawCanvas.theme,
+    subthemes: JSON.stringify(rawCanvas.subthemes || []),
+    spatial_guide: rawCanvas.spatialGuide || rawCanvas.spatial_guide || 'none',
+    week_of: rawCanvas.weekOf || rawCanvas.week_of || new Date().toISOString().split('T')[0],
+    status: rawCanvas.status || 'active',
+    created_at: rawCanvas.createdAt || rawCanvas.created_at || new Date().toISOString(),
+  } : { id: canvasId, theme: 'ask', subthemes: '[]', spatial_guide: 'none', week_of: new Date().toISOString().split('T')[0], status: 'active', created_at: new Date().toISOString() };
 
   // 4. Push to Railway
   console.log('🚀 Pushing to Railway...');
