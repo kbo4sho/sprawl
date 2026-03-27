@@ -14,18 +14,26 @@ const stripe = process.env.STRIPE_SECRET_KEY ? Stripe(process.env.STRIPE_SECRET_
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 
-async function llmCall(systemPrompt, userPrompt, model = 'anthropic/claude-sonnet-4-5') {
-  const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATEWAY_TOKEN}` },
-    body: JSON.stringify({ model, max_tokens: 4096, messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ]}),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(JSON.stringify(data.error).slice(0, 200));
-  return data.choices?.[0]?.message?.content || '';
+async function llmCall(systemPrompt, userPrompt, model = 'openclaw/dashboard-chat') {
+  // Route through local gateway with 30s timeout
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATEWAY_TOKEN}` },
+      body: JSON.stringify({ model: 'openclaw', max_tokens: 4096, messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ]}),
+      signal: controller.signal,
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(JSON.stringify(data.error).slice(0, 200));
+    return data.choices?.[0]?.message?.content || '';
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function parseMarksFromLLM(text) {
