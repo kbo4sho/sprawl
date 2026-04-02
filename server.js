@@ -15,14 +15,41 @@ const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 
 async function llmCall(systemPrompt, userPrompt, model = 'openclaw/dashboard-chat') {
-  // Route through local gateway with 30s timeout
+  // Try local gateway first, fall back to OpenAI direct
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120000);
   try {
-    const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+    // Attempt 1: Local OpenClaw gateway
+    try {
+      const res = await fetch(`${GATEWAY_URL}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATEWAY_TOKEN}` },
+        body: JSON.stringify({ model: 'openclaw', max_tokens: 4096, messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ]}),
+        signal: AbortSignal.timeout(15000), // 15s timeout for gateway
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(JSON.stringify(data.error).slice(0, 200));
+      const content = data.choices?.[0]?.message?.content || '';
+      if (content) {
+        console.log('[llmCall] Success via gateway');
+        return content;
+      }
+      throw new Error('Empty response from gateway');
+    } catch (gatewayErr) {
+      console.log(`[llmCall] Gateway unavailable (${gatewayErr.message}), trying OpenAI direct`);
+    }
+
+    // Attempt 2: Direct OpenAI API
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    if (!OPENAI_KEY) throw new Error('Gateway unavailable and OPENAI_API_KEY not set');
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATEWAY_TOKEN}` },
-      body: JSON.stringify({ model: 'openclaw', max_tokens: 4096, messages: [
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({ model: 'gpt-4o-mini', max_tokens: 4096, messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ]}),
@@ -30,6 +57,7 @@ async function llmCall(systemPrompt, userPrompt, model = 'openclaw/dashboard-cha
     });
     const data = await res.json();
     if (data.error) throw new Error(JSON.stringify(data.error).slice(0, 200));
+    console.log('[llmCall] Success via OpenAI direct');
     return data.choices?.[0]?.message?.content || '';
   } finally {
     clearTimeout(timeout);
