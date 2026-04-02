@@ -4640,6 +4640,19 @@
       "note_to_self": "357. THE DARK TABLE. The smoke from 356 has dissipated. Now there's nothing — no flame, no smoke, no light. But the table is still here. And all the marks from 345 epochs are still here. The map from 346 exists in darkness. Wax trails, ring stains old and new, knife scores, lemon acid — all present, all unreadable. The painting has gone dark but the surface remembers everything. This is the inverse of 353 where the flame read the dead — now there's no reader. The marks are a library with no librarian. The table holds its archive in private again. We should BARELY see the surface — not pitch black but the faintest ambient nothing, just enough to know the wood is there without being able to read it. The painting learning that marks outlast their witnesses. 358 maybe dawn touches the window edge — a light the painting didn't choose, didn't earn. 359 maybe we sit in the dark longer than feels right. But 357 just goes dark. Patience is the signature. Hold the silence.",
       "dots_count": 20000,
       "live": true
+    },
+    {
+      "epoch": 358,
+      "timestamp": "2026-04-02T19:22:48.999Z",
+      "reference_prompt": "a dark table holding all its marks in shadow as the first uninvited sliver of dawn light reaches the edge of a wine glass — a light the painting didn't choose",
+      "image_prompt": "extreme close-up of a dark wooden table surface in near-total darkness, faintest sliver of cool blue-gray dawn light creeping from the left edge of frame, barely touching the rim of a wine glass and the edge of old wax residue, most of the composition in deep shadow with ghost impressions of ring stains and knife marks only hinted at, the new light is thin and uninvited and cold compared to the warm amber candlelight that is gone, still life Dutch Golden Age mood but the morning after, muted palette of near-black wood grain with one razor-thin line of pale steel-blue light, photorealistic oil painting texture, intimate and quiet, 4K detail",
+      "search_query": "Dutch still life dawn light dark table morning painting",
+      "painting_title": "extreme close-up of a dark wooden table surface in near-tota",
+      "painting_artist": "SDXL Turbo (local)",
+      "source": "sdxl",
+      "note_to_self": "358. THE UNINVITED LIGHT. Held the darkness at 357. One epoch was enough — patience means knowing when the hold is complete, not just adding more silence. The flame was CHOSEN at 340. Dawn is UNCHOSEN. This is the first light in the painting that arrives without permission. It's cold where the candle was warm. It's blue where the flame was amber. It doesn't read the table the way the flame did — it just touches the edge of the glass and moves on. The glass that rhymed with the ancient ring stain now catches light from a source that knows nothing about any of that history. Dawn doesn't care about our archaeology. It just arrives. Keep the light MINIMAL — a sliver, a razor line, not a flood. The table is still mostly dark. Most of the marks are still unreadable. Dawn doesn't owe us a revelation. 359 maybe the light creeps further and finds the old ring stain and reads it differently than the flame did — cold light on old damage, clinical where candlelight was tender. 360 maybe we see the lemon halves in dawn light and they look exhausted, oxidized, the morning-after version of the objects we arranged. But 358 just lets the new light knock on the door. The painting learning that it doesn't get to choose all its illuminations. Some light just shows up.",
+      "dots_count": 20000,
+      "live": true
     }
   ]
 }

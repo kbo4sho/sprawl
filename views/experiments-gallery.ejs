@@ -45,7 +45,7 @@
       background: #030306; border: 1px solid #ffffff08; border-radius: 4px;
       overflow: hidden;
     }
-    #dot-canvas { width: 100%; height: 100%; display: block; }
+    #dot-canvas { width: 100%; height: 100%; display: block; will-change: transform; }
 
     .overlay { z-index: 10; }
 
@@ -78,7 +78,7 @@
       caret-color: #4a9eff80;
       position: relative;
       z-index: 100;
-      will-change: contents;
+      will-change: auto;
     }
     .prompt-input::placeholder { color: #ffffff18; }
 

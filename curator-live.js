@@ -23,7 +23,7 @@ const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions';
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 const SPRAWL_API = 'https://sprawl.place';
 const SPRAWL_KEY = process.env.SPRAWL_API_KEY || 'sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69';
-const MODEL = 'anthropic/claude-sonnet-4-5'; // cheaper for curator decisions
+const MODEL = 'openclaw'; // gateway routes internally
 const CANVAS_SIZE = 800; // internal coord system
 const SPRAWL_RANGE = 400; // maps to -400..+400 on sprawl
 
@@ -123,23 +123,45 @@ async function processBatches(ops, label = 'batch') {
 }
 
 // === LLM ===
-async function callLLM(system, user, temp = 0.7) {
-  const r = await fetch(GATEWAY_URL, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${GATEWAY_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 2000,
-      temperature: temp,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-    }),
-  });
-  const data = await r.json();
-  if (data.error) throw new Error(JSON.stringify(data.error));
-  return data.choices?.[0]?.message?.content || '';
+async function callLLM(system, user, temp = 0.7, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const r = await fetch(GATEWAY_URL, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${GATEWAY_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 2000,
+          temperature: temp,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+        }),
+      });
+      if (!r.ok) {
+        const text = await r.text();
+        console.error(`⚠️  LLM HTTP ${r.status}: ${text.slice(0, 500)}`);
+        if (attempt < retries) { console.log(`  Retrying in 5s (attempt ${attempt + 1}/${retries})...`); await new Promise(r => setTimeout(r, 5000)); continue; }
+        throw new Error(`LLM HTTP ${r.status}: ${text.slice(0, 300)}`);
+      }
+      const data = await r.json();
+      if (data.error) {
+        console.error(`⚠️  LLM API error:`, JSON.stringify(data.error).slice(0, 500));
+        if (attempt < retries) { console.log(`  Retrying in 5s (attempt ${attempt + 1}/${retries})...`); await new Promise(r => setTimeout(r, 5000)); continue; }
+        throw new Error(`LLM API error: ${JSON.stringify(data.error).slice(0, 300)}`);
+      }
+      return data.choices?.[0]?.message?.content || '';
+    } catch (err) {
+      if (attempt < retries && !err.message.startsWith('LLM')) {
+        console.error(`⚠️  LLM call failed: ${err.message}`);
+        console.log(`  Retrying in 5s (attempt ${attempt + 1}/${retries})...`);
+        await new Promise(r => setTimeout(r, 5000));
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 function parseJSON(text) {
