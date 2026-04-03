@@ -38,12 +38,14 @@ async function main() {
     await new Promise(r => setTimeout(r, 5000));
     const res = await fetch(`${LOCAL}/api/experiments/${slug}`);
     experiment = await res.json();
-    process.stdout.write(`   status: ${experiment.status}, dots: ${experiment.dots ? JSON.parse(experiment.dots || '[]').length : 0}\r`);
+    const dotCount = experiment.dots ? (typeof experiment.dots === 'string' ? JSON.parse(experiment.dots).length : Array.isArray(experiment.dots) ? experiment.dots.length : 0) : 0;
+    process.stdout.write(`   status: ${experiment.status}, dots: ${dotCount}\r`);
     if (experiment.status === 'ready') break;
     if (experiment.status === 'failed') { console.error('\n❌ Generation failed'); process.exit(1); }
   }
   if (experiment.status !== 'ready') { console.error('\n❌ Timed out'); process.exit(1); }
-  console.log(`\n✅ Ready! ${experiment.dots ? JSON.parse(experiment.dots).length : 0} dots`);
+  const readyDots = experiment.dots ? (typeof experiment.dots === 'string' ? JSON.parse(experiment.dots) : experiment.dots) : [];
+  console.log(`\n✅ Ready! ${readyDots.length} dots`);
 
   // 3. Fetch canvas
   const canvasId = experiment.canvas?.id || experiment.canvas_id;
