@@ -333,7 +333,8 @@ function showExperiment(idx) {
   document.getElementById('exp-premise').onclick = () => { window.location.href = `/experiments/${exp.slug}`; };
   document.getElementById('exp-counter').textContent = `${currentIdx + 1} / ${experiments.length}`;
   document.getElementById('exp-label').classList.remove('hidden');
-  document.getElementById('prompt-wrap').classList.add('docked');
+  const promptWrap = document.getElementById('prompt-wrap');
+  if (promptWrap) promptWrap.classList.add('docked');
 
   setTargets(exp.dots);
 }
@@ -360,7 +361,7 @@ document.getElementById('next-btn').addEventListener('click', () => {
 
 // === INPUT ===
 const input = document.getElementById('prompt-input');
-input.addEventListener('keydown', async (e) => {
+if (input) input.addEventListener('keydown', async (e) => {
   if (e.key === 'Enter' && input.value.trim()) {
     const premise = input.value.trim();
     input.disabled = true;
