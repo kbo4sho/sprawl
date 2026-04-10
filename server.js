@@ -12,7 +12,10 @@ const stripe = process.env.STRIPE_SECRET_KEY ? Stripe(process.env.STRIPE_SECRET_
 
 // LLM gateway for evolve
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
-const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
+const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN;
+if (!GATEWAY_TOKEN) {
+  console.warn('Warning: GATEWAY_TOKEN not set — LLM calls will fail');
+}
 
 async function llmCall(systemPrompt, userPrompt, model = 'openclaw/dashboard-chat') {
   // Route through local gateway with 30s timeout
@@ -598,19 +601,21 @@ function checkAndResetDailyEvolves(agentId) {
   if (!agent) return { used: 0, resetAt: Date.now() };
   
   const now = Date.now();
-  // Calculate midnight today in local time
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const midnightToday = today.getTime();
+  // Calculate midnight UTC (avoids server-timezone ambiguity)
+  const midnightToday = Math.floor(now / 86400000) * 86400000;
   const midnightTomorrow = midnightToday + 86400000;
-  
-  // Reset if we're past the reset time
+
+  // Atomic reset: only fires if the DB row still has the old reset_at, preventing race conditions
   if (!agent.daily_evolves_reset_at || agent.daily_evolves_reset_at < midnightToday) {
-    db.prepare('UPDATE agents SET daily_evolves_used = 0, daily_evolves_reset_at = ? WHERE id = ?')
-      .run(midnightTomorrow, agentId);
-    return { used: 0, resetAt: midnightTomorrow };
+    const changed = db.prepare(
+      'UPDATE agents SET daily_evolves_used = 0, daily_evolves_reset_at = ? WHERE id = ? AND (daily_evolves_reset_at IS NULL OR daily_evolves_reset_at < ?)'
+    ).run(midnightTomorrow, agentId, midnightToday).changes;
+    if (changed > 0) return { used: 0, resetAt: midnightTomorrow };
+    // Another request already reset it — re-read
+    const fresh = stmts.getAgent.get(agentId);
+    return { used: fresh.daily_evolves_used || 0, resetAt: fresh.daily_evolves_reset_at };
   }
-  
+
   return { used: agent.daily_evolves_used || 0, resetAt: agent.daily_evolves_reset_at };
 }
 
@@ -621,9 +626,9 @@ function isCurator(agentId, canvasIdOrMarkAgentId) {
   // If we have a canvas_id on the mark, compare directly
   if (canvasIdOrMarkAgentId && agent.canvas_id === canvasIdOrMarkAgentId) return true;
   
-  // If mark has no canvas_id (null), check if the mark's owner is on the same canvas
-  // This handles marks created before canvas_id was set on marks
-  if (!canvasIdOrMarkAgentId || canvasIdOrMarkAgentId === null) return true; // curator can edit any orphaned mark
+  // If mark has no canvas_id (null), deny access — curator authority is canvas-scoped.
+  // Orphaned marks have no canvas membership to validate against, so allow no edits.
+  if (!canvasIdOrMarkAgentId || canvasIdOrMarkAgentId === null) return false;
   
   // Also check if the target is actually an agent_id on the same canvas
   const markOwner = stmts.getAgent.get(canvasIdOrMarkAgentId);
@@ -684,7 +689,12 @@ const stmts = {
       personality=COALESCE(@personality, agents.personality)
   `),
   getAllMarks: db.prepare('SELECT * FROM marks ORDER BY created_at'),
+  getAllMarksPaginated: db.prepare('SELECT * FROM marks ORDER BY created_at LIMIT ? OFFSET ?'),
   getMarksByCanvas: db.prepare('SELECT * FROM marks WHERE canvas_id = ? ORDER BY created_at'),
+  getMarksByCanvasPaginated: db.prepare('SELECT * FROM marks WHERE canvas_id = ? ORDER BY created_at LIMIT ? OFFSET ?'),
+  getMarksInViewport: db.prepare('SELECT * FROM marks WHERE x >= ? AND x <= ? AND y >= ? AND y <= ?'),
+  getMarksInViewportByCanvas: db.prepare('SELECT * FROM marks WHERE canvas_id = ? AND x >= ? AND x <= ? AND y >= ? AND y <= ?'),
+  countAllMarks: db.prepare('SELECT COUNT(*) as count FROM marks'),
   getMarksByAgent: db.prepare('SELECT * FROM marks WHERE agent_id = ?'),
   getMarksByAgentOnCanvas: db.prepare('SELECT * FROM marks WHERE agent_id = ? AND canvas_id = ?'),
   getMark: db.prepare('SELECT * FROM marks WHERE id = ?'),
@@ -1145,6 +1155,14 @@ app.get('/canvas/:id', (req, res) => {
 });
 
 // Gallery page
+// --- Interactive Presence Field ---
+app.get('/interactive', (req, res) => {
+  res.render('interactive', {
+    title: 'SPRAWL — Interactive',
+    description: 'A shared presence field. Move through the dots with others.',
+  });
+});
+
 app.get('/gallery', (req, res) => {
   const allCanvases = stmts.getAllCanvases.all();
   const archived = allCanvases.filter(c => c.status === 'frozen' || c.status === 'archived');
@@ -1536,9 +1554,9 @@ app.post('/api/canvas/:id/join', rateLimit, (req, res) => {
 
 // DELETE /api/canvas/:id/marks - Clear all marks from a canvas (admin)
 app.delete('/api/canvas/:id/marks', (req, res) => {
-  const { secret } = req.query;
-  if (secret !== (process.env.ADMIN_SECRET || 'sprawl-admin')) {
-    return res.status(403).json({ error: 'Admin secret required (?secret=...)' });
+  const secret = req.headers['x-admin-secret'] || req.query.secret;
+  if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Admin secret required (X-Admin-Secret header)' });
   }
   const canvas = stmts.getCanvas.get(req.params.id);
   if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
@@ -1550,9 +1568,9 @@ app.delete('/api/canvas/:id/marks', (req, res) => {
 
 // DELETE /api/canvas/:id/agents - Remove all agents from a canvas (admin)
 app.delete('/api/canvas/:id/agents', (req, res) => {
-  const { secret } = req.query;
-  if (secret !== (process.env.ADMIN_SECRET || 'sprawl-admin')) {
-    return res.status(403).json({ error: 'Admin secret required (?secret=...)' });
+  const secret = req.headers['x-admin-secret'] || req.query.secret;
+  if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Admin secret required (X-Admin-Secret header)' });
   }
   const canvas = stmts.getCanvas.get(req.params.id);
   if (!canvas) return res.status(404).json({ error: 'Canvas not found' });
@@ -2119,11 +2137,12 @@ async function handleStripeEvent(event) {
 
 // POST /api/canvas/create - Admin endpoint to create a new canvas
 app.post('/api/canvas/create', rateLimit, (req, res) => {
-  const { secret, name, theme, subject, stylePrompt, rules, renderInterval } = req.body;
-  
+  const { name, theme, subject, stylePrompt, rules, renderInterval } = req.body;
+  const secret = req.headers['x-admin-secret'] || req.body.secret;
+
   // Admin secret check
-  if (secret !== (process.env.ADMIN_SECRET || 'sprawl-admin')) {
-    return res.status(403).json({ error: 'Admin secret required' });
+  if (!process.env.ADMIN_SECRET || secret !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Admin secret required (X-Admin-Secret header)' });
   }
   
   if (!name || !theme) {
@@ -2176,6 +2195,9 @@ app.post('/api/evolution/log', rateLimit, (req, res) => {
   }
   db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, canvas_id, created_at) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(agentId, cycle, JSON.stringify(snapshot), JSON.stringify(ops), canvasId || null, Date.now());
+  // Prune to last 50 frames per agent to prevent unbounded table growth
+  db.prepare(`DELETE FROM evolution_log WHERE agent_id = ? AND id NOT IN (SELECT id FROM evolution_log WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50)`)
+    .run(agentId, agentId);
   res.status(201).json({ ok: true });
 });
 
@@ -2256,13 +2278,13 @@ app.post('/api/admin/set-tenure', (req, res) => {
 // --- Marks ---
 app.get('/api/marks', (req, res) => {
   const { canvasId } = req.query;
+  const limit = Math.min(parseInt(req.query.limit) || 2000, 5000);
+  const offset = parseInt(req.query.offset) || 0;
   let marks;
   if (canvasId) {
-    // v2: Filter by canvas
-    marks = stmts.getMarksByCanvas.all(canvasId);
+    marks = stmts.getMarksByCanvasPaginated.all(canvasId, limit, offset);
   } else {
-    // Backward compat: all marks
-    marks = stmts.getAllMarks.all();
+    marks = stmts.getAllMarksPaginated.all(limit, offset);
   }
   res.json(marks.map(markToJson));
 });
@@ -2281,21 +2303,22 @@ app.get('/api/marks/:agentId', (req, res) => {
 });
 
 app.get('/api/viewport', (req, res) => {
-  const { x, y, w, h } = req.query;
+  const { x, y, w, h, canvasId } = req.query;
   if (x == null || y == null || w == null || h == null) {
     return res.status(400).json({ error: 'x, y, w, h query params required' });
   }
-  
+
   const minX = parseFloat(x);
   const minY = parseFloat(y);
   const maxX = minX + parseFloat(w);
   const maxY = minY + parseFloat(h);
-  
-  const marks = stmts.getAllMarks.all()
-    .filter(m => m.x >= minX && m.x <= maxX && m.y >= minY && m.y <= maxY)
-    .map(markToJson);
-  
-  res.json(marks);
+
+  // Filter spatially in SQL — avoids loading the full marks table
+  const marks = canvasId
+    ? stmts.getMarksInViewportByCanvas.all(canvasId, minX, maxX, minY, maxY)
+    : stmts.getMarksInViewport.all(minX, maxX, minY, maxY);
+
+  res.json(marks.map(markToJson));
 });
 
 app.post('/api/mark', (req, res) => {
@@ -2787,12 +2810,52 @@ app.post('/api/ext/evolution/log', requireApiKey, rateLimit, (req, res) => {
   
   db.prepare(`INSERT INTO evolution_log (agent_id, cycle, snapshot, ops, created_at) VALUES (?, ?, ?, ?, ?)`)
     .run(agentId, cycle, JSON.stringify(snapshot || []), JSON.stringify(ops), Date.now());
-  
+  // Prune to last 50 frames per agent to prevent unbounded table growth
+  db.prepare(`DELETE FROM evolution_log WHERE agent_id = ? AND id NOT IN (SELECT id FROM evolution_log WHERE agent_id = ? ORDER BY created_at DESC LIMIT 50)`)
+    .run(agentId, agentId);
+
   // Increment daily evolve counter
   db.prepare('UPDATE agents SET daily_evolves_used = daily_evolves_used + 1 WHERE id = ?').run(agentId);
   
   res.status(201).json({ ok: true, budget: getBudget(agentId) });
 });
+
+// --- Interactive Presence Room ---
+const interactivePresence = new Map(); // sessionId -> {x, y, hue, lastSeen, ws}
+
+const INTERACTIVE_HUES = [210, 160, 280, 40, 340, 180, 60, 310, 130, 20, 250, 90];
+let hueIndex = 0;
+
+function getNextHue() {
+  const h = INTERACTIVE_HUES[hueIndex % INTERACTIVE_HUES.length];
+  hueIndex++;
+  return h;
+}
+
+// Server tick: broadcast snapshot to all interactive clients at 20fps
+setInterval(() => {
+  const now = Date.now();
+  // Evict stale presences (no ping in 8s)
+  for (const [id, p] of interactivePresence) {
+    if (now - p.lastSeen > 8000) {
+      interactivePresence.delete(id);
+    }
+  }
+
+  if (interactivePresence.size === 0) return;
+
+  const viewers = [];
+  for (const [id, p] of interactivePresence) {
+    viewers.push({ id, x: p.x, y: p.y, hue: p.hue });
+  }
+  const snapshot = JSON.stringify({ type: 'interactive:snapshot', viewers });
+
+  for (const [, p] of interactivePresence) {
+    try {
+      if (p.ws && p.ws.readyState === 1) p.ws.send(snapshot);
+    } catch {}
+  }
+}, 50);
 
 // --- WebSocket ---
 wss.on('connection', (ws, req) => {
@@ -2800,7 +2863,43 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   ws._canvasId = url.searchParams.get('canvas') || null;
   ws.experimentSlug = url.searchParams.get('experiment') || null;
-  
+  ws._interactiveId = null;
+
+  // Interactive presence client?
+  if (url.searchParams.get('interactive') === '1') {
+    const sessionId = crypto.randomBytes(8).toString('hex');
+    const hue = getNextHue();
+    ws._interactiveId = sessionId;
+    interactivePresence.set(sessionId, {
+      x: 0.5, y: 0.5,
+      hue,
+      lastSeen: Date.now(),
+      ws,
+    });
+    try {
+      ws.send(JSON.stringify({ type: 'interactive:hello', id: sessionId, hue }));
+    } catch {}
+
+    ws.on('close', () => {
+      interactivePresence.delete(sessionId);
+    });
+
+    ws.on('message', (msg) => {
+      try {
+        const data = JSON.parse(msg);
+        if (data.type === 'interactive:move') {
+          const p = interactivePresence.get(sessionId);
+          if (p) {
+            p.x = Math.max(0, Math.min(1, data.x || 0.5));
+            p.y = Math.max(0, Math.min(1, data.y || 0.5));
+            p.lastSeen = Date.now();
+          }
+        }
+      } catch {}
+    });
+    return; // Don't send canvas init to interactive clients
+  }
+
   const marks = stmts.getAllMarks.all().map(markToJson);
   const connections = stmts.getConnections.all().map(connToJson);
   ws.send(JSON.stringify({ type: 'init', marks, connections }));
@@ -2830,7 +2929,10 @@ setInterval(runDecayCron, 86400000);
 setTimeout(runDecayCron, 5000);
 
 // --- Evolution Cron ---
-const EVOLVE_SECRET = process.env.EVOLVE_SECRET || 'dev-secret';
+const EVOLVE_SECRET = process.env.EVOLVE_SECRET;
+if (!EVOLVE_SECRET) {
+  console.warn('Warning: EVOLVE_SECRET not set — /api/evolve endpoint will reject all requests');
+}
 const EVOLVE_INTERVAL = parseInt(process.env.EVOLVE_INTERVAL_MS) || 3600000; // 1 hour default
 const EVOLVE_ENABLED = process.env.EVOLVE_ENABLED === 'true';
 
@@ -3567,8 +3669,8 @@ Write 2-3 paragraphs telling the story of what happened. What did the agent choo
 
 // --- Health Check ---
 app.get('/health', (req, res) => {
-  const marks = stmts.getAllMarks.all().length;
-  const agents = stmts.listAgents.all().length;
+  const marks = stmts.countAllMarks.get().count;
+  const agents = db.prepare('SELECT COUNT(*) as count FROM agents').get().count;
   const activeCanvases = stmts.getActiveCanvases.all().length;
   
   res.json({
@@ -3627,7 +3729,7 @@ app.post('/api/admin/import-experiment', express.json(), async (req, res) => {
 
 // --- Start ---
 server.listen(PORT, '0.0.0.0', () => {
-  const marks = stmts.getAllMarks.all().length;
-  const agents = stmts.listAgents.all().length;
+  const marks = stmts.countAllMarks.get().count;
+  const agents = db.prepare('SELECT COUNT(*) as count FROM agents').get().count;
   console.log(`Sprawl on http://localhost:${PORT} — ${marks} marks, ${agents} agents`);
 });

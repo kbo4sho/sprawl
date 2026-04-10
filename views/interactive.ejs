@@ -1,0 +1,362 @@
+<%- include('partials/head') %>
+<style>
+  body { overflow: hidden; }
+
+  #presence-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    cursor: none;
+    touch-action: none;
+  }
+
+  #nav-pill {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 8px 20px;
+    background: rgba(3, 3, 6, 0.7);
+    border: 1px solid rgba(200, 200, 208, 0.08);
+    border-radius: 999px;
+    backdrop-filter: blur(12px);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #4a4a5a;
+    transition: opacity 0.4s;
+  }
+
+  #nav-pill:hover { opacity: 1 !important; }
+  #nav-pill.fade { opacity: 0; }
+
+  #nav-pill a {
+    color: #4a4a5a;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  #nav-pill a:hover { color: #c8c8d0; }
+
+  #nav-pill .sep {
+    width: 1px;
+    height: 10px;
+    background: rgba(200,200,208,0.1);
+  }
+
+  #viewer-count {
+    color: #c8c8d0;
+    font-weight: 700;
+  }
+
+  #status-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #3a3a4a;
+    transition: background 0.4s;
+  }
+  #status-dot.connected { background: #6a9eff; box-shadow: 0 0 6px #6a9eff88; }
+</style>
+
+<canvas id="presence-canvas"></canvas>
+
+<div id="nav-pill">
+  <div id="status-dot"></div>
+  <span id="viewer-count">—</span>
+  <span>here</span>
+  <div class="sep"></div>
+  <a href="/">SPRAWL</a>
+</div>
+
+<script>
+(function () {
+  // ─── Config ───────────────────────────────────────────────────────────────
+  const DOT_COUNT = Math.min(3000, Math.floor((window.innerWidth * window.innerHeight) / 400));
+  const REPULSION_RADIUS = 130;
+  const REPULSION_STRENGTH = 0.55;
+  const SPRING_STRENGTH = 0.04;
+  const DAMPING = 0.82;
+  const SEND_INTERVAL_MS = 80; // ~12fps position sends
+  const IDLE_TIMEOUT_MS = 30000;
+
+  // ─── Canvas setup ──────────────────────────────────────────────────────────
+  const canvas = document.getElementById('presence-canvas');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    // Rebuild dots on resize
+    initDots();
+  }
+  window.addEventListener('resize', resize);
+
+  // ─── Dots ──────────────────────────────────────────────────────────────────
+  let dots = [];
+
+  function initDots() {
+    dots = [];
+    for (let i = 0; i < DOT_COUNT; i++) {
+      const hx = Math.random() * W;
+      const hy = Math.random() * H;
+      const opacity = 0.25 + Math.random() * 0.55;
+      const radius = 0.8 + Math.random() * 1.8;
+      dots.push({
+        hx, hy,       // home position
+        x: hx, y: hy, // current position
+        vx: 0, vy: 0, // velocity
+        opacity,
+        radius,
+      });
+    }
+  }
+
+  // ─── Viewer presence ───────────────────────────────────────────────────────
+  // others: Map<id, {x, y, hue, opacity}>
+  const others = new Map();
+  let myX = W ? W / 2 : 0.5;
+  let myY = H ? H / 2 : 0.5;
+  let myHue = 0; // assigned by server
+  let myId = null;
+  let myNormX = 0.5, myNormY = 0.5; // normalized
+
+  // ─── Physics loop ──────────────────────────────────────────────────────────
+  function updateDots() {
+    // Gather all viewer positions in screen coords
+    const viewers = [];
+
+    // My position
+    viewers.push({ x: myX, y: myY, strength: 1.0 });
+
+    // Others (normalized → screen)
+    for (const [, v] of others) {
+      viewers.push({
+        x: v.x * W,
+        y: v.y * H,
+        strength: 0.7,
+      });
+    }
+
+    for (const d of dots) {
+      let fx = 0, fy = 0;
+
+      for (const v of viewers) {
+        const dx = d.x - v.x;
+        const dy = d.y - v.y;
+        const dist2 = dx * dx + dy * dy;
+        const r = REPULSION_RADIUS;
+
+        if (dist2 < r * r && dist2 > 0.01) {
+          const dist = Math.sqrt(dist2);
+          const force = (1 - dist / r) * REPULSION_STRENGTH * v.strength;
+          fx += (dx / dist) * force;
+          fy += (dy / dist) * force;
+        }
+      }
+
+      // Spring back to home
+      fx += (d.hx - d.x) * SPRING_STRENGTH;
+      fy += (d.hy - d.y) * SPRING_STRENGTH;
+
+      d.vx = (d.vx + fx) * DAMPING;
+      d.vy = (d.vy + fy) * DAMPING;
+      d.x += d.vx;
+      d.y += d.vy;
+    }
+  }
+
+  // ─── Draw ──────────────────────────────────────────────────────────────────
+  function draw() {
+    ctx.fillStyle = '#030306';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw dots
+    for (const d of dots) {
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(200, 200, 208, ${d.opacity})`;
+      ctx.fill();
+    }
+
+    // Draw other viewers (behind self)
+    for (const [id, v] of others) {
+      if (id === myId) continue;
+      const sx = v.x * W;
+      const sy = v.y * H;
+      const op = (v.opacity || 1) * 0.6;
+      drawAura(sx, sy, v.hue, op, 70);
+    }
+
+    // Draw self (on top, brighter)
+    drawAura(myX, myY, myHue, 0.9, 90);
+  }
+
+  function drawAura(x, y, hue, opacity, radius) {
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    grad.addColorStop(0,   `hsla(${hue}, 60%, 70%, ${opacity * 0.18})`);
+    grad.addColorStop(0.4, `hsla(${hue}, 60%, 70%, ${opacity * 0.08})`);
+    grad.addColorStop(1,   `hsla(${hue}, 60%, 70%, 0)`);
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  // ─── Animation loop ────────────────────────────────────────────────────────
+  function loop() {
+    updateDots();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ─── Input handling ────────────────────────────────────────────────────────
+  let lastMoveTime = Date.now();
+  let idleHandle = null;
+
+  function onMove(x, y) {
+    myX = x;
+    myY = y;
+    myNormX = x / W;
+    myNormY = y / H;
+    lastMoveTime = Date.now();
+    clearTimeout(idleHandle);
+    idleHandle = setTimeout(onIdle, IDLE_TIMEOUT_MS);
+  }
+
+  function onIdle() {
+    // Viewer goes slightly transparent when idle — handled server-side via lastSeen
+  }
+
+  canvas.addEventListener('mousemove', e => onMove(e.clientX, e.clientY));
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    const t = e.touches[0];
+    onMove(t.clientX, t.clientY);
+  }, { passive: false });
+  canvas.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    onMove(t.clientX, t.clientY);
+  });
+
+  // Arrow keys
+  const ARROW_STEP = 4;
+  const keysDown = new Set();
+  window.addEventListener('keydown', e => {
+    keysDown.add(e.key);
+    // Prevent page scroll
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+  });
+  window.addEventListener('keyup', e => keysDown.delete(e.key));
+
+  function applyArrowKeys() {
+    if (keysDown.has('ArrowLeft'))  onMove(Math.max(0, myX - ARROW_STEP), myY);
+    if (keysDown.has('ArrowRight')) onMove(Math.min(W, myX + ARROW_STEP), myY);
+    if (keysDown.has('ArrowUp'))    onMove(myX, Math.max(0, myY - ARROW_STEP));
+    if (keysDown.has('ArrowDown'))  onMove(myX, Math.min(H, myY + ARROW_STEP));
+  }
+  setInterval(applyArrowKeys, 16);
+
+  // ─── Nav pill fade ─────────────────────────────────────────────────────────
+  const navPill = document.getElementById('nav-pill');
+  let navFadeHandle = setTimeout(() => navPill.classList.add('fade'), 3000);
+  canvas.addEventListener('mousemove', () => {
+    navPill.classList.remove('fade');
+    clearTimeout(navFadeHandle);
+    navFadeHandle = setTimeout(() => navPill.classList.add('fade'), 3000);
+  });
+
+  // ─── WebSocket ─────────────────────────────────────────────────────────────
+  const statusDot = document.getElementById('status-dot');
+  const viewerCountEl = document.getElementById('viewer-count');
+  let ws = null;
+  let sendHandle = null;
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}/?interactive=1`);
+
+    ws.addEventListener('open', () => {
+      statusDot.classList.add('connected');
+      // Start sending position
+      sendHandle = setInterval(sendPosition, SEND_INTERVAL_MS);
+    });
+
+    ws.addEventListener('message', e => {
+      try {
+        const msg = JSON.parse(e.data);
+        handleMessage(msg);
+      } catch {}
+    });
+
+    ws.addEventListener('close', () => {
+      statusDot.classList.remove('connected');
+      clearInterval(sendHandle);
+      others.clear();
+      viewerCountEl.textContent = '—';
+      // Reconnect after 2s
+      setTimeout(connect, 2000);
+    });
+
+    ws.addEventListener('error', () => ws.close());
+  }
+
+  function sendPosition() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'interactive:move',
+        x: myNormX,
+        y: myNormY,
+      }));
+    }
+  }
+
+  function handleMessage(msg) {
+    if (msg.type === 'interactive:hello') {
+      myId = msg.id;
+      myHue = msg.hue;
+      // Place self at center initially
+      myX = W / 2;
+      myY = H / 2;
+      myNormX = 0.5;
+      myNormY = 0.5;
+    }
+
+    if (msg.type === 'interactive:snapshot') {
+      // Update others map
+      const seen = new Set();
+      for (const v of msg.viewers) {
+        if (v.id === myId) continue;
+        seen.add(v.id);
+        const existing = others.get(v.id);
+        if (existing) {
+          existing.x = v.x;
+          existing.y = v.y;
+          existing.hue = v.hue;
+          existing.opacity = 1;
+        } else {
+          others.set(v.id, { x: v.x, y: v.y, hue: v.hue, opacity: 1 });
+        }
+      }
+      // Remove departed
+      for (const [id] of others) {
+        if (!seen.has(id)) others.delete(id);
+      }
+      // Update count (includes self)
+      viewerCountEl.textContent = msg.viewers.length;
+    }
+  }
+
+  // ─── Boot ──────────────────────────────────────────────────────────────────
+  resize();
+  loop();
+  connect();
+})();
+</script>
+
+<%- include('partials/foot') %>
