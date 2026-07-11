@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 1,
+  "parentEpoch": null,
+  "pointCount": 20000,
+  "startsAt": "2026-07-10T11:00:00.000Z",
+  "transformDurationMs": 72000000,
+  "settleDurationMs": 7200000,
+  "stillDurationMs": 7200000,
+  "points": {
+    "url": "points.bin",
+    "sha256": "c8cdd1ecbbb8b7a01b75b7e0719396f81cdfea44e65cf1ba6d450133bd68b22b",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The room gathers around one remaining warmth.",
+    "retainedFacts": [
+      "A single chair anchors the room",
+      "A window holds the remaining light"
+    ]
+  }
+}

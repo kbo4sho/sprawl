@@ -1,5 +1,5 @@
 node_modules/
-data/
+/data/
 *.db
 .DS_Store
 server.log

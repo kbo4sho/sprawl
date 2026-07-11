@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Sprawl — Era II proof</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <canvas id="painting" aria-label="Sprawl Era II synthetic transition proof"></canvas>
+
+  <header class="identity">
+    <span class="mark">SPRAWL</span>
+    <span id="epoch-label">ERA II · LOADING</span>
+  </header>
+
+  <section class="now" aria-live="polite">
+    <p id="note">Loading the prepared epoch…</p>
+    <p id="phase" class="metadata"></p>
+  </section>
+
+  <button id="replay" type="button">Replay proof</button>
+  <p id="error" role="alert" hidden></p>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
