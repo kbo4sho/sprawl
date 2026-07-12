@@ -9,6 +9,8 @@ const phaseLabel = document.querySelector('#phase');
 const replayButton = document.querySelector('#replay');
 const errorLabel = document.querySelector('#error');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const query = new URLSearchParams(location.search);
+const reviewMode = query.get('review') === '1';
 
 const vertexSource = `#version 300 es
 precision highp float;
@@ -194,7 +196,7 @@ async function start() {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: true, powerPreference: 'high-performance' });
   if (!gl) throw new Error('This proof requires WebGL 2');
 
-  const manifest = await fetchJson('./data/live.json');
+  const manifest = await fetchJson(reviewMode ? './data/review.json' : './data/live.json');
   const metadata = await fetchJson(`./data/${manifest.current.metadataUrl}`);
   const pointsResponse = await fetch(`./data/${manifest.current.metadataUrl.replace(/epoch\.json$/, metadata.points.url)}`, { cache: 'force-cache' });
   if (!pointsResponse.ok) throw new Error(`Could not load point bundle: ${pointsResponse.status}`);
@@ -229,7 +231,7 @@ async function start() {
 
   let pointer = [10, 10];
   let pointerStrength = 0;
-  let replayStarted = new URLSearchParams(location.search).get('demo') === '1' ? performance.now() : null;
+  let replayStarted = query.get('demo') === '1' || reviewMode ? performance.now() : null;
 
   function resize() {
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);

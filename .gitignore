@@ -9,6 +9,11 @@ sdxl-env/
 *.pyc
 __pycache__/
 curator-frames/
+/tmp/
+
+# Private studio review artifacts are served locally but never published.
+/public/era2/data/review.json
+/public/era2/data/reviews/
 # public/experiments/*.png — images committed manually via push-experiment script
 server.js.backup-refactor
 server.js.backup
