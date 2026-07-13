@@ -198,7 +198,9 @@ async function start() {
 
   const manifest = await fetchJson(reviewMode ? './data/review.json' : './data/live.json');
   const metadata = await fetchJson(`./data/${manifest.current.metadataUrl}`);
-  const pointsResponse = await fetch(`./data/${manifest.current.metadataUrl.replace(/epoch\.json$/, metadata.points.url)}`, { cache: 'force-cache' });
+  const pointsUrl = `./data/${manifest.current.metadataUrl.replace(/epoch\.json$/, metadata.points.url)}`;
+  const reviewPointsUrl = `${pointsUrl}?sha256=${metadata.points.sha256}`;
+  const pointsResponse = await fetch(reviewMode ? reviewPointsUrl : pointsUrl, { cache: reviewMode ? 'no-store' : 'force-cache' });
   if (!pointsResponse.ok) throw new Error(`Could not load point bundle: ${pointsResponse.status}`);
   const pointBytes = await pointsResponse.arrayBuffer();
   const pointChecksum = await sha256(pointBytes);
