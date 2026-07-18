@@ -1,0 +1,120 @@
+:root {
+  color: #d8d6cf;
+  background: #030306;
+  font-family: "Space Mono", "SFMono-Regular", Consolas, monospace;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #030306;
+}
+
+#painting {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+}
+
+.identity,
+.now,
+#replay,
+#error {
+  position: fixed;
+  z-index: 2;
+}
+
+.identity {
+  top: 24px;
+  left: 26px;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  color: rgba(216, 214, 207, 0.48);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+.mark {
+  color: rgba(216, 214, 207, 0.84);
+  font-family: Syne, Inter, sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.28em;
+}
+
+.now {
+  left: 26px;
+  bottom: 24px;
+  max-width: min(440px, calc(100vw - 52px));
+  pointer-events: none;
+}
+
+.now p { margin: 0; }
+
+#note {
+  color: rgba(216, 214, 207, 0.68);
+  font-family: Georgia, serif;
+  font-size: clamp(13px, 1.4vw, 17px);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.metadata {
+  margin-top: 7px !important;
+  color: rgba(216, 214, 207, 0.34);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+#replay {
+  right: 22px;
+  bottom: 20px;
+  border: 1px solid rgba(216, 214, 207, 0.12);
+  border-radius: 999px;
+  padding: 9px 13px;
+  color: rgba(216, 214, 207, 0.5);
+  background: rgba(3, 3, 6, 0.36);
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+}
+
+#replay:hover,
+#replay:focus-visible {
+  color: rgba(216, 214, 207, 0.9);
+  border-color: rgba(216, 214, 207, 0.3);
+}
+
+#error {
+  inset: 50% auto auto 50%;
+  width: min(520px, calc(100vw - 48px));
+  margin: 0;
+  transform: translate(-50%, -50%);
+  color: #d7a49b;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .identity { top: 18px; left: 18px; }
+  .now { left: 18px; bottom: 64px; }
+  #replay { right: 16px; bottom: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #replay { display: none; }
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "status": "still",
+  "message": null,
+  "current": {
+    "era": 2,
+    "epoch": 2,
+    "metadataUrl": "epochs/era-02/epoch-000002/epoch.json",
+    "pointsSha256": "471d879f3f1f7189f6677f1a287eea0b198ce084116dc28bb7b8f3c78e4c4bb4"
+  },
+  "previous": {
+    "era": 2,
+    "epoch": 1,
+    "metadataUrl": "epochs/era-02/epoch-000001/epoch.json",
+    "pointsSha256": "c8cdd1ecbbb8b7a01b75b7e0719396f81cdfea44e65cf1ba6d450133bd68b22b"
+  }
+}

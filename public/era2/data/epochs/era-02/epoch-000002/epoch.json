@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 2,
+  "parentEpoch": 1,
+  "pointCount": 20000,
+  "startsAt": "2026-07-11T11:00:00.000Z",
+  "transformDurationMs": 72000000,
+  "settleDurationMs": 7200000,
+  "stillDurationMs": 7200000,
+  "points": {
+    "url": "points.bin",
+    "sha256": "471d879f3f1f7189f6677f1a287eea0b198ce084116dc28bb7b8f3c78e4c4bb4",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The window cools before the chair releases its warmth.",
+    "retainedFacts": [
+      "The chair remains the visual anchor",
+      "The window survives with less warmth"
+    ]
+  }
+}
