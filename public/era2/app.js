@@ -1,6 +1,9 @@
 const HEADER_SIZE = 16;
 const RECORD_SIZE = 56;
 const EXPECTED_POINTS = 20_000;
+const REVIEW_TRANSITION_MS = 18_000;
+const REVIEW_STILL_MS = 4_000;
+const REVIEW_REWIND_MS = 6_000;
 
 const canvas = document.querySelector('#painting');
 const epochLabel = document.querySelector('#epoch-label');
@@ -10,7 +13,9 @@ const replayButton = document.querySelector('#replay');
 const errorLabel = document.querySelector('#error');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const query = new URLSearchParams(location.search);
-const reviewMode = query.get('review') === '1';
+const reviewSetting = query.get('review');
+const sequenceMode = reviewSetting === 'sequence';
+const reviewMode = reviewSetting === '1' || sequenceMode;
 
 const vertexSource = `#version 300 es
 precision highp float;
@@ -48,7 +53,8 @@ vec2 cubic(vec2 a, vec2 b, vec2 c, vec2 d, float t) {
 }
 
 void main() {
-  float localProgress = clamp((u_progress - a_delay) / max(a_duration, 0.001), 0.0, 1.0);
+  float timelineSpan = max(a_duration * (1.0 - a_delay), 0.001);
+  float localProgress = clamp((u_progress - a_delay) / timelineSpan, 0.0, 1.0);
   float curvedProgress = ease(localProgress);
   vec2 position = cubic(a_start, a_control1, a_control2, a_target, curvedProgress);
 
@@ -171,14 +177,33 @@ function parsePointBundle(buffer, expectedEpoch) {
   return { pointCount, start, target, control1, control2, startColor, targetColor, memoryColor, size, delay, duration, decay };
 }
 
-function attachAttribute(gl, program, name, data, size, type = gl.FLOAT, normalized = false) {
+function createAttributeUploader(gl, program, name, size, type = gl.FLOAT, normalized = false) {
   const location = gl.getAttribLocation(program, name);
   if (location < 0) throw new Error(`Shader attribute ${name} is unavailable`);
   const buffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
   gl.enableVertexAttribArray(location);
   gl.vertexAttribPointer(location, size, type, normalized, 0, 0);
+  return data => {
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  };
+}
+
+async function loadPreparedEpoch(entry, isReview) {
+  if (!entry?.metadataUrl || !entry?.pointsSha256) throw new Error('Epoch manifest entry is incomplete');
+  const metadata = await fetchJson(`./data/${entry.metadataUrl}`);
+  if (metadata.epoch !== entry.epoch) throw new Error(`Epoch ${entry.epoch} points to metadata for epoch ${metadata.epoch}`);
+  const pointsUrl = `./data/${entry.metadataUrl.replace(/epoch\.json$/, metadata.points.url)}`;
+  const requestUrl = isReview ? `${pointsUrl}?sha256=${metadata.points.sha256}` : pointsUrl;
+  const response = await fetch(requestUrl, { cache: isReview ? 'no-store' : 'force-cache' });
+  if (!response.ok) throw new Error(`Could not load point bundle: ${response.status}`);
+  const pointBytes = await response.arrayBuffer();
+  const pointChecksum = await sha256(pointBytes);
+  if (pointChecksum !== metadata.points.sha256 || pointChecksum !== entry.pointsSha256) {
+    throw new Error(`Epoch ${metadata.epoch} checksum does not match its manifest`);
+  }
+  return { metadata, bundle: parsePointBundle(pointBytes, metadata.epoch) };
 }
 
 function phaseFor(metadata, forcedProgress) {
@@ -196,32 +221,29 @@ async function start() {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: true, powerPreference: 'high-performance' });
   if (!gl) throw new Error('This proof requires WebGL 2');
 
-  const manifest = await fetchJson(reviewMode ? './data/review.json' : './data/live.json');
-  const metadata = await fetchJson(`./data/${manifest.current.metadataUrl}`);
-  const pointsUrl = `./data/${manifest.current.metadataUrl.replace(/epoch\.json$/, metadata.points.url)}`;
-  const reviewPointsUrl = `${pointsUrl}?sha256=${metadata.points.sha256}`;
-  const pointsResponse = await fetch(reviewMode ? reviewPointsUrl : pointsUrl, { cache: reviewMode ? 'no-store' : 'force-cache' });
-  if (!pointsResponse.ok) throw new Error(`Could not load point bundle: ${pointsResponse.status}`);
-  const pointBytes = await pointsResponse.arrayBuffer();
-  const pointChecksum = await sha256(pointBytes);
-  if (pointChecksum !== metadata.points.sha256 || pointChecksum !== manifest.current.pointsSha256) {
-    throw new Error('Point bundle checksum does not match the published manifest');
-  }
-  const bundle = parsePointBundle(pointBytes, metadata.epoch);
+  const manifestUrl = sequenceMode
+    ? './data/review-sequence.json'
+    : reviewMode ? './data/review.json' : './data/live.json';
+  const manifest = await fetchJson(manifestUrl);
+  const entries = sequenceMode ? manifest.epochs : [manifest.current];
+  if (!Array.isArray(entries) || entries.length === 0) throw new Error('Review sequence contains no epochs');
+  const preparedEpochs = await Promise.all(entries.map(entry => loadPreparedEpoch(entry, reviewMode)));
 
   const program = createProgram(gl);
   gl.useProgram(program);
-  attachAttribute(gl, program, 'a_start', bundle.start, 2);
-  attachAttribute(gl, program, 'a_target', bundle.target, 2);
-  attachAttribute(gl, program, 'a_control1', bundle.control1, 2);
-  attachAttribute(gl, program, 'a_control2', bundle.control2, 2);
-  attachAttribute(gl, program, 'a_startColor', bundle.startColor, 4, gl.UNSIGNED_BYTE, true);
-  attachAttribute(gl, program, 'a_targetColor', bundle.targetColor, 4, gl.UNSIGNED_BYTE, true);
-  attachAttribute(gl, program, 'a_memoryColor', bundle.memoryColor, 4, gl.UNSIGNED_BYTE, true);
-  attachAttribute(gl, program, 'a_size', bundle.size, 1);
-  attachAttribute(gl, program, 'a_delay', bundle.delay, 1);
-  attachAttribute(gl, program, 'a_duration', bundle.duration, 1);
-  attachAttribute(gl, program, 'a_decay', bundle.decay, 1);
+  const uploaders = {
+    start: createAttributeUploader(gl, program, 'a_start', 2),
+    target: createAttributeUploader(gl, program, 'a_target', 2),
+    control1: createAttributeUploader(gl, program, 'a_control1', 2),
+    control2: createAttributeUploader(gl, program, 'a_control2', 2),
+    startColor: createAttributeUploader(gl, program, 'a_startColor', 4, gl.UNSIGNED_BYTE, true),
+    targetColor: createAttributeUploader(gl, program, 'a_targetColor', 4, gl.UNSIGNED_BYTE, true),
+    memoryColor: createAttributeUploader(gl, program, 'a_memoryColor', 4, gl.UNSIGNED_BYTE, true),
+    size: createAttributeUploader(gl, program, 'a_size', 1),
+    delay: createAttributeUploader(gl, program, 'a_delay', 1),
+    duration: createAttributeUploader(gl, program, 'a_duration', 1),
+    decay: createAttributeUploader(gl, program, 'a_decay', 1)
+  };
 
   const uniforms = {
     progress: gl.getUniformLocation(program, 'u_progress'),
@@ -230,6 +252,38 @@ async function start() {
     pointer: gl.getUniformLocation(program, 'u_pointer'),
     pointerStrength: gl.getUniformLocation(program, 'u_pointerStrength')
   };
+
+  let activeEpochIndex = -1;
+  let metadata;
+  let bundle;
+  function activateEpoch(index) {
+    if (index === activeEpochIndex) return;
+    const prepared = preparedEpochs[index];
+    metadata = prepared.metadata;
+    bundle = prepared.bundle;
+    for (const [name, upload] of Object.entries(uploaders)) upload(bundle[name]);
+    activeEpochIndex = index;
+    epochLabel.textContent = `ERA II · EPOCH ${String(metadata.epoch).padStart(3, '0')}`;
+    note.textContent = metadata.public.note || (manifest.status === 'holding' ? manifest.message : '');
+  }
+
+  const forwardSegments = preparedEpochs.map((_, epochIndex) => ({
+    epochIndex,
+    direction: 'forward',
+    transitionMs: REVIEW_TRANSITION_MS,
+    stillMs: REVIEW_STILL_MS
+  }));
+  const rewindSegments = preparedEpochs.map((_, epochIndex) => ({
+    epochIndex,
+    direction: 'rewind',
+    transitionMs: REVIEW_REWIND_MS,
+    stillMs: 0
+  })).reverse();
+  const sequenceSegments = sequenceMode ? [...forwardSegments, ...rewindSegments] : [];
+  const sequenceDuration = sequenceSegments.reduce(
+    (total, segment) => total + segment.transitionMs + segment.stillMs,
+    0
+  );
 
   let pointer = [10, 10];
   let pointerStrength = 0;
@@ -260,22 +314,51 @@ async function start() {
     pointerStrength = 1;
   });
   canvas.addEventListener('pointerleave', () => { pointerStrength = 0; });
-  replayButton.addEventListener('click', () => { replayStarted = performance.now(); });
+  replayButton.addEventListener('click', () => {
+    replayStarted = performance.now();
+    if (sequenceMode) activateEpoch(0);
+  });
   addEventListener('resize', resize);
 
-  epochLabel.textContent = `ERA II · EPOCH ${String(metadata.epoch).padStart(3, '0')}`;
-  note.textContent = metadata.public.note || (manifest.status === 'holding' ? manifest.message : '');
+  replayButton.textContent = sequenceMode ? 'Replay sequence' : 'Replay proof';
+  activateEpoch(0);
   resize();
 
   function frame(now) {
-    let forcedProgress = null;
-    if (replayStarted !== null) {
-      const elapsed = now - replayStarted;
-      forcedProgress = Math.min(1, elapsed / 18_000);
-      if (elapsed > 24_000) replayStarted = now;
+    let phase;
+    if (sequenceMode) {
+      let sequenceElapsed = (now - replayStarted) % sequenceDuration;
+      let segment = sequenceSegments[0];
+      for (const candidate of sequenceSegments) {
+        const duration = candidate.transitionMs + candidate.stillMs;
+        if (sequenceElapsed < duration) {
+          segment = candidate;
+          break;
+        }
+        sequenceElapsed -= duration;
+      }
+      activateEpoch(segment.epochIndex);
+      const transitionProgress = Math.min(1, sequenceElapsed / segment.transitionMs);
+      const progress = segment.direction === 'forward'
+        ? transitionProgress
+        : 1 - transitionProgress;
+      const name = segment.direction === 'rewind'
+        ? 'Review rewind'
+        : transitionProgress < 1 ? 'Transforming' : 'Still';
+      phase = {
+        name: `${name} · ${segment.epochIndex + 1}/${preparedEpochs.length}`,
+        progress
+      };
+    } else {
+      let forcedProgress = null;
+      if (replayStarted !== null) {
+        const elapsed = now - replayStarted;
+        forcedProgress = Math.min(1, elapsed / REVIEW_TRANSITION_MS);
+        if (elapsed > 24_000) replayStarted = now;
+      }
+      phase = phaseFor(metadata, forcedProgress);
     }
 
-    const phase = phaseFor(metadata, forcedProgress);
     const aspect = canvas.width / canvas.height;
     pointerStrength *= 0.94;
 
