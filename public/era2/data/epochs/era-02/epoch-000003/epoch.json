@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 3,
+  "parentEpoch": 2,
+  "pointCount": 20000,
+  "startsAt": "2026-07-19T11:00:00.000Z",
+  "transformDurationMs": 72000000,
+  "settleDurationMs": 7200000,
+  "stillDurationMs": 7200000,
+  "points": {
+    "url": "points.bin",
+    "sha256": "ebeb50427293a5676362480622a98b3499598f222c49ddd693070afd0e76799b",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair carries its last warmth to the window and cannot set it down.",
+    "retainedFacts": [
+      "The chair remains visibly recognizable through its seat, rails, and legs",
+      "Amber residual warmth remains materially attached to the chair's touched surfaces"
+    ]
+  }
+}
