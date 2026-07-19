@@ -30,7 +30,21 @@
     <p id="phase" class="metadata"></p>
   </section>
 
-  <button id="replay" type="button">Replay proof</button>
+  <nav class="controls" aria-label="Playback">
+    <button id="replay" type="button">Replay latest</button>
+    <button id="memory" type="button">Memory</button>
+  </nav>
+
+  <aside id="memory-panel" aria-labelledby="memory-title" hidden>
+    <p id="memory-title" class="memory-title">Memory</p>
+    <p id="memory-summary" class="memory-summary"></p>
+    <p class="memory-description">Every accepted transition, played from the beginning.</p>
+    <div class="memory-actions">
+      <button id="memory-play" type="button">Play all</button>
+      <button id="memory-pause" type="button" disabled>Pause</button>
+      <button id="memory-return" type="button">Return live</button>
+    </div>
+  </aside>
   <p id="error" role="alert" hidden></p>
 
   <script type="module" src="./app.js"></script>

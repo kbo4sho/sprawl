@@ -26,7 +26,8 @@ body {
 
 .identity,
 .now,
-#replay,
+.controls,
+#memory-panel,
 #error {
   position: fixed;
   z-index: 2;
@@ -76,9 +77,14 @@ body {
   text-transform: uppercase;
 }
 
-#replay {
+.controls {
   right: 22px;
   bottom: 20px;
+  display: flex;
+  gap: 7px;
+}
+
+button {
   border: 1px solid rgba(216, 214, 207, 0.12);
   border-radius: 999px;
   padding: 9px 13px;
@@ -92,10 +98,64 @@ body {
   backdrop-filter: blur(10px);
 }
 
-#replay:hover,
-#replay:focus-visible {
+button:hover,
+button:focus-visible {
   color: rgba(216, 214, 207, 0.9);
   border-color: rgba(216, 214, 207, 0.3);
+}
+
+button:disabled {
+  color: rgba(216, 214, 207, 0.2);
+  cursor: default;
+}
+
+#memory-panel {
+  top: 50%;
+  left: 50%;
+  width: min(390px, calc(100vw - 36px));
+  padding: 24px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(216, 214, 207, 0.13);
+  background: rgba(3, 3, 6, 0.84);
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px);
+}
+
+.memory-title,
+.memory-summary,
+.memory-description {
+  margin: 0;
+}
+
+.memory-title {
+  color: rgba(216, 214, 207, 0.82);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.memory-summary {
+  margin-top: 14px;
+  color: rgba(216, 214, 207, 0.7);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.memory-description {
+  margin-top: 8px;
+  color: rgba(216, 214, 207, 0.48);
+  font-family: Georgia, serif;
+  font-size: 14px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.memory-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 22px;
 }
 
 #error {
@@ -112,7 +172,7 @@ body {
 @media (max-width: 640px) {
   .identity { top: 18px; left: 18px; }
   .now { left: 18px; bottom: 64px; }
-  #replay { right: 16px; bottom: 14px; }
+  .controls { right: 16px; bottom: 14px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
