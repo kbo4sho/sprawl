@@ -81,6 +81,8 @@ describe('API', () => {
       expect(html).toContain('<title>Sprawl — Era II</title>');
       expect(html).toContain('https://sprawl.place/era2/');
       expect(html).toContain('The painting never gains or loses matter. It only rearranges memory.');
+      expect(html).toContain('Replay latest');
+      expect(html).toContain('Every accepted transition, played from the beginning.');
     });
   });
 

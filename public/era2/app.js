@@ -1,8 +1,15 @@
+import {
+  LATEST_TRANSITION_MS,
+  MEMORY_HOLD_MS,
+  formatDuration,
+  latestFrame,
+  memoryDuration,
+  memoryFrame
+} from './timeline.mjs';
+
 const HEADER_SIZE = 16;
 const RECORD_SIZE = 56;
 const EXPECTED_POINTS = 20_000;
-const REVIEW_TRANSITION_MS = 18_000;
-const REVIEW_STILL_MS = 4_000;
 const REVIEW_REWIND_MS = 6_000;
 
 const canvas = document.querySelector('#painting');
@@ -10,6 +17,12 @@ const epochLabel = document.querySelector('#epoch-label');
 const note = document.querySelector('#note');
 const phaseLabel = document.querySelector('#phase');
 const replayButton = document.querySelector('#replay');
+const memoryButton = document.querySelector('#memory');
+const memoryPanel = document.querySelector('#memory-panel');
+const memorySummary = document.querySelector('#memory-summary');
+const memoryPlayButton = document.querySelector('#memory-play');
+const memoryPauseButton = document.querySelector('#memory-pause');
+const memoryReturnButton = document.querySelector('#memory-return');
 const errorLabel = document.querySelector('#error');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const query = new URLSearchParams(location.search);
@@ -206,15 +219,24 @@ async function loadPreparedEpoch(entry, isReview) {
   return { metadata, bundle: parsePointBundle(pointBytes, metadata.epoch) };
 }
 
-function phaseFor(metadata, forcedProgress) {
-  if (forcedProgress !== null) return { name: 'Proof replay', progress: forcedProgress };
-  if (reducedMotion) return { name: 'Reduced motion · complete', progress: 1 };
-
-  const elapsed = Date.now() - Date.parse(metadata.startsAt);
-  if (elapsed <= 0) return { name: 'Waiting', progress: 0 };
-  if (elapsed < metadata.transformDurationMs) return { name: 'Transforming', progress: elapsed / metadata.transformDurationMs };
-  if (elapsed < metadata.transformDurationMs + metadata.settleDurationMs) return { name: 'Settling', progress: 1 };
-  return { name: 'Still', progress: 1 };
+function validateHistory(history, current) {
+  if (!Array.isArray(history?.epochs) || history.epochs.length === 0) {
+    throw new Error('The public memory contains no epochs');
+  }
+  const latest = history.epochs.at(-1);
+  if (
+    latest.era !== current.era
+    || latest.epoch !== current.epoch
+    || latest.pointsSha256 !== current.pointsSha256
+  ) {
+    throw new Error('The public memory does not end at the live epoch');
+  }
+  for (let index = 1; index < history.epochs.length; index += 1) {
+    if (history.epochs[index].epoch <= history.epochs[index - 1].epoch) {
+      throw new Error('The public memory is not chronological');
+    }
+  }
+  return history;
 }
 
 async function start() {
@@ -224,10 +246,15 @@ async function start() {
   const manifestUrl = sequenceMode
     ? './data/review-sequence.json'
     : reviewMode ? './data/review.json' : './data/live.json';
-  const manifest = await fetchJson(manifestUrl);
+  const [manifest, rawHistory] = await Promise.all([
+    fetchJson(manifestUrl),
+    reviewMode ? Promise.resolve(null) : fetchJson('./data/history.json')
+  ]);
+  const history = reviewMode ? null : validateHistory(rawHistory, manifest.current);
   const entries = sequenceMode ? manifest.epochs : [manifest.current];
   if (!Array.isArray(entries) || entries.length === 0) throw new Error('Review sequence contains no epochs');
   const preparedEpochs = await Promise.all(entries.map(entry => loadPreparedEpoch(entry, reviewMode)));
+  const preparedCache = new Map(entries.map((entry, index) => [entry.metadataUrl, preparedEpochs[index]]));
 
   const program = createProgram(gl);
   gl.useProgram(program);
@@ -253,16 +280,15 @@ async function start() {
     pointerStrength: gl.getUniformLocation(program, 'u_pointerStrength')
   };
 
-  let activeEpochIndex = -1;
+  let activePrepared = null;
   let metadata;
   let bundle;
-  function activateEpoch(index) {
-    if (index === activeEpochIndex) return;
-    const prepared = preparedEpochs[index];
+  function activatePrepared(prepared) {
+    if (prepared === activePrepared) return;
     metadata = prepared.metadata;
     bundle = prepared.bundle;
     for (const [name, upload] of Object.entries(uploaders)) upload(bundle[name]);
-    activeEpochIndex = index;
+    activePrepared = prepared;
     epochLabel.textContent = `ERA II · EPOCH ${String(metadata.epoch).padStart(3, '0')}`;
     note.textContent = metadata.public.note || (manifest.status === 'holding' ? manifest.message : '');
   }
@@ -270,8 +296,8 @@ async function start() {
   const forwardSegments = preparedEpochs.map((_, epochIndex) => ({
     epochIndex,
     direction: 'forward',
-    transitionMs: REVIEW_TRANSITION_MS,
-    stillMs: REVIEW_STILL_MS
+    transitionMs: LATEST_TRANSITION_MS,
+    stillMs: MEMORY_HOLD_MS
   }));
   const rewindSegments = preparedEpochs.map((_, epochIndex) => ({
     epochIndex,
@@ -287,7 +313,53 @@ async function start() {
 
   let pointer = [10, 10];
   let pointerStrength = 0;
-  let replayStarted = query.get('demo') === '1' || reviewMode ? performance.now() : null;
+  let latestStarted = reducedMotion ? null : performance.now();
+  let playbackMode = 'latest';
+  let memoryPrepared = null;
+  let memoryStarted = null;
+  let memoryElapsed = 0;
+  let memoryPaused = false;
+  let memoryCompleted = false;
+
+  async function preparedFor(entry) {
+    if (!preparedCache.has(entry.metadataUrl)) {
+      preparedCache.set(entry.metadataUrl, await loadPreparedEpoch(entry, false));
+    }
+    return preparedCache.get(entry.metadataUrl);
+  }
+
+  function closeMemory() {
+    playbackMode = 'latest';
+    latestStarted = null;
+    memoryPaused = false;
+    memoryCompleted = false;
+    activatePrepared(preparedEpochs.at(-1));
+    memoryPanel.hidden = true;
+    memoryPauseButton.disabled = true;
+    memoryPauseButton.textContent = 'Pause';
+    memoryPlayButton.textContent = 'Play all';
+  }
+
+  async function playMemory() {
+    memoryPlayButton.disabled = true;
+    memoryPauseButton.disabled = true;
+    memorySummary.textContent = `Loading ${history.epochs.length} epochs…`;
+    try {
+      memoryPrepared = await Promise.all(history.epochs.map(preparedFor));
+      playbackMode = 'memory';
+      memoryElapsed = 0;
+      memoryStarted = performance.now();
+      memoryPaused = false;
+      memoryCompleted = false;
+      activatePrepared(memoryPrepared[0]);
+      memorySummary.textContent = `${history.epochs.length} epochs · ${formatDuration(memoryDuration(history.epochs.length))}`;
+      memoryPlayButton.textContent = 'Play again';
+      memoryPauseButton.textContent = 'Pause';
+      memoryPauseButton.disabled = false;
+    } finally {
+      memoryPlayButton.disabled = false;
+    }
+  }
 
   function resize() {
     const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
@@ -315,19 +387,47 @@ async function start() {
   });
   canvas.addEventListener('pointerleave', () => { pointerStrength = 0; });
   replayButton.addEventListener('click', () => {
-    replayStarted = performance.now();
-    if (sequenceMode) activateEpoch(0);
+    if (!reviewMode) closeMemory();
+    latestStarted = performance.now();
+    playbackMode = 'latest';
+    if (sequenceMode) activatePrepared(preparedEpochs[0]);
   });
+  memoryButton.addEventListener('click', () => {
+    memoryPanel.hidden = false;
+    memorySummary.textContent = `${history.epochs.length} epochs · ${formatDuration(memoryDuration(history.epochs.length))}`;
+  });
+  memoryPlayButton.addEventListener('click', () => {
+    playMemory().catch(error => {
+      console.error(error);
+      errorLabel.hidden = false;
+      errorLabel.textContent = error.message;
+      memorySummary.textContent = 'Memory could not be loaded.';
+    });
+  });
+  memoryPauseButton.addEventListener('click', () => {
+    if (playbackMode !== 'memory' || memoryCompleted) return;
+    if (memoryPaused) {
+      memoryStarted = performance.now();
+      memoryPaused = false;
+      memoryPauseButton.textContent = 'Pause';
+    } else {
+      memoryElapsed += performance.now() - memoryStarted;
+      memoryPaused = true;
+      memoryPauseButton.textContent = 'Resume';
+    }
+  });
+  memoryReturnButton.addEventListener('click', closeMemory);
   addEventListener('resize', resize);
 
-  replayButton.textContent = sequenceMode ? 'Replay sequence' : 'Replay proof';
-  activateEpoch(0);
+  replayButton.textContent = sequenceMode ? 'Replay sequence' : 'Replay latest';
+  memoryButton.hidden = reviewMode;
+  activatePrepared(preparedEpochs[0]);
   resize();
 
   function frame(now) {
     let phase;
     if (sequenceMode) {
-      let sequenceElapsed = (now - replayStarted) % sequenceDuration;
+      let sequenceElapsed = (now - latestStarted) % sequenceDuration;
       let segment = sequenceSegments[0];
       for (const candidate of sequenceSegments) {
         const duration = candidate.transitionMs + candidate.stillMs;
@@ -337,7 +437,7 @@ async function start() {
         }
         sequenceElapsed -= duration;
       }
-      activateEpoch(segment.epochIndex);
+      activatePrepared(preparedEpochs[segment.epochIndex]);
       const transitionProgress = Math.min(1, sequenceElapsed / segment.transitionMs);
       const progress = segment.direction === 'forward'
         ? transitionProgress
@@ -349,14 +449,32 @@ async function start() {
         name: `${name} · ${segment.epochIndex + 1}/${preparedEpochs.length}`,
         progress
       };
-    } else {
-      let forcedProgress = null;
-      if (replayStarted !== null) {
-        const elapsed = now - replayStarted;
-        forcedProgress = Math.min(1, elapsed / REVIEW_TRANSITION_MS);
-        if (elapsed > 24_000) replayStarted = now;
+    } else if (playbackMode === 'memory') {
+      const elapsed = memoryElapsed + (memoryPaused ? 0 : now - memoryStarted);
+      const memoryPhase = memoryFrame(elapsed, memoryPrepared.length);
+      activatePrepared(memoryPrepared[memoryPhase.epochIndex]);
+      if (memoryPhase.complete) {
+        playbackMode = 'latest';
+        latestStarted = null;
+        memoryCompleted = true;
+        memoryPauseButton.disabled = true;
+        memoryPauseButton.textContent = 'Pause';
+        memorySummary.textContent = `Memory complete · ${memoryPrepared.length} epochs · live restored`;
+        activatePrepared(preparedEpochs.at(-1));
       }
-      phase = phaseFor(metadata, forcedProgress);
+      phase = {
+        name: memoryPhase.complete
+          ? 'Memory complete'
+          : `Memory ${memoryPhase.epochIndex + 1}/${memoryPrepared.length} · ${memoryPhase.holding ? 'Remembering' : 'Transforming'}`,
+        progress: memoryPhase.progress
+      };
+    } else {
+      const latestPhase = latestFrame(latestStarted === null ? LATEST_TRANSITION_MS : now - latestStarted, reducedMotion);
+      if (latestPhase.complete) latestStarted = null;
+      phase = {
+        name: latestPhase.complete ? 'Still' : reviewMode ? 'Proof replay' : 'Latest transition',
+        progress: latestPhase.progress
+      };
     }
 
     const aspect = canvas.width / canvas.height;
