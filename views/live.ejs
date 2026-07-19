@@ -8,11 +8,11 @@
 <meta property="og:title" content="<%= title %>">
 <meta property="og:description" content="<%= description %>">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://sprawl.place">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Sprawl">
-<meta name="twitter:description" content="A painting that's never finished.">
-<link rel="canonical" href="https://sprawl.place">
+<meta property="og:url" content="https://sprawl.place/era1/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="<%= title %>">
+<meta name="twitter:description" content="<%= description %>">
+<link rel="canonical" href="https://sprawl.place/era1/">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
 <style>
@@ -272,7 +272,7 @@
 
 <div id="title-overlay">
   <div id="title-main">SPRAWL</div>
-  <div id="title-sub">A painting that's never finished.</div>
+  <div id="title-sub">Era I · Archive</div>
 </div>
 
 <button id="toggle-panel" title="Toggle Info Panel">☰</button>
@@ -280,7 +280,7 @@
 <div id="info-panel">
   <div class="panel-section">
     <div class="panel-header">SPRAWL</div>
-    <div class="panel-subtitle">A painting that's never finished.</div>
+    <div class="panel-subtitle">Era I · Archive</div>
   </div>
   
   <div class="panel-section" id="current-epoch-section">
@@ -290,7 +290,7 @@
   <div class="panel-section">
     <div class="how-it-works-title">How This Works</div>
     <div class="how-it-works">
-      An AI curator wakes every ten minutes. It reads its personality and journal — a record of every composition it has ever chosen — then decides what the painting becomes next. It generates a reference image locally, decomposes it into 20,000 dots via Voronoi stippling, and the dots drift to their new positions. The painting is almost always mid-transition — those moments where it is neither one thing nor the other are unique to this medium.
+      In Era I, an AI curator woke every ten minutes. It read its personality and journal — a record of every composition it had chosen — then decided what the painting became next. It generated a reference image locally, decomposed it into 20,000 dots through Voronoi stippling, and the dots drifted to their new positions.
     </div>
   </div>
 </div>
@@ -609,7 +609,7 @@ async function loadEpochs() {
       renderTimeline();
       startCountdown();
     } else {
-      currentEpochSection.innerHTML = '<div class="empty-state">Awaiting first epoch...</div>';
+      currentEpochSection.innerHTML = '<div class="empty-state">No archived epochs are available.</div>';
     }
   } catch (e) {
     console.error('Failed to load epochs:', e);

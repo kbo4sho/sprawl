@@ -51,6 +51,39 @@ afterAll(() => {
 });
 
 describe('API', () => {
+  describe('Artwork routes', () => {
+    it('redirects the homepage permanently to Era II', async () => {
+      const res = await fetch(`${API}/`, { redirect: 'manual' });
+      expect(res.status).toBe(301);
+      expect(res.headers.get('location')).toBe('/era2/');
+    });
+
+    it('redirects the legacy live route permanently to Era II', async () => {
+      const res = await fetch(`${API}/live`, { redirect: 'manual' });
+      expect(res.status).toBe(301);
+      expect(res.headers.get('location')).toBe('/era2/');
+    });
+
+    it('preserves Era I as a labeled archive', async () => {
+      const res = await fetch(`${API}/era1/`);
+      const html = await res.text();
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/html');
+      expect(html).toContain('Era I · Archive');
+      expect(html).toContain('https://sprawl.place/era1/');
+    });
+
+    it('serves Era II with canonical artwork metadata', async () => {
+      const res = await fetch(`${API}/era2/`);
+      const html = await res.text();
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/html');
+      expect(html).toContain('<title>Sprawl — Era II</title>');
+      expect(html).toContain('https://sprawl.place/era2/');
+      expect(html).toContain('The painting never gains or loses matter. It only rearranges memory.');
+    });
+  });
+
   describe('GET /api/agents', () => {
     it('returns empty array initially', async () => {
       const { status, data } = await api('GET', '/api/agents');

@@ -982,19 +982,24 @@ app.get('/agent/:id', (req, res) => {
   });
 });
 
-// Homepage — the living canvas
+// Era II is the canonical Sprawl experience.
 app.get('/', (req, res) => {
+  res.redirect(301, '/era2/');
+});
+
+// Preserve the first living-canvas system as a historical archive.
+app.get('/era1', (req, res) => {
   const agentId = req.query.agent || 'autoart-painter';
   res.render('live', {
     agentId,
-    title: "Sprawl — A painting that's never finished.",
-    description: 'A living painting made of 20,000 dots. An AI curator composes a new image every ten minutes. The dots drift to follow. Always mid-transition, always changing.',
+    title: 'Sprawl — Era I Archive',
+    description: 'The archived first era of Sprawl, when a local AI curator recomposed 20,000 living points every ten minutes.',
   });
 });
 
-// Legacy /live route — redirect to homepage
+// Legacy /live route — redirect to the current painting.
 app.get('/live', (req, res) => {
-  res.redirect(301, '/' + (req.query.agent ? '?agent=' + req.query.agent : ''));
+  res.redirect(301, '/era2/');
 });
 
 // Canvas grid page (old homepage)
