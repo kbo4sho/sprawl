@@ -335,6 +335,7 @@ async function start() {
     memoryCompleted = false;
     activatePrepared(preparedEpochs.at(-1));
     memoryPanel.hidden = true;
+    memoryButton.setAttribute('aria-expanded', 'false');
     memoryPauseButton.disabled = true;
     memoryPauseButton.textContent = 'Pause';
     memoryPlayButton.textContent = 'Play all';
@@ -356,6 +357,9 @@ async function start() {
       memoryPlayButton.textContent = 'Play again';
       memoryPauseButton.textContent = 'Pause';
       memoryPauseButton.disabled = false;
+      memoryPanel.hidden = true;
+      memoryButton.setAttribute('aria-expanded', 'false');
+      memoryButton.focus({ preventScroll: true });
     } finally {
       memoryPlayButton.disabled = false;
     }
@@ -394,6 +398,7 @@ async function start() {
   });
   memoryButton.addEventListener('click', () => {
     memoryPanel.hidden = false;
+    memoryButton.setAttribute('aria-expanded', 'true');
     memorySummary.textContent = `${history.epochs.length} epochs · ${formatDuration(memoryDuration(history.epochs.length))}`;
   });
   memoryPlayButton.addEventListener('click', () => {
