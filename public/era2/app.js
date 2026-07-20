@@ -23,6 +23,16 @@ const memorySummary = document.querySelector('#memory-summary');
 const memoryPlayButton = document.querySelector('#memory-play');
 const memoryPauseButton = document.querySelector('#memory-pause');
 const memoryReturnButton = document.querySelector('#memory-return');
+const artistButton = document.querySelector('#artist');
+const artistPanel = document.querySelector('#artist-panel');
+const artistIdentity = document.querySelector('#artist-identity');
+const artistGoal = document.querySelector('#artist-goal');
+const artistStatement = document.querySelector('#artist-statement');
+const artistArc = document.querySelector('#artist-arc');
+const artistInquiry = document.querySelector('#artist-inquiry');
+const artistPractice = document.querySelector('#artist-practice');
+const artistProposition = document.querySelector('#artist-proposition');
+const artistCloseButton = document.querySelector('#artist-close');
 const errorLabel = document.querySelector('#error');
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const query = new URLSearchParams(location.search);
@@ -239,6 +249,38 @@ function validateHistory(history, current) {
   return history;
 }
 
+function validateArtist(artist) {
+  if (
+    artist?.schemaVersion !== 1
+    || artist.name !== 'Sprawl'
+    || !artist.identity
+    || !artist.enduringGoal
+    || !Array.isArray(artist.statement)
+    || artist.statement.length === 0
+    || !artist.currentArc?.name
+    || !artist.currentInquiry
+    || !artist.practice
+    || !artist.proposition
+  ) {
+    throw new Error('The public artist statement is incomplete');
+  }
+  return artist;
+}
+
+function populateArtistPanel(artist) {
+  artistIdentity.textContent = artist.identity;
+  artistGoal.textContent = artist.enduringGoal;
+  artistStatement.replaceChildren(...artist.statement.map(value => {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = value;
+    return paragraph;
+  }));
+  artistArc.textContent = `Current inquiry · ${artist.currentArc.name}`;
+  artistInquiry.textContent = artist.currentInquiry;
+  artistPractice.textContent = artist.practice;
+  artistProposition.textContent = artist.proposition;
+}
+
 async function start() {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: true, powerPreference: 'high-performance' });
   if (!gl) throw new Error('This proof requires WebGL 2');
@@ -246,11 +288,18 @@ async function start() {
   const manifestUrl = sequenceMode
     ? './data/review-sequence.json'
     : reviewMode ? './data/review.json' : './data/live.json';
-  const [manifest, rawHistory] = await Promise.all([
+  const [manifest, rawHistory, rawArtist] = await Promise.all([
     fetchJson(manifestUrl),
-    reviewMode ? Promise.resolve(null) : fetchJson('./data/history.json')
+    reviewMode ? Promise.resolve(null) : fetchJson('./data/history.json'),
+    reviewMode
+      ? Promise.resolve(null)
+      : fetchJson('./data/artist.json').catch(error => {
+        console.error(error);
+        return null;
+      })
   ]);
   const history = reviewMode ? null : validateHistory(rawHistory, manifest.current);
+  const artist = rawArtist ? validateArtist(rawArtist) : null;
   const entries = sequenceMode ? manifest.epochs : [manifest.current];
   if (!Array.isArray(entries) || entries.length === 0) throw new Error('Review sequence contains no epochs');
   const preparedEpochs = await Promise.all(entries.map(entry => loadPreparedEpoch(entry, reviewMode)));
@@ -341,6 +390,12 @@ async function start() {
     memoryPlayButton.textContent = 'Play all';
   }
 
+  function closeArtist({ restoreFocus = true } = {}) {
+    artistPanel.hidden = true;
+    artistButton.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) artistButton.focus({ preventScroll: true });
+  }
+
   async function playMemory() {
     memoryPlayButton.disabled = true;
     memoryPauseButton.disabled = true;
@@ -397,6 +452,7 @@ async function start() {
     if (sequenceMode) activatePrepared(preparedEpochs[0]);
   });
   memoryButton.addEventListener('click', () => {
+    closeArtist({ restoreFocus: false });
     memoryPanel.hidden = false;
     memoryButton.setAttribute('aria-expanded', 'true');
     memorySummary.textContent = `${history.epochs.length} epochs · ${formatDuration(memoryDuration(history.epochs.length))}`;
@@ -422,10 +478,28 @@ async function start() {
     }
   });
   memoryReturnButton.addEventListener('click', closeMemory);
+  artistButton.addEventListener('click', () => {
+    const opening = artistPanel.hidden;
+    if (!opening) {
+      closeArtist();
+      return;
+    }
+    memoryPanel.hidden = true;
+    memoryButton.setAttribute('aria-expanded', 'false');
+    artistPanel.hidden = false;
+    artistButton.setAttribute('aria-expanded', 'true');
+    artistCloseButton.focus({ preventScroll: true });
+  });
+  artistCloseButton.addEventListener('click', () => closeArtist());
+  addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !artistPanel.hidden) closeArtist();
+  });
   addEventListener('resize', resize);
 
   replayButton.textContent = sequenceMode ? 'Replay sequence' : 'Replay latest';
   memoryButton.hidden = reviewMode;
+  artistButton.hidden = reviewMode || !artist;
+  if (artist) populateArtistPanel(artist);
   activatePrepared(preparedEpochs[0]);
   resize();
 
