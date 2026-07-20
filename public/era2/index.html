@@ -33,6 +33,7 @@
   <nav class="controls" aria-label="Playback">
     <button id="replay" type="button">Replay latest</button>
     <button id="memory" type="button" aria-controls="memory-panel" aria-expanded="false">Memory</button>
+    <button id="artist" type="button" aria-controls="artist-panel" aria-expanded="false" hidden>Artist</button>
   </nav>
 
   <aside id="memory-panel" aria-labelledby="memory-title" hidden>
@@ -44,6 +45,21 @@
       <button id="memory-pause" type="button" disabled>Pause</button>
       <button id="memory-return" type="button">Return live</button>
     </div>
+  </aside>
+
+  <aside id="artist-panel" role="dialog" aria-labelledby="artist-title" hidden>
+    <p class="panel-kicker">What Sprawl is trying to do</p>
+    <p id="artist-title" class="panel-title">Sprawl</p>
+    <p id="artist-identity" class="artist-identity"></p>
+    <p id="artist-goal" class="artist-goal"></p>
+    <div id="artist-statement" class="artist-statement"></div>
+    <div class="artist-inquiry">
+      <p id="artist-arc" class="panel-kicker"></p>
+      <p id="artist-inquiry"></p>
+    </div>
+    <p id="artist-practice" class="artist-practice"></p>
+    <p id="artist-proposition" class="artist-proposition"></p>
+    <button id="artist-close" type="button">Return to painting</button>
   </aside>
   <p id="error" role="alert" hidden></p>
 

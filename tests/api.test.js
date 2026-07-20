@@ -83,6 +83,19 @@ describe('API', () => {
       expect(html).toContain('The painting never gains or loses matter. It only rearranges memory.');
       expect(html).toContain('Replay latest');
       expect(html).toContain('Every accepted transition, played from the beginning.');
+      expect(html).toContain('What Sprawl is trying to do');
+      expect(html).toContain('Return to painting');
+    });
+
+    it('serves the public artist goal and current inquiry', async () => {
+      const res = await fetch(`${API}/era2/data/artist.json`);
+      const artist = await res.json();
+      expect(res.status).toBe(200);
+      expect(artist.name).toBe('Sprawl');
+      expect(artist.enduringGoal).toContain('memory of someone having been somewhere');
+      expect(artist.statement.join(' ')).toContain('never occupied a room');
+      expect(artist.currentInquiry).toContain('recently vacated room');
+      expect(artist.practice).toContain('up to three possible continuations');
     });
   });
 
