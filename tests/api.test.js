@@ -92,8 +92,10 @@ describe('API', () => {
       const artist = await res.json();
       expect(res.status).toBe(200);
       expect(artist.name).toBe('Sprawl');
-      expect(artist.enduringGoal).toContain('memory of someone having been somewhere');
-      expect(artist.statement.join(' ')).toContain('never occupied a room');
+      expect(artist.enduringGoal).toContain('from inside their experience');
+      expect(artist.enduringGoal).toContain('I was here');
+      expect(artist.statement.join(' ')).toContain('evidence is not experience');
+      expect(artist.statement.join(' ')).toContain('may someday enter a room');
       expect(artist.currentInquiry).toContain('recently vacated room');
       expect(artist.practice).toContain('up to three possible continuations');
     });
