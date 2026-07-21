@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 5,
+  "parentEpoch": 4,
+  "pointCount": 20000,
+  "startsAt": "2026-07-21T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "a092c3aeb3886e1f3cb3867cf3db5a429e4a53551f1e16f8a904f3c1ec5e27dc",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair interrupts the light it was waiting beside.",
+    "retainedFacts": [
+      "The old wooden chair survives visibly through its round seat, rails, and four-legged frame.",
+      "Restrained amber abrasion remains attached to the chair's rim and rail edges, reading as material wear rather than ambient light."
+    ]
+  }
+}
