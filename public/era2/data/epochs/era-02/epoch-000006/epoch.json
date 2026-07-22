@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 6,
+  "parentEpoch": 5,
+  "pointCount": 20000,
+  "startsAt": "2026-07-22T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "9ff72ecedcdf7c2120a2471f25919231bd431c8d48deecc6dd06d2ceeaa02dc5",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair keeps the polish of a touch after the room has gone dark.",
+    "retainedFacts": [
+      "The chair remains recognizable through its seat, vertical rails, and four-legged frame.",
+      "Small amber edge abrasion remains attached to the chair's seat rim and upper rails as material wear."
+    ]
+  }
+}
