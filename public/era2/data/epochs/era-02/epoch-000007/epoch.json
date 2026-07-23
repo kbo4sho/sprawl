@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 7,
+  "parentEpoch": 6,
+  "pointCount": 20000,
+  "startsAt": "2026-07-23T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "202b062305024194725e08dc6fb33c71007139a16631e37690e075536d27487b",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "One narrow polished place refuses to cool with the rest of the chair.",
+    "retainedFacts": [
+      "The chair remains recognizable through the round seat, open rails, and four-legged wooden frame.",
+      "A localized amber crescent is visibly embedded on the front seat rim as a polished handling surface."
+    ]
+  }
+}
