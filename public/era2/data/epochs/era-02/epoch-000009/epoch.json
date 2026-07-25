@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 9,
+  "parentEpoch": 8,
+  "pointCount": 20000,
+  "startsAt": "2026-07-25T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "bf200f528497470ffdc7ab217db9437c57674cdcfc263e3059a97bca29392d2b",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair has fallen sideways, but its handled edge still remembers the lift.",
+    "retainedFacts": [
+      "The old chair remains visibly recognizable through its round seat, open rails, and four-legged wooden frame.",
+      "A localized amber crescent remains visibly attached to the seat rim as worn wood rather than free light."
+    ]
+  }
+}
