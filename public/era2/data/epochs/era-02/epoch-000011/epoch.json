@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 11,
+  "parentEpoch": 10,
+  "pointCount": 20000,
+  "startsAt": "2026-07-27T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "cbb62fec1fecb19d8ca27f7f9328171b7784e7dbcb9d768a124ae250d24720a4",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair has changed direction, but one handled edge keeps its warmth.",
+    "retainedFacts": [
+      "The chair remains recognizable through its circular seat, open rail back, and four-legged wooden frame.",
+      "A restrained amber crescent remains visibly attached to the seat rim as localized polished handling wear."
+    ]
+  }
+}
