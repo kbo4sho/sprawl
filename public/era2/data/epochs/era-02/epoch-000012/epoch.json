@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 12,
+  "parentEpoch": 11,
+  "pointCount": 20000,
+  "startsAt": "2026-08-02T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "15bfc1e7df83541e783a69e3795c57be8b0eab2effb555b2d7604f5bd476d48a",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "What was pulled away leaves its resistance gathered at the edge.",
+    "retainedFacts": [
+      "The old wooden chair remains visibly recognizable through its circular seat, open rail back, and four-legged frame.",
+      "A restrained amber crescent remains visibly embedded on the front seat rim as handling wear."
+    ]
+  }
+}
