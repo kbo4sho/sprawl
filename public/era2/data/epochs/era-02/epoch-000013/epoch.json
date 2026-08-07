@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 13,
+  "parentEpoch": 12,
+  "pointCount": 20000,
+  "startsAt": "2026-08-07T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "381bd9ec8b9236b11333fca3353b929ede442a450868746f6605ce9cb6a5d4b1",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The clean places keep the shape of what was moved before the dust can return.",
+    "retainedFacts": [
+      "The recognizable wooden chair survives through its round seat, open rail back, and four-legged frame.",
+      "A restrained amber crescent on the front seat rim visibly reads as localized polished handling wear against the cold particulate surface."
+    ]
+  }
+}
