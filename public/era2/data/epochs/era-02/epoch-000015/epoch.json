@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 15,
+  "parentEpoch": 14,
+  "pointCount": 20000,
+  "startsAt": "2026-08-09T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "4f26cd464fee436a7736b684ae681eeb01e79ef9bfe5608ca629db7691d4d802",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair keeps a pressure the air cannot explain.",
+    "retainedFacts": [
+      "The old chair remains visibly recognizable through its round seat, open rail back, and four-legged wooden frame.",
+      "A narrow amber crescent remains physically attached to the front seat rim as localized polished handling wear."
+    ]
+  }
+}
