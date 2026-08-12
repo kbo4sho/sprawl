@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 18,
+  "parentEpoch": 17,
+  "pointCount": 20000,
+  "startsAt": "2026-08-12T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "c9f9d3e960471b0b972bac968e029a512bcdeff4251b5d2c6adb64205e09f980",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge stays warm after the weight has found another room.",
+    "retainedFacts": [
+      "The recognizable wooden chair remains visible through its circular seat, open rail back, and four-legged frame.",
+      "A narrow restrained amber crescent remains physically attached to the front seat rim as localized polished handling wear."
+    ]
+  }
+}
