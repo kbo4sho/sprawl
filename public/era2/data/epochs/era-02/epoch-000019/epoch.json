@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 19,
+  "parentEpoch": 18,
+  "pointCount": 20000,
+  "startsAt": "2026-08-13T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "b27156ca7efef7905d1981ac14e4e039451f1e4379ada593d47076e48a9bd05c",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair keeps the clean places where a weight had been.",
+    "retainedFacts": [
+      "The wooden chair visibly survives through its circular seat, open rail back, turned legs, and finials.",
+      "A narrow restrained amber crescent remains physically attached to the exposed seat rim as localized polished handling wear."
+    ]
+  }
+}
