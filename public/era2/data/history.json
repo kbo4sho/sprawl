@@ -115,6 +115,12 @@
       "epoch": 19,
       "metadataUrl": "epochs/era-02/epoch-000019/epoch.json",
       "pointsSha256": "b27156ca7efef7905d1981ac14e4e039451f1e4379ada593d47076e48a9bd05c"
+    },
+    {
+      "era": 2,
+      "epoch": 20,
+      "metadataUrl": "epochs/era-02/epoch-000020/epoch.json",
+      "pointsSha256": "643e7771a2a1ef630920f75684100ca8d1b72c82e9377424bdc6668c804ceed4"
     }
   ]
 }

@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 20,
+  "parentEpoch": 19,
+  "pointCount": 20000,
+  "startsAt": "2026-08-14T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "643e7771a2a1ef630920f75684100ca8d1b72c82e9377424bdc6668c804ceed4",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair faces the glass, keeping one handled edge warm.",
+    "retainedFacts": [
+      "The old wooden chair visibly survives through its circular seat, open rail back, turned legs, and finials.",
+      "A narrow restrained amber crescent remains physically attached to the exposed seat rim as localized polished handling wear."
+    ]
+  }
+}
