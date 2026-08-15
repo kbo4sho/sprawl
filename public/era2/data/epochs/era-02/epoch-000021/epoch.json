@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 21,
+  "parentEpoch": 20,
+  "pointCount": 20000,
+  "startsAt": "2026-08-15T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "00889f15b09e49f80e6c50f293ca67d9f304af199ec8c4227ebee4e0f5d304f4",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge stays warm where the glass has begun to forget.",
+    "retainedFacts": [
+      "The wooden chair remains recognizable through its circular seat, open rail back, turned legs, and finials.",
+      "A narrow amber crescent remains visibly attached to the exposed seat rim as localized polished handling wear."
+    ]
+  }
+}
