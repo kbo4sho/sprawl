@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 23,
+  "parentEpoch": 22,
+  "pointCount": 20000,
+  "startsAt": "2026-08-20T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "7b0eb8b91feb015e3f66df33fb8940f4ef16b8493799d76a0ad5ef14121c5b9e",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge keeps its warmth after the chair has been turned away.",
+    "retainedFacts": [
+      "The old chair remains recognizable through its circular seat, open rail back, turned legs, and rounded finials.",
+      "A narrow amber crescent remains visibly attached to the seat rim as localized polished handling wear."
+    ]
+  }
+}
