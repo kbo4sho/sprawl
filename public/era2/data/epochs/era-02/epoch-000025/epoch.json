@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 25,
+  "parentEpoch": 24,
+  "pointCount": 20000,
+  "startsAt": "2026-08-22T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "0955b30dff95d909112596b7204e4ab03d30edfa34dd41eb80922181e09e0a8d",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge turns upward, holding what the room has released.",
+    "retainedFacts": [
+      "The old wooden chair visibly survives through its open rail back, turned legs, rungs, seat, and rounded finials.",
+      "A narrow muted amber band visibly adheres to the seat rim as localized polished handling wear."
+    ]
+  }
+}
