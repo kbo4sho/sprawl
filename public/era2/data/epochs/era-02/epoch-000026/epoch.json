@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 26,
+  "parentEpoch": 25,
+  "pointCount": 20000,
+  "startsAt": "2026-08-23T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "ad96032d972da06823b4c2e6da5b4984a82e3b7155c3557c0d56bf5699d3d088",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "Four clean places keep the turn after the chair has left them.",
+    "retainedFacts": [
+      "The old chair visibly survives through its circular seat, open rail back, turned legs, rungs, and rounded finials.",
+      "A narrow muted amber crescent visibly adheres to the exposed seat rim as localized polished handling wear."
+    ]
+  }
+}
