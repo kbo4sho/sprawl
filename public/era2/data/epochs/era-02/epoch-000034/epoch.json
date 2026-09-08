@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 34,
+  "parentEpoch": 33,
+  "pointCount": 20000,
+  "startsAt": "2026-09-08T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "f3e169f9fbaa7ad083e669029cda63be11499e99d04b116774fd494daaf988ee",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge faces the place the weight left behind.",
+    "retainedFacts": [
+      "The old wooden chair visibly survives through its circular seat, open rail back, turned legs, rungs, and rounded finials.",
+      "A narrow muted amber crescent visibly adheres to the exposed front seat rim as localized polished handling wear."
+    ]
+  }
+}
