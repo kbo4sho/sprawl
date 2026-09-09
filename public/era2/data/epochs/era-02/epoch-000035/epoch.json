@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 35,
+  "parentEpoch": 34,
+  "pointCount": 20000,
+  "startsAt": "2026-09-09T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "4883ee7861fa9aebd9078afca639f47f91766d29713b8f438b33b780f18a979c",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "Four clean places keep the chair's weight after the room changes its mind.",
+    "retainedFacts": [
+      "The old wooden chair visibly survives through its circular seat, open rail back, turned legs, rungs, and rounded finials.",
+      "A narrow muted amber crescent visibly adheres to the exposed seat rim as localized polished handling wear."
+    ]
+  }
+}
