@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 36,
+  "parentEpoch": 35,
+  "pointCount": 20000,
+  "startsAt": "2026-09-10T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "968ca1426fee8f6d8318a3708105626d3759a3e44e3d98439a8b2bf43d6b897f",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The warm rim is farther off; the dust keeps the direction of its leaving.",
+    "retainedFacts": [
+      "The old wooden chair visibly survives through its open rail back, turned legs, rungs, circular seat, and rounded finial.",
+      "A narrow muted amber crescent visibly remains attached to the exposed seat rim as localized polished handling wear."
+    ]
+  }
+}
