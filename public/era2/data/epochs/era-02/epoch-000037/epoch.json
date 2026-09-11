@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 37,
+  "parentEpoch": 36,
+  "pointCount": 20000,
+  "startsAt": "2026-09-11T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "1c396f5d2cc47faf41cbdcf4bbcb5268254e346b848038562f760a210781066b",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "Four clean places hold after the chair has moved away.",
+    "retainedFacts": [
+      "The recognizable old wooden chair remains visible through its open rail back, circular seat, turned legs, rungs, and rounded finials.",
+      "A narrow muted amber crescent remains visibly attached to the seat rim as localized worn handling polish."
+    ]
+  }
+}
