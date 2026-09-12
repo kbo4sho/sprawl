@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 38,
+  "parentEpoch": 37,
+  "pointCount": 20000,
+  "startsAt": "2026-09-12T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "c1702cb23eae2222d789e2a5d2a13a8c5a06ee1bc1bc45e68c4b560296e6e432",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The dust keeps the shape of weight after it changes direction.",
+    "retainedFacts": [
+      "The old wooden chair visibly survives through its round seat, open rail back, turned legs, rungs, and rounded finials.",
+      "A localized muted amber worn-handling crescent visibly remains on the exposed front edge of the chair seat."
+    ]
+  }
+}
