@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 40,
+  "parentEpoch": 39,
+  "pointCount": 20000,
+  "startsAt": "2026-09-14T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "48fb06e2dfe96e2e3a24250a02676f0e97537554b5cb4bcb1de07b8d3c51ffb9",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge turns toward the dust that has not settled.",
+    "retainedFacts": [
+      "The recognizable wooden chair survives visibly through its round seat, open spindle back, turned legs, cross rungs, and rounded finials.",
+      "A localized narrow muted amber worn-handling highlight visibly remains on the front rim of the chair seat."
+    ]
+  }
+}
