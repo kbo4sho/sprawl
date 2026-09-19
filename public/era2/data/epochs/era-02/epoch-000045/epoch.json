@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 45,
+  "parentEpoch": 44,
+  "pointCount": 20000,
+  "startsAt": "2026-09-19T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "21df6d1e81f15fc42fc7c1ded5deaec4de3f4402ff9d8bb79dd6b235fd6d6de8",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge faces away from the places that still remember its weight.",
+    "retainedFacts": [
+      "The recognizable wooden chair survives visibly through its circular seat, spindle back, turned legs, cross rungs, and rounded finials.",
+      "A localized muted amber worn-polish crescent visibly remains on the chair's seat rim."
+    ]
+  }
+}
