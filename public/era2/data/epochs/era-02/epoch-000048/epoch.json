@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 48,
+  "parentEpoch": 47,
+  "pointCount": 20000,
+  "startsAt": "2026-09-22T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "09766ace2349a3db7165e257984a041015b53c83390e7cd66f31d1d008409374",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge rests inside the dust it carried away.",
+    "retainedFacts": [
+      "The recognizable old wooden chair visibly survives through its circular seat, open spindle back, turned legs, cross rungs, and rounded finials.",
+      "A narrow muted amber worn-handling crescent visibly remains localized on the exposed front rim of the chair seat."
+    ]
+  }
+}
