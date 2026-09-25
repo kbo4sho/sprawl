@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 51,
+  "parentEpoch": 50,
+  "pointCount": 20000,
+  "startsAt": "2026-09-25T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "b8139f3709f83a1612f5ea8133eccc7265846325845c715fcea7aa65304b827c",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair falls where the body did not.",
+    "retainedFacts": [
+      "The old wooden chair remains recognizable through its circular seat, open spindle back, turned legs, cross rungs, and rounded finials.",
+      "A narrow subdued amber strip remains visibly attached to the upward-facing seat rim as worn handling polish."
+    ]
+  }
+}
