@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 52,
+  "parentEpoch": 51,
+  "pointCount": 20000,
+  "startsAt": "2026-09-26T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "0828d89182aee9e2666b9df964bc3d93b0071cdf96a6a625071bb3f63d58e110",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair stands beside the place that still holds its weight.",
+    "retainedFacts": [
+      "The old wooden chair remains recognizable through its round seat, spindle back, turned legs, cross rungs, and finials.",
+      "A restrained amber worn-handling polish remains visible only along the chair's seat rim."
+    ]
+  }
+}
