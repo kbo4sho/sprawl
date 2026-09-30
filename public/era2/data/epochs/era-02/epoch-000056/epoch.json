@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 56,
+  "parentEpoch": 55,
+  "pointCount": 20000,
+  "startsAt": "2026-09-30T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "9a8ca92efa1739f46f07b2f1a020d278b170e00e8da33ff4829d0f51be18b14e",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The polished edge keeps its distance from the shape that remembers it.",
+    "retainedFacts": [
+      "The worn wooden chair remains visibly recognizable.",
+      "The chair's restrained amber seat edge remains as the remembered warmth."
+    ]
+  }
+}
