@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 58,
+  "parentEpoch": 57,
+  "pointCount": 20000,
+  "startsAt": "2026-10-02T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "0ecf87e1fe1ff5cc4c0153f0ab1f877748aadc59f1e7a482f9fefd4fe93eb7ea",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The polished edge waits beside the place its weight has not yet forgotten.",
+    "retainedFacts": [
+      "The old wooden spindle-back chair remains visibly recognizable through its round seat, open turned-spindle back, legs, cross rungs, and finials.",
+      "A restrained amber worn-handling crescent remains visibly attached to the chair's exposed seat rim."
+    ]
+  }
+}
