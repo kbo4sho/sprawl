@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 59,
+  "parentEpoch": 58,
+  "pointCount": 20000,
+  "startsAt": "2026-10-03T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "dd213f7567f6444018a9240cf4f8753c178ab1fbc55f8f1a7a271b3d482d9775",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge turns toward the place that let go of it.",
+    "retainedFacts": [
+      "The wooden spindle-back chair remains recognizable through its circular seat, open curved back, turned legs, crossbars, and rounded finials.",
+      "A narrow restrained amber worn-handling band remains visibly attached to the exposed seat rim."
+    ]
+  }
+}
