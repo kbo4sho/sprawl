@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 61,
+  "parentEpoch": 60,
+  "pointCount": 20000,
+  "startsAt": "2026-10-05T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "f1b0955dd20c9c7e0cc8d8736fa49673a3e369338425d275c69a4b39293522a0",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge turns away from the step that cooled behind it.",
+    "retainedFacts": [
+      "The recognizable dark wooden spindle-back chair visibly survives.",
+      "The chair's localized amber handling wear remains visible along the seat rim."
+    ]
+  }
+}
