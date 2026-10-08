@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 64,
+  "parentEpoch": 63,
+  "pointCount": 20000,
+  "startsAt": "2026-10-08T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "8ee805644dc4d70de489421879ec30aba8ecbd8c768481e7d0a77d4ef910ee8e",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge crosses the circle that is still drying.",
+    "retainedFacts": [
+      "The recognizable dark wooden spindle-back chair visibly survives through its round seat, open spindles, turned legs, cross rungs, and rounded finials.",
+      "A restrained amber handling-wear crescent visibly remains localized along the chair's exposed seat rim."
+    ]
+  }
+}
