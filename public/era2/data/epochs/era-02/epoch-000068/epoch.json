@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 68,
+  "parentEpoch": 67,
+  "pointCount": 20000,
+  "startsAt": "2026-10-12T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "09abde4edfdcb9607274079b65057beadd45b5152e4e6430088e1f48d3c6cc1c",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair stands, but the circle of cooling water has not left it.",
+    "retainedFacts": [
+      "The recognizable dark spindle-back chair survives through its circular seat, curved rail, turned spindles, finials, legs, and lower cross rung.",
+      "The narrow localized amber handling-wear crescent visibly remains on the outer right rim of the seat."
+    ]
+  }
+}
