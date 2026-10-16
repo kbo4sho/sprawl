@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 72,
+  "parentEpoch": 71,
+  "pointCount": 20000,
+  "startsAt": "2026-10-16T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "46ccd07ea3423fb0525a585bcba40b9a99a24eeca01cd7b1fd6ec5a7b32c0e26",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The handled edge waits where the rain cannot reach.",
+    "retainedFacts": [
+      "The recognizable dark wooden spindle-back chair visibly survives through its round seat, open curved back, turned legs, cross rungs, and rounded finials.",
+      "A restrained localized amber handling-wear glint remains visible along the chair's exposed seat rim."
+    ]
+  }
+}
