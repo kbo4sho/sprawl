@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 76,
+  "parentEpoch": 75,
+  "pointCount": 20000,
+  "startsAt": "2026-10-20T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "966b30389afa6a6a8ead211bbcda2ccdf561650b49292f8a61551a37fd803cb8",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair faces forward; the circle on its seat is still colder than the room.",
+    "retainedFacts": [
+      "The recognizable dark wooden spindle-back chair visibly survives through its circular seat, curved back rail, turned spindles, rounded finials, legs, and lower cross rung.",
+      "A narrow restrained amber handling-wear crescent visibly remains localized along the exposed front edge of the seat rim."
+    ]
+  }
+}
