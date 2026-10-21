@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 77,
+  "parentEpoch": 76,
+  "pointCount": 20000,
+  "startsAt": "2026-10-21T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "3ce604f400c0e21d6fe790c0145ed61ac28588928d31dc763bd25c398057c72f",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "The chair turns away; the floor keeps its damp answer.",
+    "retainedFacts": [
+      "The dark wooden spindle-back chair remains visibly recognizable through its round seat, turned legs, lower rungs, open spindles, and rounded finials.",
+      "A narrow restrained amber handling-wear line remains visible along the exposed front edge of the chair's seat rim."
+    ]
+  }
+}
