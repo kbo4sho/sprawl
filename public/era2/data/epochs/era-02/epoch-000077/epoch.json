@@ -5,7 +5,7 @@
   "epoch": 77,
   "parentEpoch": 76,
   "pointCount": 20000,
-  "startsAt": "2026-10-21T11:00:00.000Z",
+  "startsAt": "2026-10-22T11:00:00.000Z",
   "transformDurationMs": 18000,
   "settleDurationMs": 0,
   "stillDurationMs": 0,
