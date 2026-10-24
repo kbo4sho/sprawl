@@ -3,12 +3,13 @@
  * Resume seeding from a partial run. Re-stipples the reference image,
  * checks how many marks exist, and adds the missing ones.
  */
+const { requireEnv } = require('./lib/require-env');
+const SPRAWL_KEY = requireEnv('SPRAWL_API_KEY');
 const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
 
 const SPRAWL_API = 'https://sprawl.place';
-const SPRAWL_KEY = process.env.SPRAWL_API_KEY || 'sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69';
 const SPRAWL_RANGE = 400;
 const BATCH_SIZE = 50;
 const BATCH_DELAY_MS = 2200;

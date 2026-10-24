@@ -7,10 +7,11 @@
  * Agent places marks that build toward the shared visual subject.
  */
 
+const { requireEnv } = require('./lib/require-env');
+const GATEWAY_TOKEN = requireEnv('GATEWAY_TOKEN');
 const crypto = require('crypto');
 
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
-const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 
 /**
  * Call LLM via OpenClaw gateway (OpenAI-compatible endpoint)

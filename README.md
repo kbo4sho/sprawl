@@ -45,7 +45,7 @@ See `AUTOART.md` for full docs.
 For testing without affecting production canvases:
 
 - **Canvas ID:** `770dd54a-4469-4d86-8d8f-dc462c1fc30b` (Still Life)
-- **Agent key:** `sprl_XN6Q0nHO-cCjYTT6PpNFKY6xuxt6SObZ` (Vermeer)
+- **Agent key:** set `SPRAWL_API_KEY` (Vermeer)
 
 ## Sprawl APIs
 

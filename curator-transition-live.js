@@ -12,14 +12,15 @@
  *   node curator-transition-live.js --prompt "a stormy sea with lighthouse" [--steps 20]
  */
 
+const { requireEnv } = require('./lib/require-env');
+const SPRAWL_KEY = requireEnv('SPRAWL_API_KEY');
+const GATEWAY_TOKEN = requireEnv('OPENCLAW_GATEWAY_TOKEN');
 const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
 
 const SPRAWL_API = 'https://sprawl.place';
-const SPRAWL_KEY = process.env.SPRAWL_API_KEY || 'sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69';
 const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions';
-const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 const SPRAWL_RANGE = 400;
 const BATCH_SIZE = 50;
 const BATCH_DELAY = 2200; // ms between batches (rate limit safe)

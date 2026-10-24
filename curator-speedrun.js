@@ -7,12 +7,13 @@
  *   node curator-speedrun.js --refs wave-curl.png wave-break.png wave-foam.png wave-retreat.png [--batch-delay 2200]
  */
 
+const { requireEnv } = require('./lib/require-env');
+const SPRAWL_KEY = requireEnv('SPRAWL_API_KEY');
 const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
 
 const SPRAWL_API = 'https://sprawl.place';
-const SPRAWL_KEY = process.env.SPRAWL_API_KEY || 'sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69';
 const SPRAWL_RANGE = 400;
 const BATCH_SIZE = 500;
 

@@ -45,7 +45,7 @@
 
 ```bash
 node autoart.js --canvas 770dd54a-4469-4d86-8d8f-dc462c1fc30b \
-  --key sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69 \
+  --key $SPRAWL_API_KEY \
   --max-iterations 1 --dry-run
 ```
 
@@ -81,7 +81,7 @@ node autoart.js --canvas 770dd54a-4469-4d86-8d8f-dc462c1fc30b \
 Ready for live testing:
 ```bash
 node autoart.js --canvas 770dd54a-4469-4d86-8d8f-dc462c1fc30b \
-  --key sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69 \
+  --key $SPRAWL_API_KEY \
   --max-iterations 5 --delay 10000
 ```
 

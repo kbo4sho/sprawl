@@ -9,9 +9,10 @@
  *   node tools/seed.js --new "Theme name"        # create new canvas + seed it
  */
 
+const { requireEnv } = require('../lib/require-env');
+const GATEWAY_TOKEN = requireEnv('GATEWAY_TOKEN');
 const API = process.env.SPRAWL_API || 'https://sprawl.place';
 const GATEWAY = process.env.GATEWAY_URL || 'http://127.0.0.1:18789';
-const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || 'sprawl-admin';
 
 const args = process.argv.slice(2);

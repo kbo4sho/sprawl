@@ -39,7 +39,7 @@ Reverting is more complex with mixed ops. The system tracks:
 # Easy mode (helper script handles environment)
 ./run-autoart.sh \
   --canvas 770dd54a-4469-4d86-8d8f-dc462c1fc30b \
-  --key sprl_XN6Q0nHO-cCjYTT6PpNFKY6xuxt6SObZ \
+  --key $SPRAWL_API_KEY \
   --max-iterations 10
 
 # Or run directly with env var
@@ -176,7 +176,7 @@ When budget is exhausted (0 remaining), the agent can still evolve via move and 
 ```bash
 ./run-autoart.sh \
   --canvas 770dd54a-4469-4d86-8d8f-dc462c1fc30b \
-  --key sprl_XN6Q0nHO-cCjYTT6PpNFKY6xuxt6SObZ \
+  --key $SPRAWL_API_KEY \
   --max-iterations 20 \
   --delay 10000
 ```

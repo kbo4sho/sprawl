@@ -9,20 +9,21 @@
  * Usage:
  *   node curator-live.js --soul curator-soul-patient.md --journal curator-journal-live.json [--once] [--dots 20000] [--interval 30]
  * 
- * Env:
- *   OPENCLAW_GATEWAY_TOKEN — for LLM calls  
- *   SPRAWL_API_KEY — sprawl.place API key (sprl_...)
+ * Env (required):
+ *   OPENCLAW_GATEWAY_TOKEN — for LLM calls
+ *   SPRAWL_API_KEY — sprawl.place API key
  */
 
+const { requireEnv } = require('./lib/require-env');
+const GATEWAY_TOKEN = requireEnv('OPENCLAW_GATEWAY_TOKEN');
+const SPRAWL_KEY = requireEnv('SPRAWL_API_KEY');
 const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
 
 // === Config ===
 const GATEWAY_URL = 'http://127.0.0.1:18789/v1/chat/completions';
-const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '213e438e21c126522742c945fc4ceea2c3df9aa3aa63e66f';
 const SPRAWL_API = 'https://sprawl.place';
-const SPRAWL_KEY = process.env.SPRAWL_API_KEY || 'sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69';
 const MODEL = 'openclaw'; // gateway routes internally
 const CANVAS_SIZE = 800; // internal coord system
 const SPRAWL_RANGE = 400; // maps to -400..+400 on sprawl
