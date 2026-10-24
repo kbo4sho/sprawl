@@ -7,11 +7,12 @@
  * Designed to run on Railway where node-canvas isn't available.
  */
 
+const { requireEnv } = require('./lib/require-env');
+const SPRAWL_KEY = requireEnv('SPRAWL_API_KEY');
 const fs = require('fs');
 const path = require('path');
 
 const SPRAWL_API = process.env.SPRAWL_API || 'https://sprawl.place';
-const SPRAWL_KEY = process.env.SPRAWL_API_KEY || 'sprl_DyXoIVwGM38U9MhGALslmLn8KZ5Tkm69';
 const BATCH_SIZE = 500;
 const BATCH_DELAY = 150;
 

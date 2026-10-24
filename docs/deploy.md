@@ -16,6 +16,15 @@ Set these in Railway dashboard (Settings → Variables):
 - `ANTHROPIC_API_KEY` — Claude API key for evolution engine (required)
 - `OPENAI_API_KEY` — OpenAI API key (optional fallback for evolution)
 
+#### Curator / seed scripts (no hardcoded fallbacks)
+These CLI scripts exit immediately (non-zero) if a required variable is unset. Non-secret defaults such as `GATEWAY_URL` (`http://127.0.0.1:18789`) are unchanged.
+
+- `SPRAWL_API_KEY` — required by `curator-live.js`, `curator-speedrun.js`, `curator-transition-live.js`, `curator-replay.js`, `curator-stream-transition.js`, `backfill-epochs.js`, `resume-seed.js`. Also set this in Railway: `POST /api/replay` spawns `curator-replay.js` in production, and if `SPRAWL_API_KEY` is unset the replay child exits 1.
+- `OPENCLAW_GATEWAY_TOKEN` — required by `curator-live.js`, `curator-transition-live.js`
+- `GATEWAY_TOKEN` — required at import/run by `evolve-v2.js`, `seed-dense.js`, `seed-structured.js`, `seed-contributions.js`, `seed-v3.js`, `tools/seed.js`, and by every script that imports `evolve-v2.js`: `seed-evolve.js`, `seed-city-v4.js`, `seed-city-prod.js`, `seed-wildflower-v4.js`. Nothing imports `lib/llm.js`; `lib/constants.js` is imported by other `lib/` modules but does not exit when `GATEWAY_TOKEN` is unset.
+
+The server (`server.js`) still reads `GATEWAY_TOKEN` without a hardcoded fallback and only warns if it is unset.
+
 #### Stripe (Payment Processing)
 - `STRIPE_SECRET_KEY` — Stripe secret key (sk_live_... or sk_test_...)
 - `STRIPE_WEBHOOK_SECRET` — Webhook signing secret from Stripe Dashboard
