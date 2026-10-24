@@ -17,6 +17,7 @@ function runNode(args, env) {
     cwd: PROJECT_DIR,
     env,
     encoding: 'utf8',
+    timeout: 10000,
   });
 }
 
