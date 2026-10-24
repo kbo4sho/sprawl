@@ -4,14 +4,14 @@
   "message": null,
   "current": {
     "era": 2,
-    "epoch": 77,
-    "metadataUrl": "epochs/era-02/epoch-000077/epoch.json",
-    "pointsSha256": "3ce604f400c0e21d6fe790c0145ed61ac28588928d31dc763bd25c398057c72f"
+    "epoch": 78,
+    "metadataUrl": "epochs/era-02/epoch-000078/epoch.json",
+    "pointsSha256": "046e0e79a044c416e1753af67a200e2e2f8965be9b70d864ed126ba68199a4ca"
   },
   "previous": {
     "era": 2,
-    "epoch": 76,
-    "metadataUrl": "epochs/era-02/epoch-000076/epoch.json",
-    "pointsSha256": "966b30389afa6a6a8ead211bbcda2ccdf561650b49292f8a61551a37fd803cb8"
+    "epoch": 77,
+    "metadataUrl": "epochs/era-02/epoch-000077/epoch.json",
+    "pointsSha256": "3ce604f400c0e21d6fe790c0145ed61ac28588928d31dc763bd25c398057c72f"
   }
 }

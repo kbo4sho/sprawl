@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "era": 2,
+  "arc": 1,
+  "epoch": 78,
+  "parentEpoch": 77,
+  "pointCount": 20000,
+  "startsAt": "2026-10-24T11:00:00.000Z",
+  "transformDurationMs": 18000,
+  "settleDurationMs": 0,
+  "stillDurationMs": 0,
+  "points": {
+    "url": "points.bin",
+    "sha256": "046e0e79a044c416e1753af67a200e2e2f8965be9b70d864ed126ba68199a4ca",
+    "byteLength": 1120016
+  },
+  "public": {
+    "status": "transitioning",
+    "note": "Five dry places remain where the falling chair was last held.",
+    "retainedFacts": [
+      "The circular seat, turned legs, lower cross rungs, and spindle-back construction keep the dark wooden chair visibly recognizable.",
+      "Cold wet beading persists on the wood while a narrow restrained amber handling-wear crescent remains localized to the exposed seat rim."
+    ]
+  }
+}
