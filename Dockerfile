@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22.23.4-alpine
 
 RUN apk add --no-cache python3 make g++ sqlite-dev cairo-dev pango-dev libjpeg-turbo-dev giflib-dev librsvg-dev
 
