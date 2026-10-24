@@ -50,4 +50,32 @@ describe('requireEnv', () => {
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('GATEWAY_TOKEN');
   });
+
+  it('exits non-zero and names the variable when it is empty', () => {
+    const result = runNode(
+      ['-e', "require('./lib/require-env').requireEnv('GATEWAY_TOKEN')"],
+      { ...process.env, GATEWAY_TOKEN: '' },
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('GATEWAY_TOKEN');
+  });
+
+  it('exits non-zero and names the variable when it is whitespace-only', () => {
+    const result = runNode(
+      ['-e', "require('./lib/require-env').requireEnv('GATEWAY_TOKEN')"],
+      { ...process.env, GATEWAY_TOKEN: '   ' },
+    );
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('GATEWAY_TOKEN');
+  });
+
+  it('returns the value when the variable is set', () => {
+    const result = runNode(
+      ['-e', "process.stdout.write(require('./lib/require-env').requireEnv('GATEWAY_TOKEN'))"],
+      { ...process.env, GATEWAY_TOKEN: 'test-ok' },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe('test-ok');
+  });
 });
+
